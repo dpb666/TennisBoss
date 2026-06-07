@@ -1,0 +1,11 @@
+# État et logs générés à l'exécution (ne pas versionner)
+state/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
