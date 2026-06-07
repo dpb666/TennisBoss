@@ -91,9 +91,9 @@ def _match_features(row: Dict[str, str]) -> Optional[Dict]:
     }
 
 
-def fetch_year(year: int) -> List[Dict]:
-    """Télécharge et parse une année ATP. Renvoie une liste de matchs exploitables."""
-    url = config.SACKMANN_URL.format(year=year)
+def fetch_year(year: int, tour: str = "atp") -> List[Dict]:
+    """Télécharge et parse une année d'un tour (atp/wta). Liste de matchs exploitables."""
+    url = config.SACKMANN_URL.format(tour=tour, year=year)
     text = _http_get(url)
     if not text:
         return []
@@ -102,16 +102,19 @@ def fetch_year(year: int) -> List[Dict]:
     for row in reader:
         feat = _match_features(row)
         if feat and feat["winner_name"] and feat["loser_name"]:
+            feat["tour"] = tour
+            feat["id"] = f"{tour}-{feat['id']}"  # évite toute collision d'id ATP/WTA
             matches.append(feat)
-    log(f"Année {year}: {len(matches)} matchs exploitables récupérés.")
+    log(f"{tour.upper()} {year}: {len(matches)} matchs exploitables récupérés.")
     return matches
 
 
-def fetch_matches(years: List[int]) -> List[Dict]:
-    """Récupère plusieurs années et trie chronologiquement (sans fuite de données)."""
+def fetch_matches(years: List[int], tours: List[str] = ("atp",)) -> List[Dict]:
+    """Récupère plusieurs années/tours et trie chronologiquement (sans fuite)."""
     all_matches: List[Dict] = []
-    for year in years:
-        all_matches.extend(fetch_year(year))
+    for tour in tours:
+        for year in years:
+            all_matches.extend(fetch_year(year, tour))
     all_matches.sort(key=lambda m: (m["date"], m["id"]))
     return all_matches
 

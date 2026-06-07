@@ -37,15 +37,18 @@ def _train_one(mem: Dict[str, Any], match: Dict, lr: float, reg: float, alpha: f
     correct = (p_a >= 0.5) == (label == 1.0)
 
     # --- Mise à jour des poids (gradient de la log-loss) -------------------
+    # IMPORTANT : pas de biais. Un duel est symétrique -> P(A>B)=1-P(B>A) exige
+    # biais=0 (sinon le modèle est incohérent et l'ordre des joueurs compte).
     err = label - p_a
     for k in config.FEATURE_ORDER:
         grad = err * (fa[k] - fb[k]) - reg * weights[k]
         weights[k] += lr * grad
-    mem["bias"] += lr * err
+    mem["bias"] = 0.0
 
     # --- Mise à jour des profils joueurs avec la perf réelle du match ------
-    features.update_profile(mem, name_w, match["winner"], won=True, alpha=alpha)
-    features.update_profile(mem, name_l, match["loser"], won=False, alpha=alpha)
+    tour = match.get("tour")
+    features.update_profile(mem, name_w, match["winner"], True, alpha, tour)
+    features.update_profile(mem, name_l, match["loser"], False, alpha, tour)
 
     # --- Métriques --------------------------------------------------------
     m = mem["metrics"]

@@ -28,7 +28,8 @@ def feature_vector(profile: Dict[str, float]) -> Dict[str, float]:
 
 
 def update_profile(
-    mem: Dict[str, Any], name: str, perf: Dict[str, float], won: bool, alpha: float
+    mem: Dict[str, Any], name: str, perf: Dict[str, float], won: bool,
+    alpha: float, tour: str = None
 ) -> None:
     """Met à jour le profil d'un joueur après un match (EMA)."""
     prof = mem["players"].get(name)
@@ -40,11 +41,14 @@ def update_profile(
             "return2": perf["return2"],
             "recent": 1.0 if won else 0.0,
             "n": 0,
+            "tour": tour or "",
         }
     else:
         for k in ("serve", "return1", "return2"):
             prof[k] = (1 - alpha) * prof[k] + alpha * perf[k]
         prof["recent"] = (1 - alpha) * prof["recent"] + alpha * (1.0 if won else 0.0)
+        if tour:
+            prof["tour"] = tour
     prof["n"] = int(prof.get("n", 0)) + 1
     mem["players"][name] = prof
 

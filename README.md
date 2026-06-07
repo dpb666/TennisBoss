@@ -28,12 +28,45 @@ pip install -r requirements.txt
 ## Utilisation
 
 ```bash
-python3 run.py train --years 2022 2023 2024   # apprentissage sur 3 saisons réelles
+python3 run.py train --years 2022 2023 2024 --tours atp wta   # apprentissage (H+F)
 python3 run.py predict "Jannik Sinner" "Daniil Medvedev"
+python3 run.py players --tour wta --limit 20                  # dictionnaire + probas
+python3 run.py players --export players.csv                   # export CSV complet
+python3 run.py backtest --years 2022 2023 2024 --tours atp wta   # backtest archivé
+python3 run.py db                              # contenu base + derniers backtests
 python3 run.py status                          # poids appris, précision, top joueurs
 python3 run.py start                           # MODE AUTONOME (boucle infinie)
-python3 run.py reset                           # efface l'état appris
+python3 run.py reset [--all]                   # efface le modèle (--all = + la base)
 ```
+
+## Base de données solide, dictionnaire & backtests
+
+Tout est stocké dans une base **SQLite** (`state/tennisboss.db`, sans dépendance) :
+
+| Table | Contenu |
+|---|---|
+| `players` | dictionnaire de **tous** les joueurs ATP+WTA, avec `win_prob` (proba de battre un adversaire moyen), `rating`, profils service/retour/forme |
+| `matches` | archive de tous les matchs exploités (pour rejouer / backtester) |
+| `predictions` | historique des prédictions demandées |
+| `backtests` | **archive des campagnes de backtest** (accuracy, log-loss, brier, baseline) |
+
+Le **backtest** est honnête (hors-échantillon, sans fuite) : il apprend sur la 1re
+partie chronologique, **gèle les poids**, puis évalue sur la partie finale.
+Exemple obtenu (ATP+WTA 2022-2024, 1117 joueurs) : accuracy **0,614** vs baseline
+service **0,611** — le modèle bat la baseline, et le backtest est archivé en base.
+
+## API live (votre clé test puis abonnement)
+
+`bot/live_api.py` lit la clé depuis l'env `TENNISBOSS_API_KEY` (ou
+`live_api_key` dans la config). Tant qu'aucune clé n'est fournie, le bot reste
+sur les données ouvertes. Donnez-moi l'endpoint + le format de votre fournisseur
+et je branche `fetch_upcoming()` dessus.
+
+## Sources de données : ouvertes et légales (aucun contournement)
+
+Les données proviennent des datasets **ouverts** de Jeff Sackmann (ATP + WTA) et
+de votre future API officielle. TennisBoss **ne contourne aucune protection
+anti-bot** de site tiers : ce n'est ni nécessaire ni souhaitable.
 
 ## Comment ça apprend (sans tricher)
 

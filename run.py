@@ -2,19 +2,24 @@
 """Point d'entrée CLI de TennisBoss.
 
 Commandes :
-  python3 run.py start                 -> lance le bot autonome (boucle infinie)
-  python3 run.py train [--years ...]   -> un seul cycle d'apprentissage
-  python3 run.py predict "J1" "J2"     -> prédit le 1er set entre deux joueurs
-  python3 run.py status                -> affiche l'état (poids, précision, top joueurs)
-  python3 run.py reset                 -> efface l'état appris
+  python3 run.py start                       -> bot autonome (boucle infinie)
+  python3 run.py train [--years ...] [--tours atp wta]  -> cycle d'apprentissage
+  python3 run.py predict "J1" "J2"           -> prédit le 1er set entre deux joueurs
+  python3 run.py players [--tour wta] [--export f.csv]  -> dictionnaire joueurs+probas
+  python3 run.py backtest [--years ...]      -> backtest hors-échantillon (archivé)
+  python3 run.py db                          -> contenu de la base + derniers backtests
+  python3 run.py status                      -> état (poids, précision, top joueurs)
+  python3 run.py reset                       -> efface l'état appris
 """
 from __future__ import annotations
 
 import argparse
+import csv as _csv
 import os
 import sys
 
-from bot import config, datasource, features, learner, memory, predictor
+from bot import (backtest as bt, config, datasource, db, features, learner,
+                 memory, predictor)
 from bot.bootstrap import bootstrap
 from bot.log import log
 
@@ -29,9 +34,12 @@ def cmd_train(args) -> None:
     cfg = bootstrap()
     if args.years:
         cfg["years"] = args.years
+    if args.tours:
+        cfg["tours"] = args.tours
+    db.init()
     mem = memory.load()
-    log(f"Cycle d'apprentissage unique sur les années : {cfg['years']}")
-    matches = datasource.fetch_matches(cfg["years"])
+    log(f"Apprentissage — années {cfg['years']} | tours {cfg['tours']}")
+    matches = datasource.fetch_matches(cfg["years"], cfg["tours"])
     if not matches:
         log("Aucune donnée récupérée (réseau ?). Abandon.", "ERROR")
         sys.exit(1)
@@ -40,7 +48,10 @@ def cmd_train(args) -> None:
         if str(y) not in mem["datasets_loaded"]:
             mem["datasets_loaded"].append(str(y))
     memory.save(mem)
-    log("Mémoire sauvegardée.")
+    # Persistance "base solide" : archive des matchs + dictionnaire joueurs.
+    added = db.archive_matches(matches)
+    n_players = db.sync_from_memory(mem)
+    log(f"Base : +{added} matchs archivés, {n_players} joueurs synchronisés.")
 
 
 def cmd_predict(args) -> None:
@@ -68,6 +79,84 @@ def cmd_predict(args) -> None:
     if not features.is_confident(prof1) or not features.is_confident(prof2):
         print("  ⚠️  Confiance faible (joueur(s) peu/pas connu(s)).")
     print("=" * 56 + "\n")
+
+    # Historique en base (archive des prédictions).
+    try:
+        db.init()
+        db.log_prediction(result["player1"], result["player2"],
+                          result["prob1"] / 100.0, result["favorite"])
+    except Exception as exc:  # noqa: BLE001
+        log(f"Impossible d'archiver la prédiction : {exc}", "WARN")
+
+
+def cmd_players(args) -> None:
+    bootstrap()
+    db.init()
+    rows = db.top_players(limit=args.limit, tour=args.tour, min_n=args.min_n)
+    if not rows:
+        log("Aucun joueur en base. Lancez d'abord : python3 run.py train", "WARN")
+        return
+
+    print(f"\n=== DICTIONNAIRE JOUEURS — top {len(rows)} par probabilité "
+          f"{'(' + args.tour.upper() + ')' if args.tour else '(ATP+WTA)'} ===")
+    print(f"{'#':>3}  {'Joueur':<26}{'tour':<5}{'win_prob':>9}{'rating':>8}{'n':>6}")
+    for i, r in enumerate(rows, 1):
+        print(f"{i:>3}  {r['name']:<26}{(r['tour'] or '?'):<5}"
+              f"{r['win_prob']*100:>8.2f}%{r['rating']:>8.3f}{r['n']:>6}")
+    print()
+
+    if args.export:
+        with db.connect() as conn:
+            allrows = conn.execute(
+                "SELECT name,tour,n,serve,return1,return2,recent,rating,win_prob,updated "
+                "FROM players ORDER BY win_prob DESC"
+            ).fetchall()
+        with open(args.export, "w", newline="", encoding="utf-8") as fh:
+            w = _csv.writer(fh)
+            w.writerow(["name", "tour", "n", "serve", "return1", "return2",
+                        "recent", "rating", "win_prob", "updated"])
+            w.writerows([tuple(r) for r in allrows])
+        log(f"Dictionnaire complet exporté ({len(allrows)} joueurs) -> {args.export}")
+
+
+def cmd_backtest(args) -> None:
+    cfg = bootstrap()
+    if args.years:
+        cfg["years"] = args.years
+    if args.tours:
+        cfg["tours"] = args.tours
+    db.init()
+    log(f"Backtest — années {cfg['years']} | tours {cfg['tours']}")
+    matches = datasource.fetch_matches(cfg["years"], cfg["tours"])
+    if not matches:
+        log("Aucune donnée récupérée. Abandon.", "ERROR")
+        sys.exit(1)
+    report = bt.run(matches, cfg, persist=True)
+    print("\n=== RAPPORT DE BACKTEST (hors-échantillon) ===")
+    for k in ("id", "span", "tours", "n_train", "n_test", "accuracy",
+              "baseline", "logloss", "brier"):
+        print(f"  {k:<10}: {report.get(k)}")
+    print(f"  -> le modèle bat la base 'serve' de "
+          f"{(report['accuracy']-report['baseline'])*100:+.2f} pts\n")
+
+
+def cmd_db(_args) -> None:
+    bootstrap()
+    db.init()
+    c = db.counts()
+    print("\n--- BASE DE DONNÉES ---")
+    print(f"Joueurs     : {c['players']}")
+    print(f"Matchs      : {c['matches']}")
+    print(f"Prédictions : {c['predictions']}")
+    print(f"Backtests   : {c['backtests']}")
+    rows = db.list_backtests(limit=5)
+    if rows:
+        print("\nDerniers backtests archivés :")
+        for r in rows:
+            print(f"  #{r['id']} {r['ts']} | {r['tours']} | acc={r['accuracy']} "
+                  f"base={r['baseline']} logloss={r['logloss']} "
+                  f"(test={r['n_test']})")
+    print()
 
 
 def cmd_status(_args) -> None:
@@ -104,11 +193,14 @@ def cmd_status(_args) -> None:
     print()
 
 
-def cmd_reset(_args) -> None:
-    for path in (config.MEMORY_FILE, config.MEMORY_FILE + ".corrupt"):
+def cmd_reset(args) -> None:
+    paths = [config.MEMORY_FILE, config.MEMORY_FILE + ".corrupt"]
+    if args.all:
+        paths.append(config.DB_FILE)
+    for path in paths:
         if os.path.exists(path):
             os.remove(path)
-    log("État appris effacé (config conservée).")
+    log("État effacé" + (" (modèle + base)." if args.all else " (modèle ; base conservée)."))
 
 
 def main() -> None:
@@ -118,7 +210,9 @@ def main() -> None:
     sub.add_parser("start", help="Lance le bot autonome").set_defaults(func=cmd_start)
 
     p_train = sub.add_parser("train", help="Un cycle d'apprentissage")
-    p_train.add_argument("--years", nargs="+", type=int, help="Années ATP à charger")
+    p_train.add_argument("--years", nargs="+", type=int, help="Années à charger")
+    p_train.add_argument("--tours", nargs="+", choices=["atp", "wta"],
+                         help="Tours à charger (atp wta)")
     p_train.set_defaults(func=cmd_train)
 
     p_pred = sub.add_parser("predict", help="Prédire le 1er set")
@@ -126,8 +220,24 @@ def main() -> None:
     p_pred.add_argument("player2")
     p_pred.set_defaults(func=cmd_predict)
 
+    p_players = sub.add_parser("players", help="Dictionnaire joueurs + probabilités")
+    p_players.add_argument("--tour", choices=["atp", "wta"], help="Filtrer par tour")
+    p_players.add_argument("--limit", type=int, default=20, help="Nb de lignes affichées")
+    p_players.add_argument("--min-n", dest="min_n", type=int, default=5,
+                           help="Min. de matchs pour être listé")
+    p_players.add_argument("--export", help="Exporter TOUT le dictionnaire en CSV")
+    p_players.set_defaults(func=cmd_players)
+
+    p_bt = sub.add_parser("backtest", help="Backtest hors-échantillon (archivé)")
+    p_bt.add_argument("--years", nargs="+", type=int, help="Années à charger")
+    p_bt.add_argument("--tours", nargs="+", choices=["atp", "wta"], help="Tours")
+    p_bt.set_defaults(func=cmd_backtest)
+
+    sub.add_parser("db", help="Contenu de la base + backtests").set_defaults(func=cmd_db)
     sub.add_parser("status", help="État du bot").set_defaults(func=cmd_status)
-    sub.add_parser("reset", help="Effacer l'état appris").set_defaults(func=cmd_reset)
+    p_reset = sub.add_parser("reset", help="Effacer l'état appris")
+    p_reset.add_argument("--all", action="store_true", help="Effacer aussi la base SQLite")
+    p_reset.set_defaults(func=cmd_reset)
 
     args = parser.parse_args()
     args.func(args)

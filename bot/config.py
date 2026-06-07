@@ -10,6 +10,7 @@ LOGS_DIR = os.path.join(ROOT, "logs")
 MEMORY_FILE = os.path.join(STATE_DIR, "memory.json")
 CONFIG_FILE = os.path.join(STATE_DIR, "config.json")
 LOG_FILE = os.path.join(LOGS_DIR, "tennisboss.log")
+DB_FILE = os.path.join(STATE_DIR, "tennisboss.db")  # base SQLite "solide"
 
 # --- Réglages par défaut (écrits dans state/config.json au bootstrap) ------
 DEFAULT_CONFIG = {
@@ -29,6 +30,14 @@ DEFAULT_CONFIG = {
     "ema_alpha": 0.20,
     # Nombre minimum de matchs avant de considérer un profil "fiable".
     "min_matches_confident": 5,
+    # Tours couverts pour le dictionnaire "tous les joueurs" : ATP (H) + WTA (F).
+    "tours": ["atp", "wta"],
+    # Backtest : fraction finale des matchs réservée au test (hors apprentissage).
+    "backtest_test_fraction": 0.25,
+    # --- API live officielle (vous fournirez une clé test puis l'abonnement) --
+    # L'adaptateur lit la clé depuis l'env TENNISBOSS_API_KEY, sinon ce champ.
+    "live_api_provider": "none",          # ex: "api-tennis", "sportradar"...
+    "live_api_key": "",
 }
 
 # --- Prior repris de votre script d'origine --------------------------------
@@ -36,10 +45,11 @@ DEFAULT_CONFIG = {
 PRIOR_WEIGHTS = {"serve": 0.30, "return1": 0.25, "return2": 0.25, "recent": 0.20}
 FEATURE_ORDER = ["serve", "return1", "return2", "recent"]
 
-# Source des données (sans clé API).
+# Sources de données ouvertes (sans contournement, sans clé API).
+#   tour = "atp" (hommes) ou "wta" (femmes).
 SACKMANN_URL = (
-    "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/"
-    "atp_matches_{year}.csv"
+    "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
+    "{tour}_matches_{year}.csv"
 )
 # Endpoint "live" (souvent bloqué par Cloudflare -> géré par le self-healing).
 SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"

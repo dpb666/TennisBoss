@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
-from . import datasource, heartbeat, learner, memory
+from . import datasource, db, heartbeat, learner, memory
 from .bootstrap import bootstrap
 from .log import log
 
@@ -56,15 +56,21 @@ def run_forever() -> None:
 def _learn_cycle(mem: Dict[str, Any], cfg: Dict[str, Any]) -> None:
     """Récupère les données manquantes puis lance un cycle de self-learning."""
     years = cfg["years"]
+    tours = cfg.get("tours", ["atp"])
     to_load = [y for y in years if str(y) not in mem["datasets_loaded"]]
     if not to_load:
         # Déjà tout chargé : on réapprend sur les éventuels nouveaux matchs.
-        matches = datasource.fetch_matches(years)
+        matches = datasource.fetch_matches(years, tours)
     else:
-        log(f"Récupération internet des années : {to_load}")
-        matches = datasource.fetch_matches(to_load)
+        log(f"Récupération internet des années : {to_load} | tours {tours}")
+        matches = datasource.fetch_matches(to_load, tours)
 
     learner.train(mem, matches, cfg)
+
+    # Alimente la base solide : archive des matchs + dictionnaire joueurs.
+    db.init()
+    db.archive_matches(matches)
+    db.sync_from_memory(mem)
 
     for y in to_load:
         if str(y) not in mem["datasets_loaded"]:
