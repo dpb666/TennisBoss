@@ -36,7 +36,7 @@ DEFAULT_CONFIG = {
     "backtest_test_fraction": 0.25,
     # --- API live officielle (vous fournirez une clé test puis l'abonnement) --
     # L'adaptateur lit la clé depuis l'env TENNISBOSS_API_KEY, sinon ce champ.
-    "live_api_provider": "none",          # ex: "api-tennis", "sportradar"...
+    "live_api_provider": "api-tennis",    # actif : clé lue dans .env (AT_API_KEY)
     "live_api_key": "",
 }
 

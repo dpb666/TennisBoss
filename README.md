@@ -55,12 +55,28 @@ partie chronologique, **gèle les poids**, puis évalue sur la partie finale.
 Exemple obtenu (ATP+WTA 2022-2024, 1117 joueurs) : accuracy **0,614** vs baseline
 service **0,611** — le modèle bat la baseline, et le backtest est archivé en base.
 
-## API live (votre clé test puis abonnement)
+## Matchs à venir en live (API-Tennis)
 
-`bot/live_api.py` lit la clé depuis l'env `TENNISBOSS_API_KEY` (ou
-`live_api_key` dans la config). Tant qu'aucune clé n'est fournie, le bot reste
-sur les données ouvertes. Donnez-moi l'endpoint + le format de votre fournisseur
-et je branche `fetch_upcoming()` dessus.
+Le bot prédit le 1er set des **vrais matchs à venir** via **API-Tennis** :
+
+```bash
+python3 run.py upcoming --days 2          # fixtures réelles + prédiction 1er set
+```
+
+Les noms abrégés de l'API ("A. Zverev") sont automatiquement reliés aux profils
+appris ("Alexander Zverev") par `bot/namematch.py`.
+
+### Clés API — fichier `.env` (jamais commité)
+Les clés vivent dans `TennisBoss/.env` (exclu de git) :
+```
+AT_API_KEY=...      # API-Tennis  (ACTIF : fixtures + live)
+SR_KEY=...          # Sportradar  (secondaire)
+ODDS_API_KEY=...    # The Odds API (cotes, lecture seule)
+```
+⚠️ Ne jamais committer `.env`. Régénérer toute clé ayant transité en clair.
+
+> **Paris** : TennisBoss prédit et peut lire des cotes, mais **ne place aucun
+> pari automatiquement** (aucune intégration d'exécution d'ordres financiers).
 
 ## Sources de données : ouvertes et légales (aucun contournement)
 

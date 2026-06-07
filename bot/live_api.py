@@ -1,15 +1,16 @@
-"""Adaptateur API live (pluggable) — prêt pour votre clé test puis l'abonnement.
+"""Adaptateur API live — branché sur API-Tennis (clé AT_API_KEY).
 
-La clé est lue par ordre de priorité :
-  1. variable d'environnement  TENNISBOSS_API_KEY
-  2. champ  live_api_key  dans state/config.json
+Les clés sont lues depuis le fichier local `.env` (exclu de git) ou
+l'environnement. Fournisseurs gérés :
+  - "api-tennis"  : fixtures à venir + live  (AT_API_KEY)            [ACTIF]
+  - "sportradar"  : gabarit prêt             (SR_KEY)                [secondaire]
 
-Tant qu'aucune clé n'est fournie, l'adaptateur reste inactif (le bot continue
-sur les données ouvertes Sackmann). Quand vous me donnez la doc de votre API,
-je remplis `fetch_upcoming()` pour votre fournisseur précis.
+Aucune protection anti-bot n'est contournée : ce sont des API officielles
+auxquelles vous êtes abonné via votre clé.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import os
 from typing import Any, Dict, List, Optional
 
@@ -18,45 +19,79 @@ import requests
 from . import config
 from .log import log
 
+API_TENNIS_URL = "https://api.api-tennis.com/tennis/"
 
-def get_api_key(cfg: Dict[str, Any]) -> Optional[str]:
-    key = os.environ.get("TENNISBOSS_API_KEY") or cfg.get("live_api_key") or ""
-    return key.strip() or None
+
+def load_env() -> None:
+    """Charge les paires CLE=VALEUR du fichier .env dans l'environnement."""
+    path = os.path.join(config.ROOT, ".env")
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip())
+
+
+def _key(name: str, cfg: Dict[str, Any]) -> Optional[str]:
+    val = os.environ.get(name) or cfg.get("live_api_key") or ""
+    return val.strip() or None
 
 
 def is_enabled(cfg: Dict[str, Any]) -> bool:
-    return get_api_key(cfg) is not None and cfg.get("live_api_provider", "none") != "none"
+    load_env()
+    return _key("AT_API_KEY", cfg) is not None
 
 
-def fetch_upcoming(cfg: Dict[str, Any]) -> List[Dict]:
-    """Récupère les matchs à venir via l'API du fournisseur configuré.
+def fetch_upcoming(cfg: Dict[str, Any], days_ahead: int = 2) -> List[Dict]:
+    """Récupère les matchs à venir (et live) via API-Tennis.
 
-    Renvoie une liste de dicts {player1, player2, tournament, start}.
-    Implémentation générique : à adapter à VOTRE fournisseur quand vous
-    me donnez l'endpoint + le format (api-tennis, sportradar, etc.).
+    Renvoie une liste de dicts normalisés :
+      {player1, player2, tournament, round, date, time, live, event_key, tour}
     """
-    key = get_api_key(cfg)
+    load_env()
+    key = _key("AT_API_KEY", cfg)
     if not key:
-        log("API live inactive (aucune clé). Utilisation des données ouvertes.", "INFO")
+        log("API live inactive (AT_API_KEY absente). Données ouvertes conservées.", "INFO")
         return []
 
-    provider = cfg.get("live_api_provider", "none")
-    log(f"API live : interrogation du fournisseur '{provider}'.")
+    start = _dt.date.today().isoformat()
+    stop = (_dt.date.today() + _dt.timedelta(days=days_ahead)).isoformat()
     try:
-        # --- GABARIT générique (à personnaliser selon votre fournisseur) ----
-        # url = "https://api.exemple-tennis.com/v1/fixtures"
-        # resp = requests.get(url, params={"apikey": key, "status": "upcoming"},
-        #                     headers={"User-Agent": config.BROWSER_UA}, timeout=15)
-        # resp.raise_for_status()
-        # return _parse_provider(provider, resp.json())
-        log("fetch_upcoming() : gabarit non encore branché sur un fournisseur.", "WARN")
-        return []
-    except requests.RequestException as exc:
-        log(f"API live indisponible ({exc}) -> on garde les données ouvertes.", "WARN")
+        resp = requests.get(
+            API_TENNIS_URL,
+            params={"method": "get_fixtures", "APIkey": key,
+                    "date_start": start, "date_stop": stop},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        log(f"API-Tennis indisponible ({exc}) -> on garde les données ouvertes.", "WARN")
         return []
 
+    if not payload.get("success"):
+        log(f"API-Tennis: réponse sans succès ({str(payload)[:120]}).", "WARN")
+        return []
 
-def _parse_provider(provider: str, payload: Any) -> List[Dict]:
-    """Normalise la réponse JSON du fournisseur en {player1, player2, ...}."""
-    # À compléter par fournisseur. Laissé explicite pour brancher votre clé test.
-    return []
+    return [_parse_fixture(m) for m in (payload.get("result") or [])]
+
+
+def _parse_fixture(m: Dict[str, Any]) -> Dict[str, Any]:
+    etype = (m.get("event_type_type") or "").lower()  # ex: "Atp Singles"
+    tour = "atp" if "atp" in etype else ("wta" if "wta" in etype else "")
+    return {
+        "player1": m.get("event_first_player", "").strip(),
+        "player2": m.get("event_second_player", "").strip(),
+        "tournament": m.get("tournament_name", ""),
+        "round": m.get("tournament_round", ""),
+        "date": m.get("event_date", ""),
+        "time": m.get("event_time", ""),
+        "live": str(m.get("event_live", "0")) == "1",
+        "event_key": m.get("event_key"),
+        "is_doubles": "doubles" in etype,
+        "tour": tour,
+    }

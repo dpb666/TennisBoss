@@ -19,7 +19,7 @@ import os
 import sys
 
 from bot import (backtest as bt, config, datasource, db, features, learner,
-                 memory, predictor)
+                 live_api, memory, namematch, predictor)
 from bot.bootstrap import bootstrap
 from bot.log import log
 
@@ -140,6 +140,53 @@ def cmd_backtest(args) -> None:
           f"{(report['accuracy']-report['baseline'])*100:+.2f} pts\n")
 
 
+def cmd_upcoming(args) -> None:
+    cfg = bootstrap()
+    db.init()
+    mem = memory.load()
+    if not mem["players"]:
+        log("Aucun joueur appris. Lancez d'abord : python3 run.py train", "WARN")
+        return
+
+    # Index de résolution de noms (nom API abrégé -> nom complet appris).
+    counts = {n: int(p.get("n", 0)) for n, p in mem["players"].items()}
+    index = namematch.build_index(list(mem["players"]), counts)
+
+    fixtures = live_api.fetch_upcoming(cfg, days_ahead=args.days)
+    if not fixtures:
+        log("Aucun match à venir récupéré (clé API ? réseau ?).", "WARN")
+        return
+
+    singles = [f for f in fixtures if not f["is_doubles"]]
+    print(f"\n=== MATCHS À VENIR ({len(singles)} simples, {args.days}j) — "
+          f"prédiction 1er set ===")
+    shown = 0
+    for f in singles:
+        n1 = namematch.resolve(f["player1"], index)
+        n2 = namematch.resolve(f["player2"], index)
+        when = f"{f['date']} {f['time']}"
+        head = f"{f['player1']} vs {f['player2']}  [{f['tournament']}, {when}]"
+        if not n1 or not n2:
+            miss = f['player1'] if not n1 else f['player2']
+            print(f"  • {head}\n      → joueur inconnu en base : {miss} (pas de prédiction)")
+            continue
+        fe1 = features.feature_vector(features.get_profile(mem, n1))
+        fe2 = features.feature_vector(features.get_profile(mem, n2))
+        r = predictor.predict(mem, n1, fe1, n2, fe2)
+        live_tag = " 🔴LIVE" if f["live"] else ""
+        print(f"  • {head}{live_tag}")
+        print(f"      → {r['favorite'] or 'serré'} | "
+              f"{n1} {r['prob1']:.1f}% / {n2} {r['prob2']:.1f}%")
+        try:
+            db.log_prediction(n1, n2, r["prob1"] / 100.0, r["favorite"], source="live")
+        except Exception:  # noqa: BLE001
+            pass
+        shown += 1
+        if args.limit and shown >= args.limit:
+            break
+    print()
+
+
 def cmd_db(_args) -> None:
     bootstrap()
     db.init()
@@ -232,6 +279,11 @@ def main() -> None:
     p_bt.add_argument("--years", nargs="+", type=int, help="Années à charger")
     p_bt.add_argument("--tours", nargs="+", choices=["atp", "wta"], help="Tours")
     p_bt.set_defaults(func=cmd_backtest)
+
+    p_up = sub.add_parser("upcoming", help="Matchs à venir (live) + prédiction 1er set")
+    p_up.add_argument("--days", type=int, default=2, help="Horizon en jours")
+    p_up.add_argument("--limit", type=int, default=25, help="Max de matchs affichés")
+    p_up.set_defaults(func=cmd_upcoming)
 
     sub.add_parser("db", help="Contenu de la base + backtests").set_defaults(func=cmd_db)
     sub.add_parser("status", help="État du bot").set_defaults(func=cmd_status)
