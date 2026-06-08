@@ -56,11 +56,12 @@ android/
             └── ui/PredictViewModel.kt   (état + appel réseau)
 ```
 
-## Étendre l'app (déjà câblé côté API)
-L'interface `TennisBossApi` couvre aussi `players()` (autocomplete) et
-`upcoming()` (matchs à venir + cotes). Ajoutez un écran qui les consomme :
-- recherche joueurs → `ApiClient.create().players(q = "alc")`
-- matchs du jour → `ApiClient.create().upcoming(days = 1, odds = true)`
+## Écrans (navigation par onglets)
+| Onglet | Écran | Endpoint |
+|---|---|---|
+| 🎯 Prédire | `PredictScreen` (MainActivity) | `/api/predict` |
+| 📅 Matchs | `UpcomingScreen` + `UpcomingViewModel` | `/api/upcoming?odds=true` |
+| 👤 Joueurs | `PlayersScreen` + `PlayersViewModel` (autocomplete débouncé) | `/api/players?q=` |
 
 ## Notes
 - Le HTTP en clair est activé pour le **dev** uniquement (voir

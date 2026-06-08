@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.PredictResponse
+import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictUiState
 import com.tennisboss.app.ui.PredictViewModel
 import com.tennisboss.app.ui.UpcomingScreen
@@ -71,6 +72,12 @@ fun AppRoot() {
                     icon = { Text("📅") },
                     label = { Text("Matchs") },
                 )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Text("👤") },
+                    label = { Text("Joueurs") },
+                )
             }
         },
     ) { padding ->
@@ -81,7 +88,8 @@ fun AppRoot() {
         ) {
             when (tab) {
                 0 -> PredictScreen()
-                else -> UpcomingScreen()
+                1 -> UpcomingScreen()
+                else -> PlayersScreen()
             }
         }
     }
