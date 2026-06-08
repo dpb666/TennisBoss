@@ -22,10 +22,26 @@ interface TennisBossApi {
         @Query("limit") limit: Int = 20,
     ): PlayersResponse
 
+    @GET("api/player")
+    suspend fun player(
+        @Query("name") name: String,
+    ): PlayerDetail
+
+    @GET("api/h2h")
+    suspend fun h2h(
+        @Query("p1") p1: String,
+        @Query("p2") p2: String,
+    ): H2H
+
     @GET("api/upcoming")
     suspend fun upcoming(
         @Query("days") days: Int = 2,
         @Query("limit") limit: Int = 25,
         @Query("odds") odds: Boolean = false,
     ): UpcomingResponse
+
+    @GET("api/value")
+    suspend fun value(
+        @Query("limit") limit: Int = 12,
+    ): ValueResponse
 }

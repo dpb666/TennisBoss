@@ -15,12 +15,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.Player
+import com.tennisboss.app.ui.components.PlayerDetailSheet
 
 @Composable
 fun PlayersScreen(
@@ -28,7 +34,15 @@ fun PlayersScreen(
     selectedP2: String,
     onPlayerClick: (String) -> Unit,
     vm: PlayersViewModel = viewModel(),
+    detailVM: PlayerDetailViewModel = viewModel(),
 ) {
+    var detailOpen by remember { mutableStateOf(false) }
+    if (detailOpen) {
+        PlayerDetailSheet(
+            state = detailVM.state,
+            onDismiss = { detailOpen = false; detailVM.clear() },
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -66,13 +80,19 @@ fun PlayersScreen(
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(vm.players) { p -> PlayerRow(p, onClick = { onPlayerClick(p.name) }) }
+            items(vm.players) { p ->
+                PlayerRow(
+                    p = p,
+                    onClick = { onPlayerClick(p.name) },
+                    onInfo = { detailVM.load(p.name); detailOpen = true },
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun PlayerRow(p: Player, onClick: () -> Unit) {
+private fun PlayerRow(p: Player, onClick: () -> Unit, onInfo: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -82,7 +102,7 @@ private fun PlayerRow(p: Player, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(p.name, fontWeight = FontWeight.SemiBold)
                 Text(
                     buildString {
@@ -106,6 +126,14 @@ private fun PlayerRow(p: Player, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
+            // Bouton info -> ouvre la fiche détaillée (consomme son propre clic).
+            Text(
+                "ℹ️",
+                fontSize = 20.sp,
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .clickable(onClick = onInfo),
+            )
         }
     }
 }

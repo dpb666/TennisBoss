@@ -89,6 +89,57 @@ def _player_payload(name: str) -> Dict[str, Any]:
     }
 
 
+# Libellés lisibles des features du modèle (pour l'écran d'explication).
+FEATURE_LABELS = {
+    "serve": "Service",
+    "return1": "Retour (1er service adverse)",
+    "return2": "Retour (2e service adverse)",
+    "recent": "Forme récente",
+}
+
+
+def _explain(name1: str, feat1: Dict[str, float],
+             name2: str, feat2: Dict[str, float]) -> Dict[str, Any]:
+    """Décompose la prédiction du 1er set, facteur par facteur.
+
+    Le modèle est une régression logistique :
+        z = Σ_k  poids_k * (feature1_k - feature2_k)  + biais
+        P(J1) = sigmoid(z)
+    La contribution de chaque facteur au logit z est donc
+        poids_k * (feature1_k - feature2_k)
+    >0 pousse vers J1, <0 vers J2. C'est une explication exacte (pas une
+    approximation) : la somme des contributions + biais redonne z.
+    """
+    weights = _MEM["weights"]
+    bias = float(_MEM["bias"])
+    factors = []
+    z = bias
+    for k in config.FEATURE_ORDER:
+        w = float(weights.get(k, 0.0))
+        v1 = float(feat1.get(k, 0.5))
+        v2 = float(feat2.get(k, 0.5))
+        contrib = w * (v1 - v2)
+        z += contrib
+        favors = name1 if contrib > 1e-9 else (name2 if contrib < -1e-9 else None)
+        factors.append({
+            "key": k,
+            "label": FEATURE_LABELS.get(k, k),
+            "value1": round(v1, 4),
+            "value2": round(v2, 4),
+            "weight": round(w, 4),
+            "contribution": round(contrib, 4),
+            "favors": favors,
+        })
+    decisive = max(factors, key=lambda f: abs(f["contribution"]))
+    return {
+        "bias": round(bias, 4),
+        "logit": round(z, 4),
+        "factors": factors,
+        "decisive": decisive["key"],
+        "model_accuracy": round(float(_MEM["metrics"].get("accuracy", 0.0)), 4),
+    }
+
+
 # --- Endpoints -------------------------------------------------------------
 @app.get("/health")
 def health():
@@ -125,6 +176,115 @@ def api_players():
     return jsonify({"count": len(results), "players": results[:limit]})
 
 
+def _fmt_date(d: str) -> str:
+    """'20241124' -> '24/11/2024' (tolérant si format inattendu)."""
+    s = str(d)
+    if len(s) == 8 and s.isdigit():
+        return f"{s[6:8]}/{s[4:6]}/{s[0:4]}"
+    return s
+
+
+def _h2h_payload(n1: str, n2: str, limit: int = 20) -> Dict[str, Any]:
+    """Bilan des confrontations directes entre n1 et n2 (noms résolus)."""
+    rows = db.head_to_head(n1, n2)
+    wins1 = sum(1 for r in rows if r["winner"] == n1)
+    wins2 = sum(1 for r in rows if r["winner"] == n2)
+    meetings = [{
+        "date": _fmt_date(r["date"]),
+        "tour": r["tour"],
+        "winner": r["winner"],
+    } for r in rows[:limit]]
+    leader = n1 if wins1 > wins2 else (n2 if wins2 > wins1 else None)
+    return {
+        "player1": n1, "player2": n2,
+        "wins1": wins1, "wins2": wins2,
+        "total": wins1 + wins2,
+        "leader": leader,
+        "meetings": meetings,
+    }
+
+
+@app.get("/api/h2h")
+def api_h2h():
+    p1, p2 = request.args.get("p1"), request.args.get("p2")
+    if not p1 or not p2:
+        return jsonify({"error": "paramètres requis: p1, p2"}), 400
+    n1, n2 = _resolve(p1), _resolve(p2)
+    if not n1 or not n2:
+        return jsonify({"error": "joueur inconnu",
+                        "unresolved": p1 if not n1 else p2}), 404
+    return jsonify(_h2h_payload(n1, n2))
+
+
+@app.get("/api/player")
+def api_player():
+    """Fiche détaillée d'un joueur : force, bilan V/D et forme récente."""
+    name = request.args.get("name") or request.args.get("q")
+    if not name:
+        return jsonify({"error": "paramètre requis: name"}), 400
+    resolved = _resolve(name)
+    if not resolved:
+        return jsonify({"error": "joueur inconnu", "unresolved": name}), 404
+
+    payload = _player_payload(resolved)
+
+    rec = db.player_record(resolved)
+    total = rec["wins"] + rec["losses"]
+    payload["record"] = {
+        "wins": rec["wins"], "losses": rec["losses"], "total": total,
+        "win_rate": round(rec["wins"] / total, 4) if total else 0.0,
+    }
+
+    form = []
+    for r in db.player_recent_matches(resolved, limit=10):
+        won = (r["winner"] == resolved)
+        form.append({
+            "date": _fmt_date(r["date"]),
+            "tour": r["tour"],
+            "opponent": r["loser"] if won else r["winner"],
+            "result": "W" if won else "L",
+        })
+    payload["form"] = form
+
+    prow = db.get_player(resolved)
+    if prow is not None:
+        payload["rating"] = round(float(prow["rating"]), 4)
+        payload["win_prob"] = round(float(prow["win_prob"]), 4)
+
+    return jsonify(payload)
+
+
+def _set_to_match_prob(p_set: float) -> float:
+    """Proba de gagner UN set -> proba de gagner le MATCH (best-of-3).
+
+    Sets supposés indépendants de proba p :  P(match) = p²·(3 - 2p).
+    """
+    p = max(0.0, min(1.0, p_set))
+    return p * p * (3 - 2 * p)
+
+
+def _bet_builder(p1_set: float, n1: str, n2: str) -> Dict[str, Any]:
+    """Dérive plusieurs marchés à partir de la proba du 1er set (best-of-3).
+
+    Honnête : on ne renvoie que ce qui découle du modèle de set (vainqueur match,
+    2e set, match en 3 sets, score exact). Points/aces ne sont PAS dérivables.
+    """
+    p = max(0.0, min(1.0, p1_set))
+    q = 1.0 - p
+    pm1 = _set_to_match_prob(p)
+    return {
+        "match": {"prob1": round(pm1 * 100, 1), "prob2": round((1 - pm1) * 100, 1)},
+        "set2": {"prob1": round(p * 100, 1), "prob2": round(q * 100, 1)},
+        "third_set_prob": round(2 * p * q * 100, 1),
+        "correct_score": {
+            f"{n1} 2-0": round(p * p * 100, 1),
+            f"{n1} 2-1": round(2 * p * p * q * 100, 1),
+            f"{n2} 2-1": round(2 * p * q * q * 100, 1),
+            f"{n2} 2-0": round(q * q * 100, 1),
+        },
+    }
+
+
 @app.get("/api/predict")
 def api_predict():
     p1, p2 = request.args.get("p1"), request.args.get("p2")
@@ -148,6 +308,9 @@ def api_predict():
             "prob1": r["prob1"], "prob2": r["prob2"],
             "favorite": r["favorite"], "verdict": r["verdict"],
         },
+        "explain": _explain(n1, f1, n2, f2),
+        "h2h": _h2h_payload(n1, n2, limit=5),
+        "bet_builder": _bet_builder(r["prob1"] / 100.0, n1, n2),
     })
 
 
@@ -178,10 +341,16 @@ def api_upcoming():
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
             r = predictor.predict(_MEM, n1, f1, n2, f2)
+            bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
             item["prediction"] = {
                 "player1": n1, "player2": n2,
                 "prob1": r["prob1"], "prob2": r["prob2"],
                 "favorite": r["favorite"],
+                # Bet Builder (champs plats consommés par l'app).
+                "ml_prob1": bb["match"]["prob1"], "ml_prob2": bb["match"]["prob2"],
+                "set2_prob1": bb["set2"]["prob1"], "set2_prob2": bb["set2"]["prob2"],
+                "total_sets_over": bb["third_set_prob"],
+                "correct_score_probs": bb["correct_score"],
             }
             if odds_index is not None:
                 item["odds"] = _odds_for(odds_index, f["player1"], f["player2"])
@@ -193,6 +362,10 @@ def api_upcoming():
 
 @app.get("/api/value")
 def api_value():
+    """Compare le modèle au marché et calcule l'EV (espérance de gain) réelle.
+
+    EV(parier J) = proba_match_modèle(J) × cote(J) − 1.  EV > 0 = value (+).
+    """
     limit = min(int(request.args.get("limit", 10)), 30)
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
@@ -208,18 +381,43 @@ def api_value():
         f1 = features.feature_vector(features.get_profile(_MEM, n1))
         f2 = features.feature_vector(features.get_profile(_MEM, n2))
         r = predictor.predict(_MEM, n1, f1, n2, f2)
+
+        pm1 = _set_to_match_prob(r["prob1"] / 100.0)   # proba match modèle (J1)
+        pm2 = 1.0 - pm1                                  # (J2)
+        ho, ao = mw["home_odds"], mw["away_odds"]
+        ev1 = pm1 * ho - 1.0
+        ev2 = pm2 * ao - 1.0
+
+        if ev1 >= ev2:
+            best_side, best_ev = n1, ev1
+        else:
+            best_side, best_ev = n2, ev2
+
         out.append({
             "player1": n1, "player2": n2,
             "league": (e.get("league") or {}).get("name", ""),
             "model_first_set_prob1": r["prob1"],
+            "model_match_prob1": round(pm1 * 100, 1),
+            "model_match_prob2": round(pm2 * 100, 1),
             "market_match_prob1": round(mw["home_prob"] * 100, 1),
-            "odds": {"home": mw["home_odds"], "away": mw["away_odds"],
-                     "books": mw["books"]},
+            "market_match_prob2": round(mw["away_prob"] * 100, 1),
+            "odds": {"home": ho, "away": ao, "books": mw["books"]},
+            "ev1": round(ev1 * 100, 1),
+            "ev2": round(ev2 * 100, 1),
+            "best_side": best_side if best_ev > 0 else None,
+            "best_ev": round(best_ev * 100, 1),
+            "value": best_ev > 0,
         })
-        if len(out) >= limit:
-            break
-    return jsonify({"count": len(out), "comparisons": out,
-                    "note": "marchés différents: modèle=1er set, marché=match"})
+
+    # Les meilleures values d'abord.
+    out.sort(key=lambda c: c["best_ev"], reverse=True)
+    if len(out) > limit:
+        out = out[:limit]
+    return jsonify({
+        "count": len(out),
+        "comparisons": out,
+        "note": "proba match dérivée du 1er set (best-of-3) ; EV = proba×cote − 1",
+    })
 
 
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:

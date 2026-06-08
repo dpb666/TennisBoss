@@ -3,6 +3,7 @@ package com.tennisboss.app.data
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 /**
  * Fabrique le client Retrofit vers l'API TennisBoss.
@@ -17,13 +18,22 @@ import retrofit2.converter.gson.GsonConverterFactory
 object ApiClient {
 
     @Volatile
-    var baseUrl: String = "http://10.0.2.2:8000/"
+    var baseUrl: String = "http://192.168.0.94:8000/"
 
     @Volatile
     var apiToken: String = ""
 
+    /** Implémentation injectable pour les tests (court-circuite Retrofit). */
+    @Volatile
+    var apiOverride: TennisBossApi? = null
+
     fun create(): TennisBossApi {
+        apiOverride?.let { return it }
+
         val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
                 if (apiToken.isNotBlank()) {

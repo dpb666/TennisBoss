@@ -2,6 +2,9 @@
 state/
 logs/
 
+# Firebase (retiré du build — fichier orphelin, ne pas versionner)
+android/app/google-services.json
+
 # Python
 __pycache__/
 *.py[cod]

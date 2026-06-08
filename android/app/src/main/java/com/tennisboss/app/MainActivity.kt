@@ -11,11 +11,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -25,11 +35,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import com.tennisboss.app.data.SettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +60,10 @@ import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictUiState
 import com.tennisboss.app.ui.PredictViewModel
 import com.tennisboss.app.ui.UpcomingScreen
+import com.tennisboss.app.ui.ValueScreen
+import com.tennisboss.app.ui.components.BetBuilderView
+import com.tennisboss.app.ui.components.ExplainView
+import com.tennisboss.app.ui.components.H2HView
 import com.tennisboss.app.ui.theme.TennisBossTheme
 
 class MainActivity : ComponentActivity() {
@@ -59,6 +82,16 @@ fun AppRoot() {
     var tab by remember { mutableIntStateOf(0) }
     // ViewModel de prédiction partagé : la recherche joueurs peut le pré-remplir.
     val predictVM: PredictViewModel = viewModel()
+
+    // Réglages persistants : on restaure l'URL serveur + token au démarrage.
+    val context = LocalContext.current
+    val store = remember { SettingsStore(context) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        ApiClient.baseUrl = store.baseUrlFlow.first()
+        ApiClient.apiToken = store.tokenFlow.first()
+    }
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -80,6 +113,12 @@ fun AppRoot() {
                     icon = { Text("👤") },
                     label = { Text("Joueurs") },
                 )
+                NavigationBarItem(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
+                    icon = { Text("💎") },
+                    label = { Text("Value") },
+                )
             }
         },
     ) { padding ->
@@ -88,24 +127,39 @@ fun AppRoot() {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            when (tab) {
-                0 -> PredictScreen(predictVM)
-                1 -> UpcomingScreen()
-                else -> PlayersScreen(
-                    selectedP1 = predictVM.player1,
-                    selectedP2 = predictVM.player2,
-                    onPlayerClick = { name ->
-                        val pairComplete = predictVM.pick(name)
-                        if (pairComplete) tab = 0   // paire prête -> on bascule sur Prédire
-                    },
-                )
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    (fadeIn(tween(260)) +
+                        slideInVertically(tween(260)) { it / 16 }) togetherWith
+                        fadeOut(tween(180))
+                },
+                label = "tabs",
+            ) { current ->
+                when (current) {
+                    0 -> PredictScreen(predictVM, store, scope)
+                    1 -> UpcomingScreen()
+                    2 -> PlayersScreen(
+                        selectedP1 = predictVM.player1,
+                        selectedP2 = predictVM.player2,
+                        onPlayerClick = { name ->
+                            val pairComplete = predictVM.pick(name)
+                            if (pairComplete) tab = 0   // paire prête -> on bascule sur Prédire
+                        },
+                    )
+                    else -> ValueScreen()
+                }
             }
         }
     }
 }
 
 @Composable
-fun PredictScreen(vm: PredictViewModel = viewModel()) {
+fun PredictScreen(
+    vm: PredictViewModel = viewModel(),
+    store: SettingsStore? = null,
+    scope: CoroutineScope? = null,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -123,7 +177,9 @@ fun PredictScreen(vm: PredictViewModel = viewModel()) {
             style = MaterialTheme.typography.titleMedium,
         )
 
-        ServerField()
+        if (store != null && scope != null) {
+            ServerSettings(store, scope)
+        }
 
         OutlinedTextField(
             value = vm.player1,
@@ -160,22 +216,6 @@ fun PredictScreen(vm: PredictViewModel = viewModel()) {
     }
 }
 
-/** Permet de changer l'URL du backend à chaud (émulateur vs téléphone réel). */
-@Composable
-private fun ServerField() {
-    var url by remember { mutableStateOf(ApiClient.baseUrl) }
-    OutlinedTextField(
-        value = url,
-        onValueChange = {
-            url = it
-            ApiClient.baseUrl = it
-        },
-        label = { Text("URL du serveur") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
 @Composable
 private fun ResultCard(d: PredictResponse) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -199,6 +239,29 @@ private fun ResultCard(d: PredictResponse) {
                     "⚠️ Confiance faible (joueur peu/pas connu).",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFB26A00),
+                )
+            }
+
+            d.explain?.let { ex ->
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                ExplainView(
+                    name1 = d.player1.name,
+                    name2 = d.player2.name,
+                    explain = ex,
+                )
+            }
+
+            d.h2h?.let { h ->
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                H2HView(h2h = h)
+            }
+
+            d.bet_builder?.let { bb ->
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                BetBuilderView(
+                    name1 = d.player1.name,
+                    name2 = d.player2.name,
+                    bb = bb,
                 )
             }
         }
@@ -225,5 +288,77 @@ private fun ProbabilityRow(name: String, prob: Double, matches: Int) {
             "matchs vus : $matches",
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+/** Réglages serveur persistants (URL + token), repliables. */
+@Composable
+private fun ServerSettings(store: SettingsStore, scope: CoroutineScope) {
+    var expanded by remember { mutableStateOf(false) }
+
+    // Valeurs persistées (source de vérité). Les champs locaux sont seedés dessus.
+    val savedUrl by store.baseUrlFlow.collectAsState(initial = ApiClient.baseUrl)
+    val savedToken by store.tokenFlow.collectAsState(initial = ApiClient.apiToken)
+    var urlEdit by remember { mutableStateOf<String?>(null) }
+    var tokenEdit by remember { mutableStateOf<String?>(null) }
+    val url = urlEdit ?: savedUrl
+    val token = tokenEdit ?: savedToken
+
+    // Applique la valeur persistée au client réseau.
+    LaunchedEffect(savedUrl) { ApiClient.baseUrl = savedUrl }
+    LaunchedEffect(savedToken) { ApiClient.apiToken = savedToken }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            if (expanded) "⚙️ Réglages serveur  ▲" else "⚙️ Réglages serveur  ▼",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+        )
+        if (!expanded) {
+            Text(
+                url,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            OutlinedTextField(
+                value = url,
+                onValueChange = {
+                    urlEdit = it
+                    ApiClient.baseUrl = it
+                    scope.launch { store.setBaseUrl(it) }
+                },
+                label = { Text("URL du serveur") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = token,
+                onValueChange = {
+                    tokenEdit = it
+                    ApiClient.apiToken = it
+                    scope.launch { store.setToken(it) }
+                },
+                label = { Text("Token API (optionnel)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Sauvegardé automatiquement. Émulateur : http://10.0.2.2:8000/ · " +
+                    "téléphone : http://IP_DU_PC:8000/",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
     }
 }

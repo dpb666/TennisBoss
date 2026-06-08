@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Palette hi-tech (dark-first). Doit rester cohérente avec Theme.kt. -->
+    <color name="tb_background">#FF0A0E14</color>
+    <color name="tb_surface">#FF131A24</color>
+    <color name="tb_primary">#FF00E5A0</color>
+</resources>

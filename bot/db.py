@@ -180,6 +180,37 @@ def get_player(name: str) -> Optional[sqlite3.Row]:
         return conn.execute("SELECT * FROM players WHERE name=?", (name,)).fetchone()
 
 
+def player_record(name: str) -> Dict[str, int]:
+    """Bilan victoires / défaites du joueur sur l'archive des matchs."""
+    with connect() as conn:
+        wins = conn.execute(
+            "SELECT COUNT(*) FROM matches WHERE winner=?", (name,)).fetchone()[0]
+        losses = conn.execute(
+            "SELECT COUNT(*) FROM matches WHERE loser=?", (name,)).fetchone()[0]
+    return {"wins": int(wins), "losses": int(losses)}
+
+
+def player_recent_matches(name: str, limit: int = 10) -> List[sqlite3.Row]:
+    """Derniers matchs du joueur (gagnés ou perdus), les plus récents d'abord."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT date,tour,winner,loser FROM matches "
+            "WHERE winner=? OR loser=? ORDER BY date DESC, id DESC LIMIT ?",
+            (name, name, limit),
+        ).fetchall()
+
+
+def head_to_head(name1: str, name2: str) -> List[sqlite3.Row]:
+    """Confrontations directes entre deux joueurs, les plus récentes d'abord."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT date,tour,winner,loser FROM matches "
+            "WHERE (winner=? AND loser=?) OR (winner=? AND loser=?) "
+            "ORDER BY date DESC, id DESC",
+            (name1, name2, name2, name1),
+        ).fetchall()
+
+
 def counts() -> Dict[str, int]:
     with connect() as conn:
         return {

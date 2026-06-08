@@ -8,22 +8,44 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.tennisboss.app.ui.components.SkeletonList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.UpcomingMatch
+import com.tennisboss.app.data.Prediction
+import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
     // Charge automatiquement au premier affichage.
@@ -63,22 +85,28 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
             }
         }
 
-        when (val s = vm.state) {
-            is UpcomingUiState.Loading -> CircularProgressIndicator()
-            is UpcomingUiState.Error -> Text(
-                s.message,
-                color = MaterialTheme.colorScheme.error,
-            )
-            is UpcomingUiState.Success -> {
-                if (s.matches.isEmpty()) {
-                    Text("Aucun match à venir trouvé.")
-                } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(s.matches) { m -> MatchCard(m) }
+        PullToRefreshBox(
+            isRefreshing = vm.state is UpcomingUiState.Loading,
+            onRefresh = { vm.load() },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            when (val s = vm.state) {
+                is UpcomingUiState.Loading -> SkeletonList(count = 5)
+                is UpcomingUiState.Error -> Text(
+                    s.message,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                is UpcomingUiState.Success -> {
+                    if (s.matches.isEmpty()) {
+                        Text("Aucun match à venir trouvé. Tire vers le bas pour réessayer.")
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(s.matches) { m -> MatchCard(m) }
+                        }
                     }
                 }
+                else -> {}
             }
-            else -> {}
         }
     }
 }
@@ -105,8 +133,12 @@ private fun MatchCard(m: UpcomingMatch) {
                     Text("🔴 LIVE", color = Color(0xFFD32F2F),
                         fontWeight = FontWeight.Bold)
                 } else {
-                    Text("${m.date} ${m.time}",
-                        style = MaterialTheme.typography.labelSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SurfaceBadge(m.tour)
+                        Spacer(Modifier.size(8.dp))
+                        Text("${m.date} ${m.time}",
+                            style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
 
@@ -115,15 +147,79 @@ private fun MatchCard(m: UpcomingMatch) {
                 fontWeight = FontWeight.SemiBold,
             )
 
+            // Section Résultats (si disponible)
+            m.result?.let { res ->
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "SCORE : ${res.score}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (res.winner.isNotBlank()) {
+                            Text(
+                                " • WINNER: ${res.winner}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF2E7D32)
+                            )
+                        }
+                    }
+                }
+            }
+
             val pred = m.prediction
             if (pred != null) {
-                Text(
-                    "1er set : ${pred.player1} ${fmt(pred.prob1)} / " +
-                        "${pred.player2} ${fmt(pred.prob2)}",
-                )
-                pred.favorite?.let {
-                    Text("🏆 Favori : $it", style = MaterialTheme.typography.bodySmall)
+                val maxProb = Math.max(pred.prob1, pred.prob2)
+                val isHighConfidence = maxProb > 65.0
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "1er set : ${pred.player1} ${fmt(pred.prob1)} / " +
+                                "${pred.player2} ${fmt(pred.prob2)}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (isHighConfidence) {
+                        Text(
+                            "🔥 TOP PICK",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFE65100),
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
                 }
+                
+                pred.favorite?.let {
+                    Text(
+                        "🏆 Favori : $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (isHighConfidence) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isHighConfidence) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Section "Boss Stats" : Comparaison visuelle
+                Spacer(Modifier.height(4.dp))
+                BossStatsComparison(pred)
+
+                // Bet Builder Section
+                BetBuilderSection(pred)
+
             } else {
                 Text(
                     "Joueur inconnu en base — pas de prédiction.",
@@ -151,4 +247,140 @@ private fun MatchCard(m: UpcomingMatch) {
     }
 }
 
-private fun fmt(v: Double): String = String.format("%.1f%%", v)
+private fun fmt(v: Double): String = String.format(Locale.US, "%.1f%%", v)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun BetBuilderSection(p: Prediction) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+            "🛠 BET BUILDER (AI)",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.secondary
+        )
+
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // ML / Winner Match
+            p.ml_prob1?.let { prob ->
+                BetChip("ML ${p.player1.take(3)}: ${fmt(prob)}")
+            }
+            p.ml_prob2?.let { prob ->
+                BetChip("ML ${p.player2.take(3)}: ${fmt(prob)}")
+            }
+
+            // 2nd Set
+            p.set2_prob1?.let { prob ->
+                BetChip("Set2 ${p.player1.take(3)}: ${fmt(prob)}")
+            }
+
+            // Totals
+            p.total_points_over?.let { prob ->
+                BetChip("Points Over: ${fmt(prob)}")
+            }
+            p.total_sets_over?.let { prob ->
+                BetChip("Sets Over: ${fmt(prob)}")
+            }
+            
+            // Aces
+            p.total_aces_avg?.let { avg ->
+                BetChip("Avg Aces: ${String.format(Locale.US, "%.1f", avg)}")
+            }
+        }
+        
+        // Correct Score Probs (Top 2)
+        p.correct_score_probs?.let { scores ->
+            val topScores = scores.entries.sortedByDescending { it.value }.take(2)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                topScores.forEach { entry ->
+                    Text(
+                        "CS ${entry.key}: ${fmt(entry.value)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BetChip(text: String) {
+    SuggestionChip(
+        onClick = { },
+        label = { Text(text, fontSize = 10.sp) },
+        shape = RoundedCornerShape(4.dp)
+    )
+}
+
+@Composable
+fun SurfaceBadge(tour: String) {
+    val color = when {
+        tour.contains("Clay", ignoreCase = true) -> Color(0xFFD84315) // Terre battue
+        tour.contains("Grass", ignoreCase = true) -> Color(0xFF2E7D32) // Gazon
+        else -> Color(0xFF1565C0) // Dur / Autre
+    }
+    Surface(
+        color = color.copy(alpha = 0.1f),
+        shape = CircleShape,
+        modifier = Modifier.clip(CircleShape)
+    ) {
+        Text(
+            text = if (tour.length > 10) tour.take(10) + "..." else tour,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun BossStatsComparison(p: Prediction) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Power Matchup", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text("Service vs Return", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        }
+        
+        // Un indicateur visuel de balance entre les deux joueurs
+        val ratio = (p.prob1 / (p.prob1 + p.prob2)).toFloat()
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(p.player1.take(3).uppercase(), style = MaterialTheme.typography.labelSmall)
+            LinearProgressIndicator(
+                progress = { ratio },
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp)
+                    .height(6.dp)
+                    .clip(CircleShape),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)
+            )
+            Text(p.player2.take(3).uppercase(), style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}

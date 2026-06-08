@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Thème hôte sombre : évite le flash blanc avant le rendu Compose
+         et donne une status bar assortie au fond hi-tech. -->
+    <style name="Theme.TennisBoss" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tb_background</item>
+        <item name="android:statusBarColor">@color/tb_background</item>
+        <item name="android:navigationBarColor">@color/tb_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
