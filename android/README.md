@@ -28,7 +28,12 @@ Réglable directement dans l'app (champ « URL du serveur ») :
 | Contexte | URL |
 |---|---|
 | Émulateur | `http://10.0.2.2:8000/` (valeur par défaut) |
+| **Téléphone réel via USB (`adb reverse`)** | `http://localhost:8000/` |
 | Téléphone réel (même Wi-Fi) | `http://IP_DU_PC:8000/` (ex. `http://192.168.1.20:8000/`) |
+
+> 📲 **Tester sur un vrai téléphone (Pixel 9 Pro) : suivez
+> [DEVICE_TESTING.md](DEVICE_TESTING.md).** Le serveur tournant dans WSL2,
+> `adb reverse` par USB est la méthode la plus fiable.
 
 > Sur téléphone réel, trouvez l'IP du PC : `ip addr` (WSL/Linux) ou `ipconfig`
 > (Windows). Le PC et le téléphone doivent être sur le **même réseau**.
