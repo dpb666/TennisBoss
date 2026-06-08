@@ -45,7 +45,12 @@ python3 run.py reset [--all]                   # efface le modèle (--all = + la
 `python3 run.py serve` expose une API JSON (Flask) : `/health`, `/api/status`,
 `/api/players` (autocomplete), `/api/predict`, `/api/upcoming`, `/api/value`.
 CORS ouvert ; auth optionnelle via `TENNISBOSS_API_TOKEN` (en-tête `X-API-Token`).
-**Guide complet + exemple Kotlin/Retrofit : [ANDROID.md](ANDROID.md).**
+**Guide d'intégration : [ANDROID.md](ANDROID.md).**
+
+### App Android (Kotlin + Compose)
+Un squelette d'app Android prêt à ouvrir dans Android Studio est dans
+**[`android/`](android/README.md)** : écran de prédiction du 1er set qui appelle
+l'API (Retrofit + Compose + ViewModel).
 
 ## Base de données solide, dictionnaire & backtests
 

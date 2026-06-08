@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEV uniquement : autorise le HTTP en clair vers le backend local
+  (émulateur 10.0.2.2, ou l'IP de votre PC sur le réseau Wi-Fi).
+  En production, supprimez ceci et utilisez HTTPS.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">192.168.1.0</domain>
+    </domain-config>
+    <!-- Filet de sécurité dev : autoriser tout cleartext. À retirer en prod. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
