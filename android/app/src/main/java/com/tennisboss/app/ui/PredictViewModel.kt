@@ -28,6 +28,22 @@ class PredictViewModel : ViewModel() {
     var state by mutableStateOf<PredictUiState>(PredictUiState.Idle)
         private set
 
+    // Quel emplacement remplir au prochain tap depuis la recherche (0 = J1, 1 = J2).
+    private var pickNext = 0
+
+    /** Place un joueur sélectionné dans J1 puis J2. Renvoie true quand la paire est complète. */
+    fun pick(name: String): Boolean {
+        return if (pickNext == 0) {
+            player1 = name
+            pickNext = 1
+            false
+        } else {
+            player2 = name
+            pickNext = 0
+            true
+        }
+    }
+
     fun predict() {
         if (player1.isBlank() || player2.isBlank()) {
             state = PredictUiState.Error("Entrez deux joueurs.")

@@ -1,5 +1,6 @@
 package com.tennisboss.app.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +23,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.Player
 
 @Composable
-fun PlayersScreen(vm: PlayersViewModel = viewModel()) {
+fun PlayersScreen(
+    selectedP1: String,
+    selectedP2: String,
+    onPlayerClick: (String) -> Unit,
+    vm: PlayersViewModel = viewModel(),
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -33,6 +39,16 @@ fun PlayersScreen(vm: PlayersViewModel = viewModel()) {
             "Recherche joueurs",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
+        )
+        Text(
+            "Touchez un joueur pour le placer dans la prédiction (J1 puis J2).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Text(
+            "Sélection →  J1 : ${selectedP1.ifBlank { "—" }}   ·   J2 : ${selectedP2.ifBlank { "—" }}",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
         )
         OutlinedTextField(
             value = vm.query,
@@ -50,17 +66,18 @@ fun PlayersScreen(vm: PlayersViewModel = viewModel()) {
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(vm.players) { p -> PlayerRow(p) }
+            items(vm.players) { p -> PlayerRow(p, onClick = { onPlayerClick(p.name) }) }
         }
     }
 }
 
 @Composable
-private fun PlayerRow(p: Player) {
+private fun PlayerRow(p: Player, onClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onClick)
                 .padding(14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,

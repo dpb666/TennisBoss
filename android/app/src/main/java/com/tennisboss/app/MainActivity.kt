@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppRoot() {
     var tab by remember { mutableIntStateOf(0) }
+    // ViewModel de prédiction partagé : la recherche joueurs peut le pré-remplir.
+    val predictVM: PredictViewModel = viewModel()
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -87,9 +89,16 @@ fun AppRoot() {
                 .padding(padding),
         ) {
             when (tab) {
-                0 -> PredictScreen()
+                0 -> PredictScreen(predictVM)
                 1 -> UpcomingScreen()
-                else -> PlayersScreen()
+                else -> PlayersScreen(
+                    selectedP1 = predictVM.player1,
+                    selectedP2 = predictVM.player2,
+                    onPlayerClick = { name ->
+                        val pairComplete = predictVM.pick(name)
+                        if (pairComplete) tab = 0   // paire prête -> on bascule sur Prédire
+                    },
+                )
             }
         }
     }
