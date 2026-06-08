@@ -24,6 +24,19 @@ def match_logit(ra: float, rb: float) -> float:
     return (ra - rb) / 400.0 * math.log(10)
 
 
+def update(ratings: Dict[str, float], winner: str, loser: str,
+           base: float = BASE, k: float = K) -> Dict[str, float]:
+    """Met à jour les notes ELO après UN match (winner bat loser)."""
+    if not winner or not loser:
+        return ratings
+    rw = ratings.get(winner, base)
+    rl = ratings.get(loser, base)
+    ew = expected(rw, rl)
+    ratings[winner] = rw + k * (1.0 - ew)
+    ratings[loser] = rl + k * (0.0 - (1.0 - ew))
+    return ratings
+
+
 def build_from_matches(rows: Iterable[Any], base: float = BASE,
                        k: float = K) -> Dict[str, float]:
     """Construit les notes ELO à partir de matchs CHRONOLOGIQUES (date croissante).
@@ -32,12 +45,5 @@ def build_from_matches(rows: Iterable[Any], base: float = BASE,
     """
     ratings: Dict[str, float] = {}
     for r in rows:
-        w, l = r["winner"], r["loser"]
-        if not w or not l:
-            continue
-        rw = ratings.get(w, base)
-        rl = ratings.get(l, base)
-        ew = expected(rw, rl)
-        ratings[w] = rw + k * (1.0 - ew)
-        ratings[l] = rl + k * (0.0 - (1.0 - ew))
+        update(ratings, r["winner"], r["loser"], base, k)
     return ratings

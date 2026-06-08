@@ -26,6 +26,7 @@ from . import (calibrate, config, db, elo, features, live_api, memory,
                namematch, odds_api, predictor, settlement)
 from . import __version__
 from .bootstrap import bootstrap
+from .log import log
 
 app = Flask(__name__)
 
@@ -43,8 +44,18 @@ def _load_state() -> None:
     _MEM = memory.load()
     counts = {n: int(p.get("n", 0)) for n, p in _MEM["players"].items()}
     _INDEX = namematch.build_index(list(_MEM["players"]), counts)
-    # Notes ELO construites depuis l'archive chronologique (signal fort).
+    # Notes ELO : archive chronologique + rejeu des matchs réglés (joueurs connus)
+    # = apprentissage continu qui survit aux redémarrages.
     _MEM["elo"] = elo.build_from_matches(db.all_matches_chrono())
+    known = _MEM["players"]
+    replayed = 0
+    for s in db.settled_chrono():
+        w, p1, p2 = s["winner"], s["player1"], s["player2"]
+        if w in known and p1 in known and p2 in known and w in (p1, p2):
+            elo.update(_MEM["elo"], w, p2 if w == p1 else p1)
+            replayed += 1
+    if replayed:
+        log(f"ELO : {replayed} matchs réglés rejoués (apprentissage continu).")
     try:
         _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
     except (TypeError, ValueError):
@@ -371,10 +382,17 @@ def api_upcoming():
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
             r = predictor.predict(_MEM, n1, f1, n2, f2)
             bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
+            # Cote juste du 1er set sur le favori = 1 / proba. Cible si >= 1.60.
+            fs_prob = max(r["prob1"], r["prob2"]) / 100.0
+            fair_odds = round(1.0 / fs_prob, 2) if fs_prob > 0 else None
             item["prediction"] = {
                 "player1": n1, "player2": n2,
                 "prob1": r["prob1"], "prob2": r["prob2"],
                 "favorite": r["favorite"],
+                # Cible 1er set (cote juste >= 1.60 = zone jouable).
+                "first_set_prob": round(fs_prob * 100, 1),
+                "fair_odds": fair_odds,
+                "target_160": bool(fair_odds is not None and fair_odds >= 1.60),
                 # Bet Builder (champs plats consommés par l'app).
                 "ml_prob1": bb["match"]["prob1"], "ml_prob2": bb["match"]["prob2"],
                 "set2_prob1": bb["set2"]["prob1"], "set2_prob2": bb["set2"]["prob2"],

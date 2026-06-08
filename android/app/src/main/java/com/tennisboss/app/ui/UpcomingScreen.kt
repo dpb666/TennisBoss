@@ -213,6 +213,16 @@ private fun MatchCard(m: UpcomingMatch) {
                     )
                 }
 
+                // Cible 1er set : favori jouable à cote juste >= 1.60.
+                if (pred.target_160 && pred.fair_odds != null) {
+                    Text(
+                        "🎯 1er set jouable : ${pred.favorite} @ cote juste ${pred.fair_odds} (≥1.60)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00E5A0),
+                    )
+                }
+
                 // Section "Boss Stats" : Comparaison visuelle
                 Spacer(Modifier.height(4.dp))
                 BossStatsComparison(pred)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from . import db, features, live_api, predictor
+from . import db, elo, features, live_api, predictor
 
 
 def run_settlement(mem: Dict[str, Any],
@@ -53,6 +53,9 @@ def run_settlement(mem: Dict[str, Any],
             "pred_favorite": pred_fav, "pred_prob1": pred_prob1, "correct": correct,
         }):
             added += 1
+            # Apprentissage continu : on met à jour l'ELO avec ce nouveau résultat.
+            if n1 and n2 and "elo" in mem:
+                elo.update(mem["elo"], winner_name, n2 if r["winner"] == "p1" else n1)
 
     return {"results_seen": len(results), "added": added}
 

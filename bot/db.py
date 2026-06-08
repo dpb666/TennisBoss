@@ -316,6 +316,14 @@ def list_settled(limit: int = 50) -> List[sqlite3.Row]:
         ).fetchall()
 
 
+def settled_chrono() -> List[sqlite3.Row]:
+    """Matchs réglés par ordre chronologique (pour rejouer l'ELO)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT player1, player2, winner FROM settled_matches "
+            "ORDER BY date ASC, id ASC").fetchall()
+
+
 def save_calibration(metrics: Dict[str, Any]) -> int:
     import datetime as _dt
     with connect() as conn:

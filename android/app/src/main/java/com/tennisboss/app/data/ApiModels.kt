@@ -133,6 +133,10 @@ data class Prediction(
     val prob1: Double,
     val prob2: Double,
     val favorite: String?,
+    // Cible 1er set (cote juste = 1/proba ; jouable si >= 1.60)
+    val first_set_prob: Double? = null,
+    val fair_odds: Double? = null,
+    val target_160: Boolean = false,
     // Bet Builder data
     val ml_prob1: Double? = null,
     val ml_prob2: Double? = null,
