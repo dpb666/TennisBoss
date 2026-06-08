@@ -18,11 +18,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -35,6 +39,7 @@ import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.PredictResponse
 import com.tennisboss.app.ui.PredictUiState
 import com.tennisboss.app.ui.PredictViewModel
+import com.tennisboss.app.ui.UpcomingScreen
 import com.tennisboss.app.ui.theme.TennisBossTheme
 
 class MainActivity : ComponentActivity() {
@@ -42,9 +47,41 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             TennisBossTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    PredictScreen()
-                }
+                AppRoot()
+            }
+        }
+    }
+}
+
+@Composable
+fun AppRoot() {
+    var tab by remember { mutableIntStateOf(0) }
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    icon = { Text("🎯") },
+                    label = { Text("Prédire") },
+                )
+                NavigationBarItem(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    icon = { Text("📅") },
+                    label = { Text("Matchs") },
+                )
+            }
+        },
+    ) { padding ->
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            when (tab) {
+                0 -> PredictScreen()
+                else -> UpcomingScreen()
             }
         }
     }

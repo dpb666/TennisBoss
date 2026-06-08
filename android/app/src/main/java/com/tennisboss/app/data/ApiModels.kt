@@ -47,6 +47,13 @@ data class Prediction(
     val favorite: String?,
 )
 
+data class Odds(
+    val market_match_prob_home: Double,
+    val home_odds: Double,
+    val away_odds: Double,
+    val books: List<String> = emptyList(),
+)
+
 data class UpcomingMatch(
     val player1_raw: String,
     val player2_raw: String,
@@ -58,6 +65,7 @@ data class UpcomingMatch(
     val tour: String,
     val predictable: Boolean,
     val prediction: Prediction? = null,
+    val odds: Odds? = null,
 )
 
 data class UpcomingResponse(
