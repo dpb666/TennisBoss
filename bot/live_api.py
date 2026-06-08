@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -20,6 +21,35 @@ from . import config
 from .log import log
 
 API_TENNIS_URL = "https://api.api-tennis.com/tennis/"
+
+# API-Tennis n'expose pas d'en-tête rate-limit -> on protège le quota par un
+# simple cache TTL (mono-utilisateur, tennis uniquement).
+TTL_FIXTURES = 60      # matchs à venir / live
+TTL_RESULTS = 300      # résultats terminés (changent peu)
+_CACHE: Dict[str, tuple] = {}
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
+
+
+def _cached_request(params: Dict[str, Any], ttl: float) -> Optional[Any]:
+    """GET API-Tennis avec cache TTL. Renvoie le payload JSON brut, le cache
+    périmé en secours, ou None. Ne fait jamais d'appel inutile sous le TTL."""
+    key = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "APIkey")
+    now = time.time()
+    hit = _CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    try:
+        resp = requests.get(API_TENNIS_URL, params=params, timeout=20)
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        log(f"API-Tennis indisponible ({exc}).", "WARN")
+        return hit[1] if hit else None
+    _CACHE[key] = (now + ttl, payload)
+    return payload
 
 
 def load_env() -> None:
@@ -60,23 +90,13 @@ def fetch_upcoming(cfg: Dict[str, Any], days_ahead: int = 2) -> List[Dict]:
 
     start = _dt.date.today().isoformat()
     stop = (_dt.date.today() + _dt.timedelta(days=days_ahead)).isoformat()
-    try:
-        resp = requests.get(
-            API_TENNIS_URL,
-            params={"method": "get_fixtures", "APIkey": key,
-                    "date_start": start, "date_stop": stop},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-    except (requests.RequestException, ValueError) as exc:
-        log(f"API-Tennis indisponible ({exc}) -> on garde les données ouvertes.", "WARN")
+    payload = _cached_request(
+        {"method": "get_fixtures", "APIkey": key,
+         "date_start": start, "date_stop": stop},
+        ttl=TTL_FIXTURES,
+    )
+    if not isinstance(payload, dict) or not payload.get("success"):
         return []
-
-    if not payload.get("success"):
-        log(f"API-Tennis: réponse sans succès ({str(payload)[:120]}).", "WARN")
-        return []
-
     return [_parse_fixture(m) for m in (payload.get("result") or [])]
 
 
@@ -91,19 +111,12 @@ def fetch_results(cfg: Dict[str, Any], days_back: int = 2) -> List[Dict[str, Any
         return []
     stop = _dt.date.today().isoformat()
     start = (_dt.date.today() - _dt.timedelta(days=days_back)).isoformat()
-    try:
-        resp = requests.get(
-            API_TENNIS_URL,
-            params={"method": "get_fixtures", "APIkey": key,
-                    "date_start": start, "date_stop": stop},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-    except (requests.RequestException, ValueError) as exc:
-        log(f"API-Tennis résultats indisponibles ({exc}).", "WARN")
-        return []
-    if not payload.get("success"):
+    payload = _cached_request(
+        {"method": "get_fixtures", "APIkey": key,
+         "date_start": start, "date_stop": stop},
+        ttl=TTL_RESULTS,
+    )
+    if not isinstance(payload, dict) or not payload.get("success"):
         return []
     out = [_parse_result(m) for m in (payload.get("result") or [])]
     return [r for r in out if r["finished"] and not r["is_doubles"]]

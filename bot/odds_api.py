@@ -43,6 +43,22 @@ def _cache_key(path: str, params: Dict[str, Any]) -> str:
     return path + "?" + "&".join(f"{k}={v}" for k, v in items)
 
 
+def _parse_reset(rst: str) -> Optional[float]:
+    """x-ratelimit-reset -> epoch (s). Gère 3 formats vus en pratique :
+    epoch absolu, nb de secondes restantes, ou timestamp ISO 8601 (doc odds-api)."""
+    rst = rst.strip()
+    try:
+        v = float(rst)
+        return v if v > 1e6 else time.time() + v
+    except ValueError:
+        pass
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(rst.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 def _update_rl(resp: requests.Response) -> None:
     """Lit x-ratelimit-remaining / x-ratelimit-reset dans la réponse."""
     rem = resp.headers.get("x-ratelimit-remaining")
@@ -53,22 +69,20 @@ def _update_rl(resp: requests.Response) -> None:
             pass
     rst = resp.headers.get("x-ratelimit-reset")
     if rst is not None:
-        try:
-            v = float(rst)
-            # reset peut être un epoch absolu OU un nombre de secondes restantes.
-            _RL["reset"] = v if v > 1e6 else time.time() + v
-        except ValueError:
-            pass
+        parsed = _parse_reset(rst)
+        if parsed is not None:
+            _RL["reset"] = parsed
 
 
 def _budget_ok() -> bool:
-    """False si le budget est trop bas et que le reset n'est pas encore passé."""
+    """False seulement si le budget est bas ET qu'on connaît un reset futur.
+    Si le reset est inconnu, on ne suspend pas (sinon blocage permanent)."""
     if _RL["remaining"] is None or _RL["remaining"] >= RL_SAFETY:
         return True
-    if _RL["reset"] and time.time() >= _RL["reset"]:
-        _RL["remaining"] = None   # fenêtre repassée : on retente
-        return True
-    return False
+    if _RL["reset"] and time.time() < _RL["reset"]:
+        return False                  # budget bas + reset futur -> on attend
+    _RL["remaining"] = None           # reset inconnu/passé -> on retente
+    return True
 
 
 def rate_limit_status() -> Dict[str, Any]:
