@@ -61,7 +61,13 @@ Le bot prédit le 1er set des **vrais matchs à venir** via **API-Tennis** :
 
 ```bash
 python3 run.py upcoming --days 2          # fixtures réelles + prédiction 1er set
+python3 run.py upcoming --days 2 --odds   # + cotes marché (odds-api.io) quand appariées
 ```
+
+Avec `--odds`, chaque match est apparié à odds-api.io par **paire de noms de
+famille** ; l'appariement n'affiche les cotes que si les **deux** joueurs
+correspondent (sinon « introuvable » — les fournisseurs ont parfois des affiches
+différentes le même jour). Pour une couverture cotes maximale, voir `value`.
 
 Les noms abrégés de l'API ("A. Zverev") sont automatiquement reliés aux profils
 appris ("Alexander Zverev") par `bot/namematch.py`.

@@ -56,6 +56,31 @@ def fetch_tennis_events(upcoming_only: bool = True) -> List[Dict[str, Any]]:
     return events
 
 
+def build_event_index(events: List[Dict[str, Any]]) -> Dict[frozenset, Dict[str, Any]]:
+    """Index { {nom_famille_1, nom_famille_2} -> event } pour apparier 2 fournisseurs."""
+    from .namematch import split_name
+
+    idx: Dict[frozenset, Dict[str, Any]] = {}
+    for e in events:
+        _, l1 = split_name(e.get("home", ""))
+        _, l2 = split_name(e.get("away", ""))
+        if l1 and l2 and l1 != l2:
+            idx[frozenset((l1, l2))] = e
+    return idx
+
+
+def find_event(index: Dict[frozenset, Dict[str, Any]],
+               name1: str, name2: str) -> Optional[Dict[str, Any]]:
+    """Retrouve l'événement odds-api.io pour deux joueurs (par noms de famille)."""
+    from .namematch import split_name
+
+    _, l1 = split_name(name1)
+    _, l2 = split_name(name2)
+    if not l1 or not l2:
+        return None
+    return index.get(frozenset((l1, l2)))
+
+
 def fetch_match_winner(event_id: Any,
                        bookmakers: str = DEFAULT_BOOKMAKERS) -> Optional[Dict[str, Any]]:
     """Cotes "ML" (vainqueur de match) -> probabilités implicites SANS vig.

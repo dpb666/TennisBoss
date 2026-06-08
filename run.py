@@ -157,10 +157,21 @@ def cmd_upcoming(args) -> None:
         log("Aucun match à venir récupéré (clé API ? réseau ?).", "WARN")
         return
 
+    # Cotes optionnelles (odds-api.io) : un seul appel /events, puis appariement.
+    odds_index = None
+    if args.odds:
+        if odds_api.is_enabled():
+            odds_index = odds_api.build_event_index(
+                odds_api.fetch_tennis_events(upcoming_only=True))
+            log(f"Cotes activées : {len(odds_index)} événements odds-api.io indexés.")
+        else:
+            log("ODDS_API_KEY absente — cotes ignorées.", "WARN")
+
     singles = [f for f in fixtures if not f["is_doubles"]]
     print(f"\n=== MATCHS À VENIR ({len(singles)} simples, {args.days}j) — "
-          f"prédiction 1er set ===")
+          f"prédiction 1er set{' + cotes' if odds_index else ''} ===")
     shown = 0
+    odds_found = 0
     for f in singles:
         n1 = namematch.resolve(f["player1"], index)
         n2 = namematch.resolve(f["player2"], index)
@@ -177,6 +188,8 @@ def cmd_upcoming(args) -> None:
         print(f"  • {head}{live_tag}")
         print(f"      → {r['favorite'] or 'serré'} | "
               f"{n1} {r['prob1']:.1f}% / {n2} {r['prob2']:.1f}%")
+        if odds_index is not None:
+            odds_found += _print_odds_line(odds_index, f["player1"], f["player2"])
         try:
             db.log_prediction(n1, n2, r["prob1"] / 100.0, r["favorite"], source="live")
         except Exception:  # noqa: BLE001
@@ -184,7 +197,33 @@ def cmd_upcoming(args) -> None:
         shown += 1
         if args.limit and shown >= args.limit:
             break
+    if odds_index is not None:
+        print(f"\n  Cotes appariées : {odds_found}/{shown} matchs "
+              f"(les autres ont un adversaire/planning différent chez odds-api.io).")
     print()
+
+
+def _print_odds_line(odds_index, raw1: str, raw2: str) -> bool:
+    """Affiche la ligne de cotes marché (no-vig) si trouvée. Renvoie True si affichée."""
+    ev = odds_api.find_event(odds_index, raw1, raw2)
+    if not ev:
+        print("      cotes : — (appariement introuvable / autre adversaire)")
+        return False
+    mw = odds_api.fetch_match_winner(ev["id"])
+    if not mw:
+        print("      cotes : — (aucune cote proposée par les 2 bookmakers)")
+        return False
+    # Aligner le côté "home" du marché sur le joueur 1 affiché.
+    from bot.namematch import split_name
+    _, l_raw1 = split_name(raw1)
+    _, l_home = split_name(ev.get("home", ""))
+    p1, p2 = (mw["home_prob"], mw["away_prob"]) if l_raw1 == l_home \
+        else (mw["away_prob"], mw["home_prob"])
+    o1, o2 = (mw["home_odds"], mw["away_odds"]) if l_raw1 == l_home \
+        else (mw["away_odds"], mw["home_odds"])
+    print(f"      marché (match, no-vig) : {p1*100:.1f}% / {p2*100:.1f}%  "
+          f"cotes {o1}/{o2} [{', '.join(mw['books'])}]")
+    return True
 
 
 def cmd_value(args) -> None:
@@ -335,6 +374,8 @@ def main() -> None:
     p_up = sub.add_parser("upcoming", help="Matchs à venir (live) + prédiction 1er set")
     p_up.add_argument("--days", type=int, default=2, help="Horizon en jours")
     p_up.add_argument("--limit", type=int, default=25, help="Max de matchs affichés")
+    p_up.add_argument("--odds", action="store_true",
+                      help="Ajouter les cotes marché (odds-api.io)")
     p_up.set_defaults(func=cmd_upcoming)
 
     p_val = sub.add_parser("value", help="Compare modèle (1er set) vs cotes marché")
