@@ -62,9 +62,10 @@ CHALLENGER_URL = (
 SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
 
 # LLM local via LM Studio (API OpenAI-compatible).
-# Depuis WSL2 en mode réseau miroir, localhost:1234 pointe sur Windows.
-# Override via .env : LM_STUDIO_URL=http://...
-LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234/v1/chat/completions")
+# LM Studio doit écouter sur 0.0.0.0 (pas 127.0.0.1) pour être joignable depuis WSL2.
+# Depuis WSL2, utiliser l'IP LAN du PC Windows (ex: 192.168.0.94).
+# Override via .env : LM_STUDIO_URL=http://192.168.0.94:1234/v1/chat/completions
+LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://192.168.0.94:1234/v1/chat/completions")
 
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
