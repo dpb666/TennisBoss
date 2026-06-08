@@ -278,6 +278,12 @@ def cmd_value(args) -> None:
     print()
 
 
+def cmd_serve(args) -> None:
+    from bot import api
+
+    api.serve(host=args.host, port=args.port)
+
+
 def cmd_db(_args) -> None:
     bootstrap()
     db.init()
@@ -381,6 +387,11 @@ def main() -> None:
     p_val = sub.add_parser("value", help="Compare modèle (1er set) vs cotes marché")
     p_val.add_argument("--limit", type=int, default=10, help="Max de matchs cotés")
     p_val.set_defaults(func=cmd_value)
+
+    p_serve = sub.add_parser("serve", help="Lance l'API REST (backend Android)")
+    p_serve.add_argument("--host", default="0.0.0.0", help="Adresse d'écoute")
+    p_serve.add_argument("--port", type=int, default=8000, help="Port")
+    p_serve.set_defaults(func=cmd_serve)
 
     sub.add_parser("db", help="Contenu de la base + backtests").set_defaults(func=cmd_db)
     sub.add_parser("status", help="État du bot").set_defaults(func=cmd_status)

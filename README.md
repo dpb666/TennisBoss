@@ -34,10 +34,18 @@ python3 run.py players --tour wta --limit 20                  # dictionnaire + p
 python3 run.py players --export players.csv                   # export CSV complet
 python3 run.py backtest --years 2022 2023 2024 --tours atp wta   # backtest archivé
 python3 run.py db                              # contenu base + derniers backtests
+python3 run.py serve --host 0.0.0.0 --port 8000  # API REST (backend Android)
 python3 run.py status                          # poids appris, précision, top joueurs
 python3 run.py start                           # MODE AUTONOME (boucle infinie)
 python3 run.py reset [--all]                   # efface le modèle (--all = + la base)
 ```
+
+## API REST pour l'app Android
+
+`python3 run.py serve` expose une API JSON (Flask) : `/health`, `/api/status`,
+`/api/players` (autocomplete), `/api/predict`, `/api/upcoming`, `/api/value`.
+CORS ouvert ; auth optionnelle via `TENNISBOSS_API_TOKEN` (en-tête `X-API-Token`).
+**Guide complet + exemple Kotlin/Retrofit : [ANDROID.md](ANDROID.md).**
 
 ## Base de données solide, dictionnaire & backtests
 
