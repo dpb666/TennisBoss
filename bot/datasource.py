@@ -90,7 +90,29 @@ def _match_features(row: Dict[str, str]) -> Optional[Dict]:
         "loser": loser,
         "surface": (row.get("surface") or "").strip().lower(),   # hard/clay/grass
         "tourney_name": (row.get("tourney_name") or "").strip(),
+        "margin": parse_margin(row.get("score", "")),            # jeux gagnant - perdant
     }
+
+
+def parse_margin(score: str) -> Optional[int]:
+    """Marge de victoire en jeux (jeux vainqueur - jeux perdant) depuis un score
+    Sackmann ('6-4 7-6(5)'). None si illisible (walkover/abandon)."""
+    if not score:
+        return None
+    wg = lg = 0
+    found = False
+    for tok in score.split():
+        tok = tok.split("(")[0]            # retire le tie-break "(5)"
+        if "-" not in tok:
+            continue
+        a, _, b = tok.partition("-")
+        try:
+            wg += int(a)
+            lg += int(b)
+            found = True
+        except ValueError:
+            continue
+    return (wg - lg) if found else None
 
 
 def fetch_year(year: int, tour: str = "atp") -> List[Dict]:
@@ -164,6 +186,7 @@ def surface_backfill(years: Optional[List[int]] = None,
     tours = tours or cfg.get("tours", ["atp", "wta"])
 
     id_surface: Dict[str, str] = {}
+    id_margin: Dict[str, int] = {}
     name_map: Dict[str, str] = {}
     token_counts: Dict[str, _Counter] = _ddict(_Counter)
     week_counts: Dict[int, _Counter] = _ddict(_Counter)
@@ -174,10 +197,13 @@ def surface_backfill(years: Optional[List[int]] = None,
             if not text:
                 continue
             for row in csv.DictReader(io.StringIO(text)):
+                mid = f"{tour}-{row.get('tourney_id', '?')}-{row.get('match_num', '?')}"
+                margin = parse_margin(row.get("score", ""))
+                if margin is not None:
+                    id_margin[mid] = margin
                 surf = (row.get("surface") or "").strip().lower()
                 if not surf:
                     continue
-                mid = f"{tour}-{row.get('tourney_id', '?')}-{row.get('match_num', '?')}"
                 id_surface[mid] = surf
                 toks = normalize_tournament(row.get("tourney_name", ""))
                 if toks:
@@ -191,6 +217,8 @@ def surface_backfill(years: Optional[List[int]] = None,
     with db.connect() as conn:
         conn.executemany("UPDATE matches SET surface=? WHERE id=?",
                          [(s, i) for i, s in id_surface.items()])
+        conn.executemany("UPDATE matches SET margin=? WHERE id=?",
+                         [(m, i) for i, m in id_margin.items()])
 
     token_map = {t: c.most_common(1)[0][0] for t, c in token_counts.items()}
     week_map = {str(w): c.most_common(1)[0][0] for w, c in week_counts.items()}

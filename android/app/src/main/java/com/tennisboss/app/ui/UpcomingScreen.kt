@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.Prediction
+import com.tennisboss.app.ui.components.BetBuilderView
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -227,8 +228,20 @@ private fun MatchCard(m: UpcomingMatch) {
                 Spacer(Modifier.height(4.dp))
                 BossStatsComparison(pred)
 
-                // Bet Builder Section
-                BetBuilderSection(pred)
+                // Bet Builder Section - Unified
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
+                BetBuilderView(
+                    name1 = pred.player1,
+                    name2 = pred.player2,
+                    mlProb1 = pred.ml_prob1,
+                    mlProb2 = pred.ml_prob2,
+                    set2Prob1 = pred.set2_prob1,
+                    set2Prob2 = pred.set2_prob2,
+                    thirdSetProb = pred.total_sets_over, // Utilise total_sets_over comme proxy pour 3 sets si non dispo
+                    correctScore = pred.correct_score_probs,
+                    totalPointsOver = pred.total_points_over,
+                    totalAcesAvg = pred.total_aces_avg
+                )
 
             } else {
                 Text(
@@ -258,80 +271,6 @@ private fun MatchCard(m: UpcomingMatch) {
 }
 
 private fun fmt(v: Double): String = String.format(Locale.US, "%.1f%%", v)
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun BetBuilderSection(p: Prediction) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-        Text(
-            "🛠 BET BUILDER (AI)",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.secondary
-        )
-
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // ML / Winner Match
-            p.ml_prob1?.let { prob ->
-                BetChip("ML ${p.player1.take(3)}: ${fmt(prob)}")
-            }
-            p.ml_prob2?.let { prob ->
-                BetChip("ML ${p.player2.take(3)}: ${fmt(prob)}")
-            }
-
-            // 2nd Set
-            p.set2_prob1?.let { prob ->
-                BetChip("Set2 ${p.player1.take(3)}: ${fmt(prob)}")
-            }
-
-            // Totals
-            p.total_points_over?.let { prob ->
-                BetChip("Points Over: ${fmt(prob)}")
-            }
-            p.total_sets_over?.let { prob ->
-                BetChip("Sets Over: ${fmt(prob)}")
-            }
-            
-            // Aces
-            p.total_aces_avg?.let { avg ->
-                BetChip("Avg Aces: ${String.format(Locale.US, "%.1f", avg)}")
-            }
-        }
-        
-        // Correct Score Probs (Top 2)
-        p.correct_score_probs?.let { scores ->
-            val topScores = scores.entries.sortedByDescending { it.value }.take(2)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                topScores.forEach { entry ->
-                    Text(
-                        "CS ${entry.key}: ${fmt(entry.value)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun BetChip(text: String) {
-    SuggestionChip(
-        onClick = { },
-        label = { Text(text, fontSize = 10.sp) },
-        shape = RoundedCornerShape(4.dp)
-    )
-}
 
 @Composable
 fun SurfaceBadge(tour: String) {

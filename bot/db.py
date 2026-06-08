@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS matches (
     loser     TEXT,
     w_serve   REAL, w_return1 REAL, w_return2 REAL,
     l_serve   REAL, l_return1 REAL, l_return2 REAL,
-    surface   TEXT
+    surface   TEXT,
+    margin    INTEGER
 );
 CREATE TABLE IF NOT EXISTS predictions (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +125,10 @@ def init() -> None:
     with connect() as conn:
         conn.executescript(_SCHEMA)
         # Migrations idempotentes (bases déjà créées sans ces colonnes).
-        for col, ddl in (("surface", "ALTER TABLE matches ADD COLUMN surface TEXT"),):
+        for col, ddl in (
+            ("surface", "ALTER TABLE matches ADD COLUMN surface TEXT"),
+            ("margin", "ALTER TABLE matches ADD COLUMN margin INTEGER"),
+        ):
             try:
                 conn.execute(ddl)
             except sqlite3.OperationalError:
@@ -141,7 +145,7 @@ def archive_matches(matches: List[Dict]) -> int:
             m["winner_name"], m["loser_name"],
             m["winner"]["serve"], m["winner"]["return1"], m["winner"]["return2"],
             m["loser"]["serve"], m["loser"]["return1"], m["loser"]["return2"],
-            m.get("surface", ""),
+            m.get("surface", ""), m.get("margin"),
         )
         for m in matches
     ]
@@ -150,7 +154,8 @@ def archive_matches(matches: List[Dict]) -> int:
         conn.executemany(
             "INSERT OR IGNORE INTO matches "
             "(id,date,tour,winner,loser,w_serve,w_return1,w_return2,"
-            " l_serve,l_return1,l_return2,surface) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " l_serve,l_return1,l_return2,surface,margin) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         after = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
@@ -261,7 +266,7 @@ def all_matches_chrono() -> List[sqlite3.Row]:
     """Tous les matchs par ordre chronologique avec surface (pour l'ELO)."""
     with connect() as conn:
         return conn.execute(
-            "SELECT winner, loser, surface FROM matches "
+            "SELECT winner, loser, surface, margin FROM matches "
             "ORDER BY date ASC, id ASC").fetchall()
 
 

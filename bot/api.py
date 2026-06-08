@@ -58,10 +58,12 @@ def _load_state() -> None:
     _MEM["elo"] = {}
     _MEM["elo_surface"] = {"hard": {}, "clay": {}, "grass": {}}
     for r in db.all_matches_chrono():
-        elo.update(_MEM["elo"], r["winner"], r["loser"])
+        m = r["margin"]
+        mult = elo.mult_from_margin(m) if m is not None else 1.0
+        elo.update(_MEM["elo"], r["winner"], r["loser"], mult=mult)
         surf = r["surface"]
         if surf in _MEM["elo_surface"]:
-            elo.update(_MEM["elo_surface"][surf], r["winner"], r["loser"])
+            elo.update(_MEM["elo_surface"][surf], r["winner"], r["loser"], mult=mult)
     # Rejeu des matchs réglés sur l'ELO global (apprentissage continu, survit aux reboots).
     known = _MEM["players"]
     replayed = 0

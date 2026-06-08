@@ -24,11 +24,16 @@ def match_logit(ra: float, rb: float) -> float:
     return (ra - rb) / 400.0 * math.log(10)
 
 
+def mult_from_margin(margin: float) -> float:
+    """Multiplicateur de marge de victoire (en jeux), borné [0.7, 1.6]."""
+    return max(0.7, min(1.6, 0.5 + 0.4 * math.log(max(0, margin) + 1)))
+
+
 def dominance_mult(sets: Any, winner_side: str = "p1") -> float:
-    """Multiplicateur de marge de victoire d'après les scores set-par-set.
+    """Multiplicateur de marge d'après les scores set-par-set du vainqueur.
 
     Un 6-1 6-2 (grosse marge en jeux) pèse plus qu'un 7-6 7-6 (marge faible).
-    `sets` : [{"first": jeux J1, "second": jeux J2}, ...]. Borné [0.7, 1.6].
+    `sets` : [{"first": jeux J1, "second": jeux J2}, ...].
     """
     wg = lg = 0
     for s in (sets or []):
@@ -43,8 +48,7 @@ def dominance_mult(sets: Any, winner_side: str = "p1") -> float:
         else:
             wg += g
             lg += f
-    margin = max(0, wg - lg)
-    return max(0.7, min(1.6, 0.5 + 0.4 * math.log(margin + 1)))
+    return mult_from_margin(wg - lg)
 
 
 def update(ratings: Dict[str, float], winner: str, loser: str,

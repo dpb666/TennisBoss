@@ -3,14 +3,7 @@ package com.tennisboss.app.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,8 +16,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.tennisboss.app.data.BetBuilder
 import com.tennisboss.app.data.BetMarket
+import java.util.Locale
 
 private val P1Color = Color(0xFF4F8CFF)
 private val P2Color = Color(0xFF00C2A8)
@@ -32,68 +27,116 @@ private val AccentColor = Color(0xFF00E5A0)
 
 /**
  * Bet Builder : marchés dérivés de la proba du 1er set (vainqueur match, 2e set,
- * match en 3 sets, score exact). 100 % issu du modèle, sans données inventées.
+ * match en 3 sets, score exact).
  */
 @Composable
-fun BetBuilderView(name1: String, name2: String, bb: BetBuilder) {
+fun BetBuilderView(
+    name1: String,
+    name2: String,
+    bb: BetBuilder? = null,
+    // Support pour les données "à plat" du modèle Prediction si bb est null
+    mlProb1: Double? = null,
+    mlProb2: Double? = null,
+    set2Prob1: Double? = null,
+    set2Prob2: Double? = null,
+    thirdSetProb: Double? = null,
+    correctScore: Map<String, Double>? = null,
+    totalPointsOver: Double? = null,
+    totalSetsOver: Double? = null,
+    totalAcesAvg: Double? = null,
+) {
+    val mProb1 = bb?.match?.prob1 ?: mlProb1
+    val mProb2 = bb?.match?.prob2 ?: mlProb2
+    val s2Prob1 = bb?.set2?.prob1 ?: set2Prob1
+    val s2Prob2 = bb?.set2?.prob2 ?: set2Prob2
+    val tSetProb = bb?.third_set_prob ?: thirdSetProb
+    val scores = bb?.correct_score ?: correctScore
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "🎰 Bet Builder",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
+            "🛠 BET BUILDER (AI)",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.secondary
         )
 
-        MarketBar("Vainqueur du match", name1, bb.match.prob1, name2, bb.match.prob2)
-        MarketBar("Vainqueur du 2e set", name1, bb.set2.prob1, name2, bb.set2.prob2)
+        if (mProb1 != null && mProb2 != null) {
+            MarketBar("Vainqueur du match (ML)", name1, mProb1, name2, mProb2)
+        }
 
-        // Match en 3 sets.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("Match en 3 sets", style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "${fmt(bb.third_set_prob)}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = AccentColor,
-            )
+        if (s2Prob1 != null && s2Prob2 != null) {
+            MarketBar("Vainqueur du 2e set", name1, s2Prob1, name2, s2Prob2)
+        }
+
+        // Stats Additionnelles (Points, Sets, Aces) en ligne
+        if (totalPointsOver != null || totalSetsOver != null || totalAcesAvg != null || tSetProb != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (tSetProb != null && tSetProb > 0) {
+                    MiniStatCard("Match en 3 sets", fmt(tSetProb), Modifier.weight(1f))
+                }
+                if (totalPointsOver != null) {
+                    MiniStatCard("Points Over", fmt(totalPointsOver), Modifier.weight(1f))
+                }
+                if (totalAcesAvg != null) {
+                    MiniStatCard("Aces (avg)", String.format(Locale.US, "%.1f", totalAcesAvg), Modifier.weight(1f))
+                }
+            }
         }
 
         // Score exact, trié par probabilité décroissante.
-        if (bb.correct_score.isNotEmpty()) {
+        if (!scores.isNullOrEmpty()) {
             Text(
-                "Score exact (en sets)",
-                style = MaterialTheme.typography.titleSmall,
+                "Top Scores Exacts",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
             )
-            bb.correct_score.entries
+            scores.entries
                 .sortedByDescending { it.value }
+                .take(3) // On limite aux 3 meilleurs pour la lisibilité
                 .forEach { (label, prob) -> ScoreRow(label, prob) }
         }
     }
 }
 
 @Composable
+private fun MiniStatCard(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = AccentColor)
+    }
+}
+
+@Composable
 private fun MarketBar(title: String, n1: String, p1: Double, n2: String, p2: Double) {
-    val frac1 = (p1 / 100.0).toFloat().coerceIn(0f, 1f)
+    val total = if (p1 + p2 > 0) p1 + p2 else 100.0
+    val frac1 = (p1 / total).toFloat().coerceIn(0f, 1f)
     val anim by animateFloatAsState(frac1, tween(600), label = "m")
+    
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp)
-                .clip(RoundedCornerShape(7.dp)),
+                .height(24.dp)
+                .clip(RoundedCornerShape(6.dp)),
         ) {
             Box(
                 modifier = Modifier
-                    .weight(anim.coerceIn(0.02f, 0.98f))
+                    .weight(anim.coerceIn(0.01f, 0.99f))
                     .fillMaxHeight()
                     .background(P1Color),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (anim > 0.18f) Text(
+                if (anim > 0.15f) Text(
                     fmt(p1), color = Color.White, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(start = 6.dp),
@@ -101,24 +144,17 @@ private fun MarketBar(title: String, n1: String, p1: Double, n2: String, p2: Dou
             }
             Box(
                 modifier = Modifier
-                    .weight((1f - anim).coerceIn(0.02f, 0.98f))
+                    .weight((1f - anim).coerceIn(0.01f, 0.99f))
                     .fillMaxHeight()
                     .background(P2Color),
                 contentAlignment = Alignment.CenterEnd,
             ) {
-                if (anim < 0.82f) Text(
+                if (anim < 0.85f) Text(
                     fmt(p2), color = Color.White, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(end = 6.dp),
                 )
             }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(n1, style = MaterialTheme.typography.labelSmall, color = P1Color)
-            Text(n2, style = MaterialTheme.typography.labelSmall, color = P2Color)
         }
     }
 }
@@ -132,39 +168,43 @@ private fun ScoreRow(label: String, prob: Double) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(label, style = MaterialTheme.typography.bodySmall)
-            Text(fmt(prob), style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold)
+            Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+            Text(fmt(prob), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold, color = AccentColor)
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Color(0x22000000)),
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         ) {
             Box(Modifier.fillMaxWidth(anim).fillMaxHeight().background(AccentColor))
         }
     }
 }
 
-private fun fmt(v: Double): String = String.format("%.1f%%", v)
+private fun fmt(v: Double): String = String.format(Locale.US, "%.1f%%", v)
 
 @Preview(showBackground = true)
 @Composable
 private fun BetBuilderPreview() {
-    BetBuilderView(
-        "Jannik Sinner", "Carlos Alcaraz",
-        BetBuilder(
-            match = BetMarket(72.8, 27.2),
-            set2 = BetMarket(65.7, 34.3),
-            third_set_prob = 45.1,
-            correct_score = mapOf(
-                "Jannik Sinner 2-0" to 43.2,
-                "Jannik Sinner 2-1" to 29.6,
-                "Carlos Alcaraz 2-1" to 15.5,
-                "Carlos Alcaraz 2-0" to 11.8,
-            ),
-        ),
-    )
+    MaterialTheme {
+        Box(Modifier.padding(16.dp)) {
+            BetBuilderView(
+                "Sinner", "Alcaraz",
+                bb = BetBuilder(
+                    match = BetMarket(72.8, 27.2),
+                    set2 = BetMarket(65.7, 34.3),
+                    third_set_prob = 45.1,
+                    correct_score = mapOf(
+                        "Sinner 2-0" to 43.2,
+                        "Sinner 2-1" to 29.6,
+                    ),
+                ),
+                totalAcesAvg = 8.5,
+                totalPointsOver = 62.1
+            )
+        }
+    }
 }
