@@ -209,6 +209,17 @@ def get_player(name: str) -> Optional[sqlite3.Row]:
         return conn.execute("SELECT * FROM players WHERE name=?", (name,)).fetchone()
 
 
+def get_meta(key: str) -> Optional[str]:
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_meta(key: str, value: Any) -> None:
+    with connect() as conn:
+        _set_meta(conn, key, str(value))
+
+
 def player_record(name: str) -> Dict[str, int]:
     """Bilan victoires / défaites du joueur sur l'archive des matchs."""
     with connect() as conn:

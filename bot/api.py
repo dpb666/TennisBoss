@@ -22,8 +22,8 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
-from . import (config, db, features, live_api, memory, namematch, odds_api,
-               predictor, settlement)
+from . import (calibrate, config, db, features, live_api, memory, namematch,
+               odds_api, predictor, settlement)
 from . import __version__
 from .bootstrap import bootstrap
 
@@ -32,15 +32,26 @@ app = Flask(__name__)
 # Mémoire chargée une fois au démarrage (modèle + profils joueurs).
 _MEM: Dict[str, Any] = {}
 _INDEX: Dict[str, Any] = {}
+# Facteur de calibration appris (temperature scaling). 1.0 = inchangé.
+_CALIB_K: float = 1.0
 
 
 def _load_state() -> None:
-    global _MEM, _INDEX
+    global _MEM, _INDEX, _CALIB_K
     bootstrap()
     db.init()
     _MEM = memory.load()
     counts = {n: int(p.get("n", 0)) for n, p in _MEM["players"].items()}
     _INDEX = namematch.build_index(list(_MEM["players"]), counts)
+    try:
+        _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
+    except (TypeError, ValueError):
+        _CALIB_K = 1.0
+
+
+def _calib(p_match: float) -> float:
+    """Applique la calibration apprise à une proba de match (0..1)."""
+    return calibrate.calibrated_prob(p_match, _CALIB_K)
 
 
 # --- CORS + auth -----------------------------------------------------------
@@ -379,8 +390,8 @@ def api_value():
         f2 = features.feature_vector(features.get_profile(_MEM, n2))
         r = predictor.predict(_MEM, n1, f1, n2, f2)
 
-        pm1 = _set_to_match_prob(r["prob1"] / 100.0)   # proba match modèle (J1)
-        pm2 = 1.0 - pm1                                  # (J2)
+        pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))  # proba match calibrée (J1)
+        pm2 = 1.0 - pm1                                         # (J2)
         ho, ao = mw["home_odds"], mw["away_odds"]
         ev1 = pm1 * ho - 1.0
         ev2 = pm2 * ao - 1.0
@@ -413,27 +424,39 @@ def api_value():
     return jsonify({
         "count": len(out),
         "comparisons": out,
-        "note": "proba match dérivée du 1er set (best-of-3) ; EV = proba×cote − 1",
+        "calibration_k": round(_CALIB_K, 3),
+        "note": "proba match calibrée (best-of-3 + temperature) ; EV = proba×cote − 1",
     })
+
+
+def _refit_calibration() -> Dict[str, Any]:
+    """Réajuste le facteur de calibration k sur tous les matchs réglés."""
+    global _CALIB_K
+    fit = calibrate.fit_temperature(db.list_settled(limit=100000))
+    if fit.get("fitted"):
+        _CALIB_K = float(fit["k"])
+        db.set_meta("match_calib_k", _CALIB_K)
+    return fit
 
 
 @app.get("/api/settlement/run")
 def api_settlement_run():
-    """Enregistre les matchs terminés récents et met à jour la calibration."""
+    """Enregistre les matchs terminés récents, recalibre, et met à jour les métriques."""
     days = min(int(request.args.get("days", 2)), 7)
     summary = settlement.run_settlement(_MEM, _resolve, days_back=days)
+    fit = _refit_calibration()
     metrics = settlement.calibration_metrics()
     if metrics["n"] > 0:
         try:
             db.save_calibration(metrics)
         except Exception:  # noqa: BLE001
             pass
-    return jsonify({"settlement": summary, "calibration": metrics})
+    return jsonify({"settlement": summary, "calibration": metrics, "fit": fit})
 
 
 @app.get("/api/calibration")
 def api_calibration():
-    """Métriques de performance du modèle sur les matchs réglés."""
+    """Métriques de performance du modèle sur les matchs réglés + facteur appris."""
     metrics = settlement.calibration_metrics()
     recent = [{
         "date": _fmt_date(r["date"]), "tour": r["tour"],
@@ -441,7 +464,8 @@ def api_calibration():
         "winner": r["winner"], "score": r["final_score"],
         "pred_favorite": r["pred_favorite"], "correct": r["correct"],
     } for r in db.list_settled(limit=25)]
-    return jsonify({"metrics": metrics, "recent": recent})
+    return jsonify({"metrics": metrics, "calibration_k": round(_CALIB_K, 3),
+                    "recent": recent})
 
 
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
