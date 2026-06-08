@@ -64,8 +64,37 @@ CREATE TABLE IF NOT EXISTS backtests (
     baseline  REAL,
     notes     TEXT
 );
+CREATE TABLE IF NOT EXISTS settled_matches (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key   TEXT UNIQUE,
+    date        TEXT,
+    tour        TEXT,
+    tournament  TEXT,
+    player1     TEXT, player2 TEXT,
+    winner      TEXT,
+    final_score TEXT,
+    sets        TEXT,
+    pred_favorite TEXT,
+    pred_prob1  REAL,
+    correct     INTEGER,
+    settled_ts  TEXT
+);
+CREATE TABLE IF NOT EXISTS calibration_history (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       TEXT,
+    n        INTEGER,
+    accuracy REAL,
+    roi      REAL,
+    brier    REAL,
+    atp_acc  REAL,
+    wta_acc  REAL,
+    fav_acc  REAL,
+    dog_acc  REAL,
+    notes    TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
+CREATE INDEX IF NOT EXISTS idx_settled_date ON settled_matches(date);
 """
 
 
@@ -218,7 +247,70 @@ def counts() -> Dict[str, int]:
             "matches": conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0],
             "predictions": conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0],
             "backtests": conn.execute("SELECT COUNT(*) FROM backtests").fetchone()[0],
+            "settled": conn.execute("SELECT COUNT(*) FROM settled_matches").fetchone()[0],
         }
+
+
+# --- Settlement (résultats finaux) -----------------------------------------
+def settled_exists(event_key: str) -> bool:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM settled_matches WHERE event_key=?", (event_key,)).fetchone()
+    return row is not None
+
+
+def insert_settled(row: Dict[str, Any]) -> bool:
+    """Insère un match réglé (ignore si event_key déjà présent). True si ajouté."""
+    import datetime as _dt
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO settled_matches "
+            "(event_key,date,tour,tournament,player1,player2,winner,final_score,"
+            " sets,pred_favorite,pred_prob1,correct,settled_ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                row.get("event_key"), row.get("date", ""), row.get("tour", ""),
+                row.get("tournament", ""), row.get("player1", ""), row.get("player2", ""),
+                row.get("winner", ""), row.get("final_score", ""),
+                json.dumps(row.get("sets", [])),
+                row.get("pred_favorite"), row.get("pred_prob1"),
+                row.get("correct"),
+                _dt.datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        return cur.rowcount > 0
+
+
+def list_settled(limit: int = 50) -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM settled_matches ORDER BY date DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
+def save_calibration(metrics: Dict[str, Any]) -> int:
+    import datetime as _dt
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO calibration_history "
+            "(ts,n,accuracy,roi,brier,atp_acc,wta_acc,fav_acc,dog_acc,notes) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                _dt.datetime.now().isoformat(timespec="seconds"),
+                metrics.get("n", 0), metrics.get("accuracy"), metrics.get("roi"),
+                metrics.get("brier"), metrics.get("atp_acc"), metrics.get("wta_acc"),
+                metrics.get("fav_acc"), metrics.get("dog_acc"), metrics.get("notes", ""),
+            ),
+        )
+        return int(cur.lastrowid or 0)
+
+
+def list_calibration(limit: int = 20) -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM calibration_history ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
 
 
 # --- Historique des prédictions --------------------------------------------

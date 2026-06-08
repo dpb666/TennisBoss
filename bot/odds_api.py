@@ -13,6 +13,7 @@ Le marché "First Set Winner" nécessiterait un plan/bookmaker le proposant.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -23,6 +24,104 @@ from .log import log
 BASE = "https://api.odds-api.io/v3"
 # Bookmakers autorisés par le plan actuel (modifiable si vous montez de palier).
 DEFAULT_BOOKMAKERS = "MelBet,Betfair Exchange"
+
+# Durées de cache (s) — pensées pour rester sous 100 req/h (plan gratuit).
+TTL_EVENTS = 60
+TTL_ODDS = 60
+TTL_LEAGUES = 3600
+# Marge de sécurité : on suspend les appels en dessous de ce budget restant.
+RL_SAFETY = 5
+
+# Cache mémoire : clé -> (expire_at, payload). Persiste tant que le serveur tourne.
+_CACHE: Dict[str, tuple] = {}
+# Budget rate-limit connu d'après les en-têtes des dernières réponses.
+_RL: Dict[str, Any] = {"remaining": None, "reset": 0.0}
+
+
+def _cache_key(path: str, params: Dict[str, Any]) -> str:
+    items = sorted((k, str(v)) for k, v in params.items() if k != "apiKey")
+    return path + "?" + "&".join(f"{k}={v}" for k, v in items)
+
+
+def _update_rl(resp: requests.Response) -> None:
+    """Lit x-ratelimit-remaining / x-ratelimit-reset dans la réponse."""
+    rem = resp.headers.get("x-ratelimit-remaining")
+    if rem is not None:
+        try:
+            _RL["remaining"] = int(rem)
+        except ValueError:
+            pass
+    rst = resp.headers.get("x-ratelimit-reset")
+    if rst is not None:
+        try:
+            v = float(rst)
+            # reset peut être un epoch absolu OU un nombre de secondes restantes.
+            _RL["reset"] = v if v > 1e6 else time.time() + v
+        except ValueError:
+            pass
+
+
+def _budget_ok() -> bool:
+    """False si le budget est trop bas et que le reset n'est pas encore passé."""
+    if _RL["remaining"] is None or _RL["remaining"] >= RL_SAFETY:
+        return True
+    if _RL["reset"] and time.time() >= _RL["reset"]:
+        _RL["remaining"] = None   # fenêtre repassée : on retente
+        return True
+    return False
+
+
+def rate_limit_status() -> Dict[str, Any]:
+    """État du budget rate-limit (pour /api/status / diagnostic)."""
+    reset_in = int(_RL["reset"] - time.time()) if _RL["reset"] else None
+    return {"remaining": _RL["remaining"],
+            "reset_in_s": max(0, reset_in) if reset_in is not None else None}
+
+
+def clear_cache() -> None:
+    """Vide le cache (utile en tests)."""
+    _CACHE.clear()
+    _RL.update(remaining=None, reset=0.0)
+
+
+def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
+    """GET caché + conscient du rate-limit. Renvoie le JSON, le cache (même périmé)
+    si on est suspendu, ou None. Ne bloque jamais longtemps (sert un serveur web)."""
+    key = _cache_key(path, params)
+    now = time.time()
+    hit = _CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]                       # cache frais
+
+    if not _budget_ok():
+        log(f"odds-api: budget bas (reste {_RL['remaining']}, reset "
+            f"{rate_limit_status()['reset_in_s']}s) — on sert le cache.", "WARN")
+        return hit[1] if hit else None      # stale plutôt que rien
+
+    try:
+        r = requests.get(f"{BASE}{path}", params=params, timeout=20)
+    except requests.RequestException as exc:
+        log(f"odds-api {path} réseau KO ({exc}).", "WARN")
+        return hit[1] if hit else None
+
+    _update_rl(r)
+
+    if r.status_code == 429:
+        if not _RL["reset"] or _RL["reset"] < now:
+            _RL["reset"] = now + 60
+        _RL["remaining"] = 0
+        log(f"odds-api 429 — appels suspendus ~"
+            f"{rate_limit_status()['reset_in_s']}s.", "WARN")
+        return hit[1] if hit else None
+    if r.status_code != 200:
+        return hit[1] if hit else None
+    try:
+        payload = r.json()
+    except ValueError:
+        return hit[1] if hit else None
+
+    _CACHE[key] = (now + ttl, payload)
+    return payload
 
 
 def _key() -> Optional[str]:
@@ -36,18 +135,11 @@ def is_enabled() -> bool:
 
 
 def fetch_tennis_events(upcoming_only: bool = True) -> List[Dict[str, Any]]:
-    """Liste des événements tennis (id, home, away, date, league, status)."""
+    """Liste des événements tennis (id, home, away, date, league, status). Caché 60 s."""
     key = _key()
     if not key:
         return []
-    try:
-        r = requests.get(f"{BASE}/events", params={"sport": "tennis", "apiKey": key},
-                         timeout=20)
-        r.raise_for_status()
-        events = r.json()
-    except (requests.RequestException, ValueError) as exc:
-        log(f"odds-api.io /events indisponible ({exc}).", "WARN")
-        return []
+    events = _get("/events", {"sport": "tennis", "apiKey": key}, ttl=TTL_EVENTS)
     if not isinstance(events, list):
         return []
     if upcoming_only:
@@ -90,13 +182,9 @@ def fetch_match_winner(event_id: Any,
     key = _key()
     if not key:
         return None
-    try:
-        r = requests.get(f"{BASE}/odds", params={
-            "eventId": event_id, "bookmakers": bookmakers, "apiKey": key}, timeout=20)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-    except (requests.RequestException, ValueError):
+    data = _get("/odds", {"eventId": event_id, "bookmakers": bookmakers, "apiKey": key},
+                ttl=TTL_ODDS)
+    if not isinstance(data, dict):
         return None
 
     books = data.get("bookmakers") or {}

@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional
 from flask import Flask, jsonify, request
 
 from . import (config, db, features, live_api, memory, namematch, odds_api,
-               predictor)
+               predictor, settlement)
 from . import __version__
 from .bootstrap import bootstrap
 
@@ -157,6 +157,7 @@ def api_status():
         "bias": _MEM["bias"],
         "datasets_loaded": _MEM["datasets_loaded"],
         "db": db.counts(),
+        "odds_rate_limit": odds_api.rate_limit_status(),
     })
 
 
@@ -255,12 +256,8 @@ def api_player():
 
 
 def _set_to_match_prob(p_set: float) -> float:
-    """Proba de gagner UN set -> proba de gagner le MATCH (best-of-3).
-
-    Sets supposés indépendants de proba p :  P(match) = p²·(3 - 2p).
-    """
-    p = max(0.0, min(1.0, p_set))
-    return p * p * (3 - 2 * p)
+    """Proba set -> proba match (centralisée dans predictor)."""
+    return predictor.set_to_match_prob(p_set)
 
 
 def _bet_builder(p1_set: float, n1: str, n2: str) -> Dict[str, Any]:
@@ -418,6 +415,33 @@ def api_value():
         "comparisons": out,
         "note": "proba match dérivée du 1er set (best-of-3) ; EV = proba×cote − 1",
     })
+
+
+@app.get("/api/settlement/run")
+def api_settlement_run():
+    """Enregistre les matchs terminés récents et met à jour la calibration."""
+    days = min(int(request.args.get("days", 2)), 7)
+    summary = settlement.run_settlement(_MEM, _resolve, days_back=days)
+    metrics = settlement.calibration_metrics()
+    if metrics["n"] > 0:
+        try:
+            db.save_calibration(metrics)
+        except Exception:  # noqa: BLE001
+            pass
+    return jsonify({"settlement": summary, "calibration": metrics})
+
+
+@app.get("/api/calibration")
+def api_calibration():
+    """Métriques de performance du modèle sur les matchs réglés."""
+    metrics = settlement.calibration_metrics()
+    recent = [{
+        "date": _fmt_date(r["date"]), "tour": r["tour"],
+        "player1": r["player1"], "player2": r["player2"],
+        "winner": r["winner"], "score": r["final_score"],
+        "pred_favorite": r["pred_favorite"], "correct": r["correct"],
+    } for r in db.list_settled(limit=25)]
+    return jsonify({"metrics": metrics, "recent": recent})
 
 
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:

@@ -16,6 +16,15 @@ from typing import Any, Dict, Tuple
 from . import config
 
 
+def set_to_match_prob(p_set: float) -> float:
+    """Proba de gagner UN set -> proba de gagner le MATCH (best-of-3).
+
+    Sets supposés indépendants de proba p :  P(match) = p²·(3 - 2p).
+    """
+    p = max(0.0, min(1.0, p_set))
+    return p * p * (3 - 2 * p)
+
+
 def _sigmoid(z: float) -> float:
     if z < -60:
         return 0.0

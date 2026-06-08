@@ -80,6 +80,71 @@ def fetch_upcoming(cfg: Dict[str, Any], days_ahead: int = 2) -> List[Dict]:
     return [_parse_fixture(m) for m in (payload.get("result") or [])]
 
 
+def fetch_results(cfg: Dict[str, Any], days_back: int = 2) -> List[Dict[str, Any]]:
+    """Récupère les matchs TERMINÉS récents (pour le settlement).
+
+    Renvoie une liste de dicts normalisés avec vainqueur + score + sets.
+    """
+    load_env()
+    key = _key("AT_API_KEY", cfg)
+    if not key:
+        return []
+    stop = _dt.date.today().isoformat()
+    start = (_dt.date.today() - _dt.timedelta(days=days_back)).isoformat()
+    try:
+        resp = requests.get(
+            API_TENNIS_URL,
+            params={"method": "get_fixtures", "APIkey": key,
+                    "date_start": start, "date_stop": stop},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        log(f"API-Tennis résultats indisponibles ({exc}).", "WARN")
+        return []
+    if not payload.get("success"):
+        return []
+    out = [_parse_result(m) for m in (payload.get("result") or [])]
+    return [r for r in out if r["finished"] and not r["is_doubles"]]
+
+
+def _parse_result(m: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise un match potentiellement terminé (winner + score + sets)."""
+    etype = (m.get("event_type_type") or "").lower()
+    tour = "atp" if "atp" in etype else ("wta" if "wta" in etype else "")
+    status = str(m.get("event_status") or "")
+    winner_raw = (m.get("event_winner") or "").strip()  # "First Player"/"Second Player"
+    winner = None
+    if winner_raw == "First Player":
+        winner = "p1"
+    elif winner_raw == "Second Player":
+        winner = "p2"
+    sets = []
+    for s in (m.get("scores") or []):
+        sets.append({
+            "set": s.get("score_set"),
+            "first": s.get("score_first"),
+            "second": s.get("score_second"),
+        })
+    finished = (status.lower() == "finished") or (winner is not None and bool(sets))
+    return {
+        "event_key": m.get("event_key"),
+        "player1": (m.get("event_first_player") or "").strip(),
+        "player2": (m.get("event_second_player") or "").strip(),
+        "winner": winner,
+        "final_score": (m.get("event_final_result") or "").strip(),
+        "sets": sets,
+        "status": status,
+        "tournament": m.get("tournament_name", ""),
+        "round": m.get("tournament_round", ""),
+        "date": m.get("event_date", ""),
+        "tour": tour,
+        "is_doubles": "doubles" in etype,
+        "finished": finished,
+    }
+
+
 def _parse_fixture(m: Dict[str, Any]) -> Dict[str, Any]:
     etype = (m.get("event_type_type") or "").lower()  # ex: "Atp Singles"
     tour = "atp" if "atp" in etype else ("wta" if "wta" in etype else "")
