@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS matches (
     winner    TEXT,
     loser     TEXT,
     w_serve   REAL, w_return1 REAL, w_return2 REAL,
-    l_serve   REAL, l_return1 REAL, l_return2 REAL
+    l_serve   REAL, l_return1 REAL, l_return2 REAL,
+    surface   TEXT
 );
 CREATE TABLE IF NOT EXISTS predictions (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +123,12 @@ def init() -> None:
     """Crée la base et le schéma si nécessaire (idempotent)."""
     with connect() as conn:
         conn.executescript(_SCHEMA)
+        # Migrations idempotentes (bases déjà créées sans ces colonnes).
+        for col, ddl in (("surface", "ALTER TABLE matches ADD COLUMN surface TEXT"),):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # colonne déjà présente
     log(f"Base SQLite prête : {config.DB_FILE}")
 
 
@@ -134,6 +141,7 @@ def archive_matches(matches: List[Dict]) -> int:
             m["winner_name"], m["loser_name"],
             m["winner"]["serve"], m["winner"]["return1"], m["winner"]["return2"],
             m["loser"]["serve"], m["loser"]["return1"], m["loser"]["return2"],
+            m.get("surface", ""),
         )
         for m in matches
     ]
@@ -142,7 +150,7 @@ def archive_matches(matches: List[Dict]) -> int:
         conn.executemany(
             "INSERT OR IGNORE INTO matches "
             "(id,date,tour,winner,loser,w_serve,w_return1,w_return2,"
-            " l_serve,l_return1,l_return2) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " l_serve,l_return1,l_return2,surface) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         after = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
@@ -250,10 +258,11 @@ def player_recent_matches(name: str, limit: int = 10) -> List[sqlite3.Row]:
 
 
 def all_matches_chrono() -> List[sqlite3.Row]:
-    """Tous les matchs par ordre chronologique (pour construire l'ELO)."""
+    """Tous les matchs par ordre chronologique avec surface (pour l'ELO)."""
     with connect() as conn:
         return conn.execute(
-            "SELECT winner, loser FROM matches ORDER BY date ASC, id ASC").fetchall()
+            "SELECT winner, loser, surface FROM matches "
+            "ORDER BY date ASC, id ASC").fetchall()
 
 
 def head_to_head(name1: str, name2: str) -> List[sqlite3.Row]:

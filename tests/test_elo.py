@@ -77,6 +77,16 @@ class TestEloDansPredicteur(unittest.TestCase):
         self.assertGreater(predictor.elo_logit(mem, "A", "B"), 0)
         self.assertAlmostEqual(predictor.elo_logit(mem, "A", "A"), 0.0)
 
+    def test_surface_elo(self):
+        mem = self._mem({"A": 1500, "B": 1500})   # global égal
+        mem["elo_surface"] = {"clay": {"A": 1700, "B": 1400}}  # A fort sur terre
+        # Sans surface : global égal -> 0.
+        self.assertAlmostEqual(predictor.elo_logit(mem, "A", "B"), 0.0)
+        # Sur terre : A devient favori.
+        self.assertGreater(predictor.elo_logit(mem, "A", "B", surface="clay"), 0.0)
+        # Surface non couverte -> retombe sur le global (0).
+        self.assertAlmostEqual(predictor.elo_logit(mem, "A", "B", surface="grass"), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

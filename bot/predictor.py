@@ -56,18 +56,28 @@ ELO_BLEND = 0.8
 ELO_BASE = 1500.0
 
 
-def elo_logit(mem: Dict[str, Any], name1: str, name2: str) -> float:
+def _raw_logit(ratings: Dict[str, float], n1: str, n2: str) -> float:
+    return (ratings.get(n1, ELO_BASE) - ratings.get(n2, ELO_BASE)) / 400.0 * math.log(10)
+
+
+def elo_logit(mem: Dict[str, Any], name1: str, name2: str,
+              surface: str = None) -> float:
     """Contribution ELO (déjà pondérée) au logit de la prédiction.
 
-    Le poids de mélange est `mem['elo_blend']` s'il existe (auto-réglé), sinon
-    ELO_BLEND par défaut."""
+    Si la surface est connue et qu'un ELO de surface existe, on mélange 50/50
+    l'ELO global et l'ELO de surface (robuste quand peu de matchs sur la surface).
+    Poids de mélange = `mem['elo_blend']` (auto-réglé) sinon ELO_BLEND."""
     elo = mem.get("elo") or {}
     if not elo:
         return 0.0
     blend = float(mem.get("elo_blend", ELO_BLEND))
-    ra = elo.get(name1, ELO_BASE)
-    rb = elo.get(name2, ELO_BASE)
-    return blend * ((ra - rb) / 400.0 * math.log(10))
+    base = _raw_logit(elo, name1, name2)
+    surf_map = mem.get("elo_surface") or {}
+    if surface and surface in surf_map:
+        combined = 0.5 * base + 0.5 * _raw_logit(surf_map[surface], name1, name2)
+    else:
+        combined = base
+    return blend * combined
 
 
 def predict(
@@ -76,11 +86,14 @@ def predict(
     feat1: Dict[str, float],
     name2: str,
     feat2: Dict[str, float],
+    surface: str = None,
 ) -> Dict[str, Any]:
-    """Construit un résultat de prédiction lisible pour le 1er set (features + ELO)."""
+    """Construit un résultat de prédiction lisible pour le 1er set (features + ELO).
+
+    `surface` ('hard'/'clay'/'grass') active l'ELO de surface si connu."""
     s1 = weighted_score(mem["weights"], feat1)
     s2 = weighted_score(mem["weights"], feat2)
-    z = (s1 - s2) + float(mem["bias"]) + elo_logit(mem, name1, name2)
+    z = (s1 - s2) + float(mem["bias"]) + elo_logit(mem, name1, name2, surface)
     p1 = _sigmoid(z)
     p2 = 1.0 - p1
     if abs(p1 - p2) < 0.04:

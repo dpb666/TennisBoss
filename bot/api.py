@@ -17,13 +17,14 @@ CORS ouvert (Access-Control-Allow-Origin: *) pour permettre l'appel depuis l'app
 """
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
-from . import (calibrate, config, db, elo, features, live_api, memory,
-               namematch, odds_api, predictor, settlement)
+from . import (calibrate, config, datasource, db, elo, features, live_api,
+               memory, namematch, odds_api, predictor, settlement)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -44,9 +45,23 @@ def _load_state() -> None:
     _MEM = memory.load()
     counts = {n: int(p.get("n", 0)) for n, p in _MEM["players"].items()}
     _INDEX = namematch.build_index(list(_MEM["players"]), counts)
-    # Notes ELO : archive chronologique + rejeu des matchs réglés (joueurs connus)
-    # = apprentissage continu qui survit aux redémarrages.
-    _MEM["elo"] = elo.build_from_matches(db.all_matches_chrono())
+    # Rétro-remplissage surface au premier démarrage (one-time, réseau).
+    if not db.get_meta("tourney_surface"):
+        try:
+            tmap = datasource.surface_backfill()
+            db.set_meta("tourney_surface", json.dumps(tmap))
+        except Exception as exc:  # noqa: BLE001
+            log(f"Backfill surface ignoré ({exc}).", "WARN")
+
+    # ELO global + ELO par surface, depuis l'archive chronologique.
+    _MEM["elo"] = {}
+    _MEM["elo_surface"] = {"hard": {}, "clay": {}, "grass": {}}
+    for r in db.all_matches_chrono():
+        elo.update(_MEM["elo"], r["winner"], r["loser"])
+        surf = r["surface"]
+        if surf in _MEM["elo_surface"]:
+            elo.update(_MEM["elo_surface"][surf], r["winner"], r["loser"])
+    # Rejeu des matchs réglés sur l'ELO global (apprentissage continu, survit aux reboots).
     known = _MEM["players"]
     replayed = 0
     for s in db.settled_chrono():
@@ -56,6 +71,11 @@ def _load_state() -> None:
             replayed += 1
     if replayed:
         log(f"ELO : {replayed} matchs réglés rejoués (apprentissage continu).")
+    # Carte tournoi -> surface (pour étiqueter les matchs live).
+    try:
+        _MEM["tourney_surface"] = json.loads(db.get_meta("tourney_surface") or "{}")
+    except (TypeError, ValueError):
+        _MEM["tourney_surface"] = {}
     try:
         _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
     except (TypeError, ValueError):
@@ -96,6 +116,13 @@ def _resolve(name: str) -> Optional[str]:
     if name in _MEM["players"]:
         return name
     return namematch.resolve(name, _INDEX)
+
+
+def _surface_for(tournament: str) -> Optional[str]:
+    """Surface ('hard'/'clay'/'grass') d'un tournoi via la carte apprise."""
+    if not tournament:
+        return None
+    return (_MEM.get("tourney_surface") or {}).get(tournament.strip().lower())
 
 
 def _player_payload(name: str) -> Dict[str, Any]:
@@ -384,7 +411,8 @@ def api_upcoming():
         if n1 and n2:
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
-            r = predictor.predict(_MEM, n1, f1, n2, f2)
+            r = predictor.predict(_MEM, n1, f1, n2, f2,
+                                  surface=_surface_for(f["tournament"]))
             bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
             # Cote juste du 1er set sur le favori = 1 / proba. Cible si >= 1.60.
             fs_prob = max(r["prob1"], r["prob2"]) / 100.0

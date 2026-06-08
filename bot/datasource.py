@@ -88,6 +88,8 @@ def _match_features(row: Dict[str, str]) -> Optional[Dict]:
         "loser_name": (row.get("loser_name") or "").strip(),
         "winner": winner,
         "loser": loser,
+        "surface": (row.get("surface") or "").strip().lower(),   # hard/clay/grass
+        "tourney_name": (row.get("tourney_name") or "").strip(),
     }
 
 
@@ -117,6 +119,41 @@ def fetch_matches(years: List[int], tours: List[str] = ("atp",)) -> List[Dict]:
             all_matches.extend(fetch_year(year, tour))
     all_matches.sort(key=lambda m: (m["date"], m["id"]))
     return all_matches
+
+
+def surface_backfill(years: Optional[List[int]] = None,
+                     tours: Optional[List[str]] = None) -> Dict[str, str]:
+    """Rétro-remplit matches.surface depuis les CSV Sackmann et renvoie la carte
+    {nom_tournoi (minuscule) -> surface} pour étiqueter les matchs live."""
+    from . import db
+
+    cfg = config.DEFAULT_CONFIG
+    years = years or cfg.get("years", [2022, 2023, 2024])
+    tours = tours or cfg.get("tours", ["atp", "wta"])
+
+    id_surface: Dict[str, str] = {}
+    tourney_surface: Dict[str, str] = {}
+    for tour in tours:
+        for year in years:
+            text = _http_get(config.SACKMANN_URL.format(tour=tour, year=year))
+            if not text:
+                continue
+            for row in csv.DictReader(io.StringIO(text)):
+                surf = (row.get("surface") or "").strip().lower()
+                if not surf:
+                    continue
+                mid = f"{tour}-{row.get('tourney_id', '?')}-{row.get('match_num', '?')}"
+                id_surface[mid] = surf
+                tn = (row.get("tourney_name") or "").strip().lower()
+                if tn:
+                    tourney_surface.setdefault(tn, surf)
+
+    with db.connect() as conn:
+        conn.executemany("UPDATE matches SET surface=? WHERE id=?",
+                         [(s, i) for i, s in id_surface.items()])
+    log(f"Surface rétro-remplie : {len(id_surface)} matchs, "
+        f"{len(tourney_surface)} tournois cartographiés.")
+    return tourney_surface
 
 
 def probe_live() -> bool:
