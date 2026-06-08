@@ -19,7 +19,7 @@ DEFAULT_CONFIG = {
     # Apprentissage : relancer un cycle de self-learning toutes les N secondes.
     "learn_interval": 300,
     # Années de données ATP à charger depuis internet (Jeff Sackmann).
-    "years": [2022, 2023, 2024],
+    "years": [2022, 2023, 2024, 2025, 2026],
     # Self-healing : backoff exponentiel après erreur (secondes).
     "backoff_start": 5,
     "backoff_max": 300,
