@@ -595,7 +595,6 @@ def api_calibration():
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     """Chat IA avec LM Studio (LLM local). Body JSON: {message, history=[]}."""
-    _check_token()
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     history = data.get("history") or []
