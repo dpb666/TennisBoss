@@ -44,12 +44,25 @@ def _player_snapshot(mem: Dict[str, Any], name: str) -> Optional[str]:
 
 
 def _detect_players(message: str, players_lower: Dict[str, str]) -> List[str]:
-    """Détecte les noms de joueurs mentionnés dans le message."""
+    """Détecte les noms de joueurs mentionnés (nom complet ou nom de famille seul)."""
     found = []
     msg_lower = message.lower()
+    # Index lastname → original pour le matching partiel
+    lastname_map: Dict[str, str] = {}
     for key, original in players_lower.items():
-        if key in msg_lower and original not in found:
+        parts = key.split()
+        if parts:
+            lastname_map.setdefault(parts[-1], original)
+
+    for key, original in players_lower.items():
+        if original in found:
+            continue
+        if key in msg_lower:          # nom complet
             found.append(original)
+        else:                          # nom de famille seul (ex: "sinner" → "Jannik Sinner")
+            parts = key.split()
+            if parts and parts[-1] in msg_lower and original not in found:
+                found.append(original)
         if len(found) >= 4:
             break
     return found
