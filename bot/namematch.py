@@ -23,8 +23,20 @@ def _norm(s: str) -> str:
 
 
 def split_name(name: str) -> Tuple[str, str]:
-    """Renvoie (initiale_prenom, nom_de_famille) normalisés."""
-    parts = _norm(name).split()
+    """Renvoie (initiale_prenom, nom_de_famille) normalisés.
+
+    Gère les deux formats rencontrés :
+      "Alexander Zverev" / "A. Zverev"   -> prénom d'abord
+      "Zverev, Alexander"                -> nom de famille d'abord (virgule)
+    """
+    raw = name or ""
+    if "," in raw:
+        last_part, _, first_part = raw.partition(",")
+        last = _norm(last_part).split()
+        first = _norm(first_part).split()
+        return (first[0][:1] if first else ""), (last[-1] if last else "")
+
+    parts = _norm(raw).split()
     if not parts:
         return "", ""
     if len(parts) == 1:

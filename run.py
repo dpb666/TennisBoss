@@ -19,7 +19,7 @@ import os
 import sys
 
 from bot import (backtest as bt, config, datasource, db, features, learner,
-                 live_api, memory, namematch, predictor)
+                 live_api, memory, namematch, odds_api, predictor)
 from bot.bootstrap import bootstrap
 from bot.log import log
 
@@ -187,6 +187,58 @@ def cmd_upcoming(args) -> None:
     print()
 
 
+def cmd_value(args) -> None:
+    bootstrap()
+    db.init()
+    mem = memory.load()
+    if not mem["players"]:
+        log("Aucun joueur appris. Lancez d'abord : python3 run.py train", "WARN")
+        return
+    if not odds_api.is_enabled():
+        log("ODDS_API_KEY absente du .env — impossible de récupérer les cotes.", "WARN")
+        return
+
+    counts = {n: int(p.get("n", 0)) for n, p in mem["players"].items()}
+    index = namematch.build_index(list(mem["players"]), counts)
+
+    events = odds_api.fetch_tennis_events(upcoming_only=True)
+    if not events:
+        log("Aucun événement tennis à venir renvoyé par odds-api.io.", "WARN")
+        return
+
+    print(f"\n=== MODÈLE (1er set) vs MARCHÉ (vainqueur match) — odds-api.io ===")
+    print("  Note : marchés différents (1er set ≠ match), comparaison indicative.\n")
+    shown = 0
+    for e in events:
+        n1 = namematch.resolve(e.get("home", ""), index)
+        n2 = namematch.resolve(e.get("away", ""), index)
+        if not n1 or not n2:
+            continue  # on ne montre que les matchs prédictibles
+        mw = odds_api.fetch_match_winner(e["id"])
+        if not mw:
+            continue  # pas de cotes -> on passe (cible: matchs cotés)
+
+        fe1 = features.feature_vector(features.get_profile(mem, n1))
+        fe2 = features.feature_vector(features.get_profile(mem, n2))
+        r = predictor.predict(mem, n1, fe1, n2, fe2)
+        model_h = r["prob1"]                       # notre proba 1er set (home)
+        mkt_h = mw["home_prob"] * 100              # proba marché match (home)
+        edge = model_h - mkt_h
+        flag = "  ⟵ écart notable" if abs(edge) >= 10 else ""
+
+        print(f"  • {n1}  vs  {n2}   [{(e.get('league') or {}).get('name','')[:40]}]")
+        print(f"      modèle 1er set : {model_h:5.1f}% / {r['prob2']:5.1f}%")
+        print(f"      marché match   : {mkt_h:5.1f}% / {mw['away_prob']*100:5.1f}%  "
+              f"(cotes {mw['home_odds']}/{mw['away_odds']}, {', '.join(mw['books'])})")
+        print(f"      écart (1er set − match, côté {n1}) : {edge:+.1f} pts{flag}")
+        shown += 1
+        if shown >= args.limit:
+            break
+    if not shown:
+        log("Aucun match à la fois prédictible ET coté dans l'échantillon.", "INFO")
+    print()
+
+
 def cmd_db(_args) -> None:
     bootstrap()
     db.init()
@@ -284,6 +336,10 @@ def main() -> None:
     p_up.add_argument("--days", type=int, default=2, help="Horizon en jours")
     p_up.add_argument("--limit", type=int, default=25, help="Max de matchs affichés")
     p_up.set_defaults(func=cmd_upcoming)
+
+    p_val = sub.add_parser("value", help="Compare modèle (1er set) vs cotes marché")
+    p_val.add_argument("--limit", type=int, default=10, help="Max de matchs cotés")
+    p_val.set_defaults(func=cmd_value)
 
     sub.add_parser("db", help="Contenu de la base + backtests").set_defaults(func=cmd_db)
     sub.add_parser("status", help="État du bot").set_defaults(func=cmd_status)

@@ -66,17 +66,34 @@ python3 run.py upcoming --days 2          # fixtures réelles + prédiction 1er 
 Les noms abrégés de l'API ("A. Zverev") sont automatiquement reliés aux profils
 appris ("Alexander Zverev") par `bot/namematch.py`.
 
+### Cotes & comparaison au marché (odds-api.io)
+
+```bash
+python3 run.py value --limit 10     # modèle 1er set vs cotes marché (no-vig)
+```
+
+Source : **odds-api.io** (`bot/odds_api.py`, base `https://api.odds-api.io/v3`,
+auth `apiKey`). Le plan actuel autorise **2 bookmakers** (MelBet, Betfair
+Exchange) qui exposent le marché **ML = vainqueur du match**. Les probabilités
+implicites sont calculées **sans la marge** (no-vig).
+
+> ⚠️ **Marchés différents** : notre modèle prédit le **1er set**, le marché donne
+> le **match**. Gagner un set est plus aléatoire → le favori y est mécaniquement
+> moins marqué. La commande `value` est une **comparaison indicative**, pas un
+> signal de pari. Le marché "First Set Winner" exigerait un bookmaker/plan le
+> proposant.
+
 ### Clés API — fichier `.env` (jamais commité)
 Les clés vivent dans `TennisBoss/.env` (exclu de git) :
 ```
-AT_API_KEY=...      # API-Tennis  (ACTIF : fixtures + live)
-SR_KEY=...          # Sportradar  (secondaire)
-ODDS_API_KEY=...    # The Odds API (cotes, lecture seule)
+AT_API_KEY=...      # API-Tennis   (ACTIF : fixtures + live)
+ODDS_API_KEY=...    # odds-api.io  (ACTIF : cotes vainqueur de match, no-vig)
+SR_KEY=...          # Sportradar   (INACTIF : HTTP 429 quota/produit -> dashboard)
 ```
 ⚠️ Ne jamais committer `.env`. Régénérer toute clé ayant transité en clair.
 
-> **Paris** : TennisBoss prédit et peut lire des cotes, mais **ne place aucun
-> pari automatiquement** (aucune intégration d'exécution d'ordres financiers).
+> **Paris** : TennisBoss prédit et lit des cotes, mais **ne place aucun pari
+> automatiquement** (aucune exécution d'ordres financiers ; clé Stake non utilisée).
 
 ## Sources de données : ouvertes et légales (aucun contournement)
 
