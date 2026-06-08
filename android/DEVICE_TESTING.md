@@ -57,23 +57,28 @@ http://localhost:8000/
 > de Windows vers le serveur Flask dans WSL.
 > ⚠️ `adb reverse` est à refaire après chaque rebranchement / redémarrage d'adb.
 
-### Option B — même Wi-Fi (sans USB)  ⚙️ avancé
-Le serveur étant dans WSL2, il faut rediriger depuis Windows. Dans un
-**PowerShell Administrateur** :
+### Option B — même Wi-Fi, SANS USB  ✅ (pour ne plus dépendre du câble)
+Le serveur étant dans WSL2, il faut rediriger le port depuis Windows. Un script
+est fourni — lancez‑le dans un **PowerShell Administrateur** :
 ```powershell
-$wsl = (wsl hostname -I).Trim().Split(" ")[0]      # IP de WSL
-netsh interface portproxy add v4tov4 listenport=8000 listenaddress=0.0.0.0 connectport=8000 connectaddress=$wsl
-netsh advfirewall firewall add rule name="TennisBoss 8000" dir=in action=allow protocol=TCP localport=8000
-ipconfig                                            # notez l'IPv4 Wi-Fi du PC, ex. 192.168.1.20
+cd C:\Users\donpa\TennisBoss\android\scripts
+powershell -ExecutionPolicy Bypass -File .\wifi-forward.ps1
 ```
-Téléphone et PC sur le **même Wi-Fi**, puis dans l'app **URL du serveur** :
+Le script recalcule l'IP de WSL, pose la redirection + la règle pare‑feu, et
+affiche l'**URL à mettre dans l'app** (ex. `http://192.168.0.94:8000/`).
+Téléphone et PC sur le **même Wi‑Fi**. Pour annuler : `wifi-forward-remove.ps1`.
+
+> ⚠️ À relancer après un redémarrage du PC ou de WSL (l'IP de WSL change).
+
+### Option C — Wi-Fi permanent (le plus propre, Windows 11 22H2+)
+Activez le **réseau miroir** de WSL : éditez `%USERPROFILE%\.wslconfig` :
+```ini
+[wsl2]
+networkingMode=mirrored
 ```
-http://192.168.1.20:8000/        # l'IPv4 Wi-Fi de votre PC
-```
-Pour retirer la redirection plus tard :
-```powershell
-netsh interface portproxy delete v4tov4 listenport=8000 listenaddress=0.0.0.0
-```
+puis `wsl --shutdown` et rouvrez WSL. Le serveur WSL est alors **directement
+joignable sur l'IP LAN du PC** (`http://192.168.0.94:8000/`), sans portproxy, et
+ça survit aux redémarrages.
 
 ---
 
