@@ -54,17 +54,20 @@ CREATE TABLE IF NOT EXISTS predictions (
     prob1    REAL, favorite TEXT, source TEXT
 );
 CREATE TABLE IF NOT EXISTS backtests (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts        TEXT,
-    span      TEXT,
-    tours     TEXT,
-    n_train   INTEGER,
-    n_test    INTEGER,
-    accuracy  REAL,
-    logloss   REAL,
-    brier     REAL,
-    baseline  REAL,
-    notes     TEXT
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT,
+    span         TEXT,
+    tours        TEXT,
+    n_train      INTEGER,
+    n_test       INTEGER,
+    accuracy     REAL,
+    logloss      REAL,
+    brier        REAL,
+    baseline     REAL,
+    accuracy_elo REAL,
+    logloss_elo  REAL,
+    brier_elo    REAL,
+    notes        TEXT
 );
 CREATE TABLE IF NOT EXISTS settled_matches (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,6 +131,9 @@ def init() -> None:
         for col, ddl in (
             ("surface", "ALTER TABLE matches ADD COLUMN surface TEXT"),
             ("margin", "ALTER TABLE matches ADD COLUMN margin INTEGER"),
+            ("accuracy_elo", "ALTER TABLE backtests ADD COLUMN accuracy_elo REAL"),
+            ("logloss_elo",  "ALTER TABLE backtests ADD COLUMN logloss_elo REAL"),
+            ("brier_elo",    "ALTER TABLE backtests ADD COLUMN brier_elo REAL"),
         ):
             try:
                 conn.execute(ddl)
@@ -402,14 +408,17 @@ def save_backtest(report: Dict[str, Any]) -> int:
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO backtests"
-            "(ts,span,tours,n_train,n_test,accuracy,logloss,brier,baseline,notes) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "(ts,span,tours,n_train,n_test,accuracy,logloss,brier,baseline,"
+            " accuracy_elo,logloss_elo,brier_elo,notes) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 _dt.datetime.now().isoformat(timespec="seconds"),
                 report.get("span"), report.get("tours"),
                 report.get("n_train"), report.get("n_test"),
                 report.get("accuracy"), report.get("logloss"),
                 report.get("brier"), report.get("baseline"),
+                report.get("accuracy_elo"), report.get("logloss_elo"),
+                report.get("brier_elo"),
                 report.get("notes", ""),
             ),
         )

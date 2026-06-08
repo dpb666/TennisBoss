@@ -133,11 +133,14 @@ def cmd_backtest(args) -> None:
         sys.exit(1)
     report = bt.run(matches, cfg, persist=True)
     print("\n=== RAPPORT DE BACKTEST (hors-échantillon) ===")
-    for k in ("id", "span", "tours", "n_train", "n_test", "accuracy",
-              "baseline", "logloss", "brier"):
-        print(f"  {k:<10}: {report.get(k)}")
-    print(f"  -> le modèle bat la base 'serve' de "
-          f"{(report['accuracy']-report['baseline'])*100:+.2f} pts\n")
+    for k in ("id", "span", "tours", "n_train", "n_test"):
+        print(f"  {k:<14}: {report.get(k)}")
+    print(f"  {'baseline':<14}: {report['baseline']} (serve seul)")
+    print(f"  {'accuracy':<14}: {report['accuracy']}  (+{(report['accuracy']-report['baseline'])*100:+.2f} pts vs baseline)")
+    if report.get("accuracy_elo"):
+        print(f"  {'accuracy+ELO':<14}: {report['accuracy_elo']}  (+{(report['accuracy_elo']-report['baseline'])*100:.2f} pts vs baseline)")
+        print(f"  {'logloss+ELO':<14}: {report['logloss_elo']}  brier_elo={report['brier_elo']}")
+    print()
 
 
 def cmd_upcoming(args) -> None:
