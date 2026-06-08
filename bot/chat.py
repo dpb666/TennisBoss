@@ -14,8 +14,8 @@ import requests
 
 from .log import log
 
-DEFAULT_LM_URL = "http://localhost:1234/v1/chat/completions"
-DEFAULT_MODEL = "local-model"   # LM Studio utilise le modèle chargé quel que soit le nom
+DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
+DEFAULT_MODEL = "qwen2.5:7b"   # Ollama sur port 11434 (ou LM Studio "local-model")
 HISTORY_WINDOW = 8              # nb de messages conservés dans le contexte glissant
 MAX_TOKENS = 600
 TEMPERATURE = 0.7
@@ -152,7 +152,7 @@ Réponds en français, directement et sans intro superflue. Max 3 paragraphes co
                 "max_tokens": MAX_TOKENS,
                 "stream": False,
             },
-            timeout=120,
+            timeout=180,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()

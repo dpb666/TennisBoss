@@ -601,8 +601,9 @@ def api_chat():
     if not message:
         return jsonify({"error": "message requis"}), 400
     lm_url = os.environ.get("LM_STUDIO_URL", config.LM_STUDIO_URL)
+    lm_model = os.environ.get("LM_STUDIO_MODEL", config.LM_STUDIO_MODEL)
     try:
-        reply = chat_mod.chat(message, history, _MEM, lm_url)
+        reply = chat_mod.chat(message, history, _MEM, lm_url, model=lm_model)
         return jsonify({"reply": reply})
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")

@@ -66,6 +66,7 @@ SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
 # Depuis WSL2, utiliser l'IP LAN du PC Windows (ex: 192.168.0.94).
 # Override via .env : LM_STUDIO_URL=http://192.168.0.94:1234/v1/chat/completions
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://127.0.0.1:11434/v1/chat/completions")
+LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "qwen2.5:7b")
 
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
