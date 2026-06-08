@@ -29,6 +29,30 @@ class TestElo(unittest.TestCase):
         self.assertAlmostEqual(r["A"] + r["B"], 3000.0, places=6)
 
 
+class TestDominance(unittest.TestCase):
+    def test_grosse_marge_pese_plus(self):
+        big = elo.dominance_mult([{"first": 6, "second": 1},
+                                  {"first": 6, "second": 2}], "p1")
+        small = elo.dominance_mult([{"first": 7, "second": 6},
+                                    {"first": 7, "second": 6}], "p1")
+        self.assertGreater(big, small)
+        for m in (big, small):
+            self.assertTrue(0.7 <= m <= 1.6)
+
+    def test_cote_du_vainqueur(self):
+        # p2 gagne 1-6 2-6 -> grosse marge POUR p2.
+        m = elo.dominance_mult([{"first": 1, "second": 6},
+                                {"first": 2, "second": 6}], "p2")
+        self.assertGreater(m, 1.0)
+
+    def test_mult_amplifie_le_gain(self):
+        r1: dict = {}
+        elo.update(r1, "A", "B", mult=1.0)
+        r2: dict = {}
+        elo.update(r2, "A", "B", mult=1.5)
+        self.assertGreater(r2["A"], r1["A"])
+
+
 class TestEloDansPredicteur(unittest.TestCase):
     def _mem(self, elo_ratings=None):
         return {

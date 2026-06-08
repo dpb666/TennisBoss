@@ -43,6 +43,30 @@ def calibrated_prob(p: float, k: float) -> float:
     return _sigmoid(k * _logit(p))
 
 
+def tune_blend(samples: List[Tuple[float, float, float]],
+               min_n: int = 20) -> Dict[str, Any]:
+    """Cherche le poids ELO β qui minimise la log-loss.
+
+    `samples` : (logit_features, logit_elo_brut, issue 0/1). On teste une grille
+    β ∈ [0, 2] et on garde le meilleur. β=0 -> ELO ignoré ; β grand -> ELO dominant.
+    """
+    if len(samples) < min_n:
+        return {"elo_blend": None, "n": len(samples), "fitted": False,
+                "note": f"Pas assez de données pour régler β (min {min_n})."}
+
+    def ll(beta: float) -> float:
+        tot = 0.0
+        for fl, el, y in samples:
+            p = _clamp(_sigmoid(fl + beta * el), _EPS, 1 - _EPS)
+            tot += -(y * math.log(p) + (1 - y) * math.log(1 - p))
+        return tot / len(samples)
+
+    grid = [i / 10.0 for i in range(0, 21)]   # 0.0 .. 2.0
+    best = min(grid, key=ll)
+    return {"elo_blend": round(best, 2), "n": len(samples), "fitted": True,
+            "logloss_no_elo": round(ll(0.0), 4), "logloss_best": round(ll(best), 4)}
+
+
 def _logloss(data: List[Tuple[float, float]], k: float) -> float:
     tot = 0.0
     for z, y in data:

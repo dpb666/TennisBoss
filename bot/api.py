@@ -60,6 +60,10 @@ def _load_state() -> None:
         _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
     except (TypeError, ValueError):
         _CALIB_K = 1.0
+    try:
+        _MEM["elo_blend"] = float(db.get_meta("elo_blend") or predictor.ELO_BLEND)
+    except (TypeError, ValueError):
+        _MEM["elo_blend"] = predictor.ELO_BLEND
 
 
 def _calib(p_match: float) -> float:
@@ -168,7 +172,7 @@ def _explain(name1: str, feat1: Dict[str, float],
             "label": "Niveau ELO (historique)",
             "value1": round(elo.expected(ra, rb), 4),
             "value2": round(elo.expected(rb, ra), 4),
-            "weight": round(predictor.ELO_BLEND, 4),
+            "weight": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 4),
             "contribution": round(elo_contrib, 4),
             "favors": favors,
         })
@@ -476,14 +480,40 @@ def api_value():
     })
 
 
+def _blend_samples() -> list:
+    """Échantillons (logit_features, logit_elo_brut, issue) pour régler β."""
+    elo_r = _MEM.get("elo") or {}
+    w = _MEM["weights"]
+    bias = float(_MEM["bias"])
+    out = []
+    for s in db.list_settled(limit=100000):
+        p1, p2, winner = s["player1"], s["player2"], s["winner"]
+        if p1 not in _MEM["players"] or p2 not in _MEM["players"]:
+            continue
+        f1 = features.feature_vector(features.get_profile(_MEM, p1))
+        f2 = features.feature_vector(features.get_profile(_MEM, p2))
+        feat_logit = (predictor.weighted_score(w, f1)
+                      - predictor.weighted_score(w, f2) + bias)
+        el = elo.match_logit(elo_r.get(p1, predictor.ELO_BASE),
+                             elo_r.get(p2, predictor.ELO_BASE))
+        out.append((feat_logit, el, 1.0 if winner == p1 else 0.0))
+    return out
+
+
 def _refit_calibration() -> Dict[str, Any]:
-    """Réajuste le facteur de calibration k sur tous les matchs réglés."""
+    """Réajuste le facteur de calibration k ET le poids ELO β sur les matchs réglés."""
     global _CALIB_K
     fit = calibrate.fit_temperature(db.list_settled(limit=100000))
     if fit.get("fitted"):
         _CALIB_K = float(fit["k"])
         db.set_meta("match_calib_k", _CALIB_K)
-    return fit
+
+    bfit = calibrate.tune_blend(_blend_samples())
+    if bfit.get("fitted") and bfit.get("elo_blend") is not None:
+        _MEM["elo_blend"] = float(bfit["elo_blend"])
+        db.set_meta("elo_blend", _MEM["elo_blend"])
+
+    return {"temperature": fit, "blend": bfit}
 
 
 @app.get("/api/settlement/run")
@@ -512,6 +542,7 @@ def api_calibration():
         "pred_favorite": r["pred_favorite"], "correct": r["correct"],
     } for r in db.list_settled(limit=25)]
     return jsonify({"metrics": metrics, "calibration_k": round(_CALIB_K, 3),
+                    "elo_blend": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 2),
                     "recent": recent})
 
 

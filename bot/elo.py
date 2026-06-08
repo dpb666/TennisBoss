@@ -24,16 +24,43 @@ def match_logit(ra: float, rb: float) -> float:
     return (ra - rb) / 400.0 * math.log(10)
 
 
+def dominance_mult(sets: Any, winner_side: str = "p1") -> float:
+    """Multiplicateur de marge de victoire d'après les scores set-par-set.
+
+    Un 6-1 6-2 (grosse marge en jeux) pèse plus qu'un 7-6 7-6 (marge faible).
+    `sets` : [{"first": jeux J1, "second": jeux J2}, ...]. Borné [0.7, 1.6].
+    """
+    wg = lg = 0
+    for s in (sets or []):
+        try:
+            f = int(s.get("first"))
+            g = int(s.get("second"))
+        except (TypeError, ValueError):
+            continue
+        if winner_side == "p1":
+            wg += f
+            lg += g
+        else:
+            wg += g
+            lg += f
+    margin = max(0, wg - lg)
+    return max(0.7, min(1.6, 0.5 + 0.4 * math.log(margin + 1)))
+
+
 def update(ratings: Dict[str, float], winner: str, loser: str,
-           base: float = BASE, k: float = K) -> Dict[str, float]:
-    """Met à jour les notes ELO après UN match (winner bat loser)."""
+           base: float = BASE, k: float = K, mult: float = 1.0) -> Dict[str, float]:
+    """Met à jour les notes ELO après UN match (winner bat loser).
+
+    `mult` : multiplicateur de marge de victoire (cf. dominance_mult).
+    """
     if not winner or not loser:
         return ratings
     rw = ratings.get(winner, base)
     rl = ratings.get(loser, base)
     ew = expected(rw, rl)
-    ratings[winner] = rw + k * (1.0 - ew)
-    ratings[loser] = rl + k * (0.0 - (1.0 - ew))
+    delta = k * mult * (1.0 - ew)
+    ratings[winner] = rw + delta
+    ratings[loser] = rl - delta
     return ratings
 
 

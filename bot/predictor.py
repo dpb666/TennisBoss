@@ -57,13 +57,17 @@ ELO_BASE = 1500.0
 
 
 def elo_logit(mem: Dict[str, Any], name1: str, name2: str) -> float:
-    """Contribution ELO (déjà pondérée) au logit de la prédiction."""
+    """Contribution ELO (déjà pondérée) au logit de la prédiction.
+
+    Le poids de mélange est `mem['elo_blend']` s'il existe (auto-réglé), sinon
+    ELO_BLEND par défaut."""
     elo = mem.get("elo") or {}
     if not elo:
         return 0.0
+    blend = float(mem.get("elo_blend", ELO_BLEND))
     ra = elo.get(name1, ELO_BASE)
     rb = elo.get(name2, ELO_BASE)
-    return ELO_BLEND * ((ra - rb) / 400.0 * math.log(10))
+    return blend * ((ra - rb) / 400.0 * math.log(10))
 
 
 def predict(

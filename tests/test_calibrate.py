@@ -51,5 +51,31 @@ class TestFitTemperature(unittest.TestCase):
         self.assertTrue(0.8 <= fit["k"] <= 1.2)
 
 
+class TestTuneBlend(unittest.TestCase):
+    def test_pas_assez_de_donnees(self):
+        fit = calibrate.tune_blend([(0.0, 0.0, 1.0)] * 5)
+        self.assertFalse(fit["fitted"])
+
+    def test_elo_informatif_donne_beta_positif(self):
+        # ELO parfaitement prédictif, features nulles -> β > 0 optimal.
+        samples = []
+        for i in range(60):
+            el = 1.0 if i % 2 == 0 else -1.0
+            samples.append((0.0, el, 1.0 if el > 0 else 0.0))
+        fit = calibrate.tune_blend(samples)
+        self.assertTrue(fit["fitted"])
+        self.assertGreater(fit["elo_blend"], 0.0)
+        self.assertLessEqual(fit["logloss_best"], fit["logloss_no_elo"])
+
+    def test_elo_inutile_donne_beta_nul(self):
+        # ELO sans rapport avec l'issue -> β optimal proche de 0.
+        samples = []
+        for i in range(60):
+            samples.append((0.0, 1.0 if i % 2 == 0 else -1.0, 1.0 if i % 3 == 0 else 0.0))
+        fit = calibrate.tune_blend(samples)
+        self.assertTrue(fit["fitted"])
+        self.assertLessEqual(fit["elo_blend"], 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()
