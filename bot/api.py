@@ -401,6 +401,14 @@ def api_value():
         else:
             best_side, best_ev = n2, ev2
 
+        # Capture la cote du favori du modèle (pour le ROI au settlement).
+        if r["favorite"] is not None:
+            fav_odds = ho if r["favorite"] == n1 else ao
+            try:
+                db.log_bet(e.get("date", ""), n1, n2, r["favorite"], fav_odds)
+            except Exception:  # noqa: BLE001
+                pass
+
         out.append({
             "player1": n1, "player2": n2,
             "league": (e.get("league") or {}).get("name", ""),
@@ -480,6 +488,25 @@ def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
             "books": mw["books"]}
 
 
+def _settlement_loop(interval: int) -> None:
+    """Boucle de fond : règle les matchs terminés et recalibre périodiquement."""
+    import time as _t
+
+    from .log import log
+    while True:
+        _t.sleep(interval)
+        try:
+            summary = settlement.run_settlement(_MEM, _resolve, days_back=2)
+            _refit_calibration()
+            metrics = settlement.calibration_metrics()
+            if metrics["n"] > 0:
+                db.save_calibration(metrics)
+            log(f"Settlement auto: +{summary['added']} réglés, "
+                f"n={metrics['n']} acc={metrics['accuracy']} k={round(_CALIB_K, 3)}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"Settlement auto en échec ({exc}).", "WARN")
+
+
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     _load_state()
     from .log import log
@@ -487,4 +514,12 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     token = os.environ.get("TENNISBOSS_API_TOKEN", "").strip()
     log(f"API REST sur http://{host}:{port}  (auth token: {'OUI' if token else 'non'})")
     log(f"{len(_MEM['players'])} joueurs chargés. Endpoints sous /api/ + /health.")
+
+    interval = int(os.environ.get("SETTLEMENT_INTERVAL_S", "1800"))
+    if interval > 0:
+        import threading
+        threading.Thread(target=_settlement_loop, args=(interval,),
+                         daemon=True).start()
+        log(f"Settlement automatique toutes les {interval}s (auto-calibration).")
+
     app.run(host=host, port=port, threaded=True)

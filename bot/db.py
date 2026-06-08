@@ -92,6 +92,15 @@ CREATE TABLE IF NOT EXISTS calibration_history (
     dog_acc  REAL,
     notes    TEXT
 );
+CREATE TABLE IF NOT EXISTS bet_log (
+    date     TEXT,
+    player1  TEXT,
+    player2  TEXT,
+    favorite TEXT,
+    fav_odds REAL,
+    ts       TEXT,
+    PRIMARY KEY (player1, player2)
+);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
 CREATE INDEX IF NOT EXISTS idx_settled_date ON settled_matches(date);
@@ -322,6 +331,25 @@ def list_calibration(limit: int = 20) -> List[sqlite3.Row]:
         return conn.execute(
             "SELECT * FROM calibration_history ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
+
+
+# --- Journal des cotes (pour le ROI) ---------------------------------------
+def log_bet(date: str, p1: str, p2: str, favorite: str, fav_odds: float) -> None:
+    """Capture la cote du favori du modèle pour une paire (pour calculer le ROI)."""
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO bet_log "
+            "(date,player1,player2,favorite,fav_odds,ts) VALUES (?,?,?,?,?,?)",
+            (date, p1, p2, favorite, fav_odds,
+             _dt.datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def list_bets() -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT date,player1,player2,favorite,fav_odds FROM bet_log").fetchall()
 
 
 # --- Historique des prédictions --------------------------------------------

@@ -207,3 +207,35 @@ data class ValueResponse(
     val comparisons: List<ValueComparison> = emptyList(),
     val note: String = "",
 )
+
+/** Métriques de performance du modèle sur les matchs réglés. */
+data class CalibMetrics(
+    val n: Int = 0,
+    val accuracy: Double? = null,
+    val roi: Double? = null,
+    val roi_n: Int = 0,
+    val brier: Double? = null,
+    val atp_acc: Double? = null,
+    val wta_acc: Double? = null,
+    val fav_acc: Double? = null,
+    val dog_acc: Double? = null,
+    val note: String = "",
+)
+
+/** Un match réglé récent (prédiction vs résultat). */
+data class SettledRecent(
+    val date: String = "",
+    val tour: String = "",
+    val player1: String = "",
+    val player2: String = "",
+    val winner: String = "",
+    val score: String = "",
+    val pred_favorite: String? = null,
+    val correct: Int? = null,
+)
+
+data class CalibrationResponse(
+    val metrics: CalibMetrics = CalibMetrics(),
+    val calibration_k: Double = 1.0,
+    val recent: List<SettledRecent> = emptyList(),
+)

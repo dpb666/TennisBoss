@@ -44,4 +44,7 @@ interface TennisBossApi {
     suspend fun value(
         @Query("limit") limit: Int = 12,
     ): ValueResponse
+
+    @GET("api/calibration")
+    suspend fun calibration(): CalibrationResponse
 }

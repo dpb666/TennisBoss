@@ -59,6 +59,7 @@ import com.tennisboss.app.data.PredictResponse
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictUiState
 import com.tennisboss.app.ui.PredictViewModel
+import com.tennisboss.app.ui.PerformanceScreen
 import com.tennisboss.app.ui.UpcomingScreen
 import com.tennisboss.app.ui.ValueScreen
 import com.tennisboss.app.ui.components.BetBuilderView
@@ -119,6 +120,12 @@ fun AppRoot() {
                     icon = { Text("💎") },
                     label = { Text("Value") },
                 )
+                NavigationBarItem(
+                    selected = tab == 4,
+                    onClick = { tab = 4 },
+                    icon = { Text("📊") },
+                    label = { Text("Perf") },
+                )
             }
         },
     ) { padding ->
@@ -147,7 +154,8 @@ fun AppRoot() {
                             if (pairComplete) tab = 0   // paire prête -> on bascule sur Prédire
                         },
                     )
-                    else -> ValueScreen()
+                    3 -> ValueScreen()
+                    else -> PerformanceScreen()
                 }
             }
         }

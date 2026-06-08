@@ -90,14 +90,27 @@ def calibration_metrics() -> Dict[str, Any]:
         briers.append((p - outcome) ** 2)
     brier = round(sum(briers) / len(briers), 4) if briers else None
 
+    # ROI : mise 1u sur le favori du modèle, pour les matchs dont on a capté la cote.
+    bets = {frozenset((b["player1"], b["player2"])): b for b in db.list_bets()}
+    profits = []
+    for r in judged:
+        b = bets.get(frozenset((r["player1"], r["player2"])))
+        if not b or b["fav_odds"] is None:
+            continue
+        won = (r["winner"] == b["favorite"])
+        profits.append((b["fav_odds"] - 1.0) if won else -1.0)
+    roi = round(sum(profits) / len(profits), 4) if profits else None
+
     return {
         "n": n,
         "accuracy": _acc(judged),
-        "roi": None,   # nécessite des cotes de clôture stockées (à venir)
+        "roi": roi,
+        "roi_n": len(profits),
         "brier": brier,
         "atp_acc": _acc([r for r in judged if r["tour"] == "atp"]),
         "wta_acc": _acc([r for r in judged if r["tour"] == "wta"]),
         "fav_acc": _acc(clear),
         "dog_acc": _acc(close),
-        "note": "ROI indisponible tant que les cotes de clôture ne sont pas stockées.",
+        "note": ("ROI = mise 1u sur le favori modèle, sur les paris dont la cote "
+                 "a été captée (onglet Value)."),
     }

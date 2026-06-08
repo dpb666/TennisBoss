@@ -65,6 +65,22 @@ class TestCalibrationMetrics(unittest.TestCase):
         self.assertFalse(db.insert_settled({"event_key": "x", "winner": "A",
                                             "player1": "A", "correct": 1}))
 
+    def test_roi_depuis_bet_log(self):
+        # Favori A coté 1.5, A gagne -> +0.5 ; favori C coté 1.8, D gagne -> -1.
+        db.insert_settled({"event_key": "1", "date": "d", "tour": "atp",
+                           "tournament": "T", "player1": "A", "player2": "B",
+                           "winner": "A", "final_score": "", "sets": [],
+                           "pred_favorite": "A", "pred_prob1": 70.0, "correct": 1})
+        db.log_bet("d", "A", "B", "A", 1.5)
+        db.insert_settled({"event_key": "2", "date": "d", "tour": "atp",
+                           "tournament": "T", "player1": "C", "player2": "D",
+                           "winner": "D", "final_score": "", "sets": [],
+                           "pred_favorite": "C", "pred_prob1": 60.0, "correct": 0})
+        db.log_bet("d", "C", "D", "C", 1.8)
+        m = settlement.calibration_metrics()
+        self.assertEqual(m["roi_n"], 2)
+        self.assertAlmostEqual(m["roi"], (0.5 - 1.0) / 2, places=4)
+
     def test_precision_et_segments(self):
         self._settle("1", "atp", "A", "A", 70.0, 1)   # favori clair, correct
         self._settle("2", "atp", "B", "Z", 65.0, 0)   # favori clair, raté
