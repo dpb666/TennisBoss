@@ -22,8 +22,8 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
-from . import (calibrate, config, db, features, live_api, memory, namematch,
-               odds_api, predictor, settlement)
+from . import (calibrate, config, db, elo, features, live_api, memory,
+               namematch, odds_api, predictor, settlement)
 from . import __version__
 from .bootstrap import bootstrap
 
@@ -43,6 +43,8 @@ def _load_state() -> None:
     _MEM = memory.load()
     counts = {n: int(p.get("n", 0)) for n, p in _MEM["players"].items()}
     _INDEX = namematch.build_index(list(_MEM["players"]), counts)
+    # Notes ELO construites depuis l'archive chronologique (signal fort).
+    _MEM["elo"] = elo.build_from_matches(db.all_matches_chrono())
     try:
         _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
     except (TypeError, ValueError):
@@ -141,6 +143,25 @@ def _explain(name1: str, feat1: Dict[str, float],
             "contribution": round(contrib, 4),
             "favors": favors,
         })
+
+    # Facteur ELO (signal historique fort), même décomposition exacte.
+    elo_ratings = _MEM.get("elo") or {}
+    if elo_ratings:
+        ra = elo_ratings.get(name1, predictor.ELO_BASE)
+        rb = elo_ratings.get(name2, predictor.ELO_BASE)
+        elo_contrib = predictor.elo_logit(_MEM, name1, name2)
+        z += elo_contrib
+        favors = name1 if elo_contrib > 1e-9 else (name2 if elo_contrib < -1e-9 else None)
+        factors.append({
+            "key": "elo",
+            "label": "Niveau ELO (historique)",
+            "value1": round(elo.expected(ra, rb), 4),
+            "value2": round(elo.expected(rb, ra), 4),
+            "weight": round(predictor.ELO_BLEND, 4),
+            "contribution": round(elo_contrib, 4),
+            "favors": favors,
+        })
+
     decisive = max(factors, key=lambda f: abs(f["contribution"]))
     return {
         "bias": round(bias, 4),

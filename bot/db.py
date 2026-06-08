@@ -249,6 +249,13 @@ def player_recent_matches(name: str, limit: int = 10) -> List[sqlite3.Row]:
         ).fetchall()
 
 
+def all_matches_chrono() -> List[sqlite3.Row]:
+    """Tous les matchs par ordre chronologique (pour construire l'ELO)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT winner, loser FROM matches ORDER BY date ASC, id ASC").fetchall()
+
+
 def head_to_head(name1: str, name2: str) -> List[sqlite3.Row]:
     """Confrontations directes entre deux joueurs, les plus récentes d'abord."""
     with connect() as conn:

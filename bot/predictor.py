@@ -51,6 +51,21 @@ def probability(
     return p1, 1.0 - p1, score1, score2
 
 
+# Poids du signal ELO mélangé au modèle (l'ELO bat le modèle seul out-of-sample).
+ELO_BLEND = 0.8
+ELO_BASE = 1500.0
+
+
+def elo_logit(mem: Dict[str, Any], name1: str, name2: str) -> float:
+    """Contribution ELO (déjà pondérée) au logit de la prédiction."""
+    elo = mem.get("elo") or {}
+    if not elo:
+        return 0.0
+    ra = elo.get(name1, ELO_BASE)
+    rb = elo.get(name2, ELO_BASE)
+    return ELO_BLEND * ((ra - rb) / 400.0 * math.log(10))
+
+
 def predict(
     mem: Dict[str, Any],
     name1: str,
@@ -58,8 +73,12 @@ def predict(
     name2: str,
     feat2: Dict[str, float],
 ) -> Dict[str, Any]:
-    """Construit un résultat de prédiction lisible pour le 1er set."""
-    p1, p2, s1, s2 = probability(mem["weights"], mem["bias"], feat1, feat2)
+    """Construit un résultat de prédiction lisible pour le 1er set (features + ELO)."""
+    s1 = weighted_score(mem["weights"], feat1)
+    s2 = weighted_score(mem["weights"], feat2)
+    z = (s1 - s2) + float(mem["bias"]) + elo_logit(mem, name1, name2)
+    p1 = _sigmoid(z)
+    p2 = 1.0 - p1
     if abs(p1 - p2) < 0.04:
         verdict = "⚖️ Très serré — tie-break possible"
         favorite = None
