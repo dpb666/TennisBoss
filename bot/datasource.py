@@ -121,10 +121,42 @@ def fetch_matches(years: List[int], tours: List[str] = ("atp",)) -> List[Dict]:
     return all_matches
 
 
+import datetime as _date
+import re as _re
+import unicodedata as _ud
+from collections import Counter as _Counter
+from collections import defaultdict as _ddict
+
+# Mots à ignorer dans les noms de tournois (génériques + niveaux).
+_TOURNEY_STOP = {
+    "open", "atp", "wta", "masters", "cup", "championships", "championship",
+    "international", "trophy", "classic", "tennis", "presented", "by", "the",
+    "challenger", "indoor", "outdoor", "ladies", "mens", "men", "women", "of",
+    "grand", "prix", "250", "500", "1000", "series", "tour", "club", "city",
+}
+
+
+def normalize_tournament(name: str) -> List[str]:
+    """Tokens significatifs d'un nom de tournoi (sans accents, ponctuation, mots vides)."""
+    s = _ud.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    s = _re.sub(r"[^a-z0-9 ]", " ", s.lower())
+    return [t for t in s.split() if t and t not in _TOURNEY_STOP]
+
+
+def _iso_week(date8: str) -> Optional[int]:
+    if len(date8) == 8 and date8.isdigit():
+        try:
+            return _date.date(int(date8[:4]), int(date8[4:6]),
+                              int(date8[6:8])).isocalendar()[1]
+        except ValueError:
+            return None
+    return None
+
+
 def surface_backfill(years: Optional[List[int]] = None,
-                     tours: Optional[List[str]] = None) -> Dict[str, str]:
-    """Rétro-remplit matches.surface depuis les CSV Sackmann et renvoie la carte
-    {nom_tournoi (minuscule) -> surface} pour étiqueter les matchs live."""
+                     tours: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Rétro-remplit matches.surface et construit 3 cartes de résolution de surface :
+    par nom normalisé, par token de ville, et par semaine de l'année (saison)."""
     from . import db
 
     cfg = config.DEFAULT_CONFIG
@@ -132,7 +164,10 @@ def surface_backfill(years: Optional[List[int]] = None,
     tours = tours or cfg.get("tours", ["atp", "wta"])
 
     id_surface: Dict[str, str] = {}
-    tourney_surface: Dict[str, str] = {}
+    name_map: Dict[str, str] = {}
+    token_counts: Dict[str, _Counter] = _ddict(_Counter)
+    week_counts: Dict[int, _Counter] = _ddict(_Counter)
+
     for tour in tours:
         for year in years:
             text = _http_get(config.SACKMANN_URL.format(tour=tour, year=year))
@@ -144,16 +179,24 @@ def surface_backfill(years: Optional[List[int]] = None,
                     continue
                 mid = f"{tour}-{row.get('tourney_id', '?')}-{row.get('match_num', '?')}"
                 id_surface[mid] = surf
-                tn = (row.get("tourney_name") or "").strip().lower()
-                if tn:
-                    tourney_surface.setdefault(tn, surf)
+                toks = normalize_tournament(row.get("tourney_name", ""))
+                if toks:
+                    name_map.setdefault(" ".join(toks), surf)
+                    for t in toks:
+                        token_counts[t][surf] += 1
+                wk = _iso_week(row.get("tourney_date", ""))
+                if wk is not None:
+                    week_counts[wk][surf] += 1
 
     with db.connect() as conn:
         conn.executemany("UPDATE matches SET surface=? WHERE id=?",
                          [(s, i) for i, s in id_surface.items()])
-    log(f"Surface rétro-remplie : {len(id_surface)} matchs, "
-        f"{len(tourney_surface)} tournois cartographiés.")
-    return tourney_surface
+
+    token_map = {t: c.most_common(1)[0][0] for t, c in token_counts.items()}
+    week_map = {str(w): c.most_common(1)[0][0] for w, c in week_counts.items()}
+    log(f"Surface rétro-remplie : {len(id_surface)} matchs ; cartes "
+        f"nom={len(name_map)} token={len(token_map)} semaine={len(week_map)}.")
+    return {"name": name_map, "token": token_map, "week": week_map}
 
 
 def probe_live() -> bool:

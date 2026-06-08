@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import Counter
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
@@ -45,11 +46,11 @@ def _load_state() -> None:
     _MEM = memory.load()
     counts = {n: int(p.get("n", 0)) for n, p in _MEM["players"].items()}
     _INDEX = namematch.build_index(list(_MEM["players"]), counts)
-    # Rétro-remplissage surface au premier démarrage (one-time, réseau).
-    if not db.get_meta("tourney_surface"):
+    # Rétro-remplissage surface + cartes de résolution au 1er démarrage (réseau).
+    if not db.get_meta("surface_maps"):
         try:
-            tmap = datasource.surface_backfill()
-            db.set_meta("tourney_surface", json.dumps(tmap))
+            maps = datasource.surface_backfill()
+            db.set_meta("surface_maps", json.dumps(maps))
         except Exception as exc:  # noqa: BLE001
             log(f"Backfill surface ignoré ({exc}).", "WARN")
 
@@ -71,11 +72,11 @@ def _load_state() -> None:
             replayed += 1
     if replayed:
         log(f"ELO : {replayed} matchs réglés rejoués (apprentissage continu).")
-    # Carte tournoi -> surface (pour étiqueter les matchs live).
+    # Cartes de résolution de surface (nom / token / semaine).
     try:
-        _MEM["tourney_surface"] = json.loads(db.get_meta("tourney_surface") or "{}")
+        _MEM["surface_maps"] = json.loads(db.get_meta("surface_maps") or "{}")
     except (TypeError, ValueError):
-        _MEM["tourney_surface"] = {}
+        _MEM["surface_maps"] = {}
     try:
         _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
     except (TypeError, ValueError):
@@ -118,11 +119,25 @@ def _resolve(name: str) -> Optional[str]:
     return namematch.resolve(name, _INDEX)
 
 
-def _surface_for(tournament: str) -> Optional[str]:
-    """Surface ('hard'/'clay'/'grass') d'un tournoi via la carte apprise."""
-    if not tournament:
-        return None
-    return (_MEM.get("tourney_surface") or {}).get(tournament.strip().lower())
+def _surface_for(tournament: str, date: str = "") -> Optional[str]:
+    """Surface d'un tournoi, en couches : nom normalisé -> vote par token de ville
+    -> repli saisonnier (semaine de l'année). Renvoie None si rien de fiable."""
+    maps = _MEM.get("surface_maps") or {}
+    toks = datasource.normalize_tournament(tournament or "")
+    if toks:
+        key = " ".join(toks)
+        nm = maps.get("name") or {}
+        if key in nm:
+            return nm[key]
+        tm = maps.get("token") or {}
+        votes = [tm[t] for t in toks if t in tm]
+        if votes:
+            return Counter(votes).most_common(1)[0][0]
+    # Repli saison : la semaine de l'année donne la surface dominante du circuit.
+    wk = datasource._iso_week((date or "").replace("-", ""))
+    if wk is not None:
+        return (maps.get("week") or {}).get(str(wk))
+    return None
 
 
 def _player_payload(name: str) -> Dict[str, Any]:
@@ -412,7 +427,7 @@ def api_upcoming():
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
             r = predictor.predict(_MEM, n1, f1, n2, f2,
-                                  surface=_surface_for(f["tournament"]))
+                                  surface=_surface_for(f["tournament"], f["date"]))
             bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
             # Cote juste du 1er set sur le favori = 1 / proba. Cible si >= 1.60.
             fs_prob = max(r["prob1"], r["prob2"]) / 100.0
