@@ -59,6 +59,22 @@ data class PlayerDetail(
     val form: List<FormMatch> = emptyList(),
 )
 
+/** Message dans l'historique du chat. */
+data class ChatMessage(
+    val role: String,    // "user" ou "assistant"
+    val content: String,
+)
+
+data class ChatRequest(
+    val message: String,
+    val history: List<ChatMessage> = emptyList(),
+)
+
+data class ChatResponse(
+    val reply: String? = null,
+    val error: String? = null,
+)
+
 data class FirstSet(
     val prob1: Double,
     val prob2: Double,

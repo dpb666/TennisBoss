@@ -51,8 +51,20 @@ SACKMANN_URL = (
     "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
     "{tour}_matches_{year}.csv"
 )
+# Matchs ITF / Futures ATP (même format CSV, ~18 000 matchs/an).
+# Couvre les joueurs moins connus absents du tableau principal.
+# Seulement ATP : pas d'équivalent WTA dans le repo Sackmann (404 ignoré).
+CHALLENGER_URL = (
+    "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
+    "{tour}_matches_futures_{year}.csv"
+)
 # Endpoint "live" (souvent bloqué par Cloudflare -> géré par le self-healing).
 SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
+
+# LLM local via LM Studio (API OpenAI-compatible).
+# Depuis WSL2 en mode réseau miroir, localhost:1234 pointe sur Windows.
+# Override via .env : LM_STUDIO_URL=http://...
+LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234/v1/chat/completions")
 
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

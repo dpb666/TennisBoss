@@ -1,0 +1,151 @@
+"""Chat IA local via LM Studio (API OpenAI-compatible).
+
+LM Studio doit tourner sur Windows avec un modèle chargé (ex: Llama 3.2 3B,
+Mistral 7B Q4) et le serveur local activé (port 1234 par défaut).
+
+Depuis WSL2 en mode réseau miroir, `localhost:1234` pointe sur Windows.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List, Optional
+
+import requests
+
+from .log import log
+
+DEFAULT_LM_URL = "http://localhost:1234/v1/chat/completions"
+DEFAULT_MODEL = "local-model"   # LM Studio utilise le modèle chargé quel que soit le nom
+HISTORY_WINDOW = 8              # nb de messages conservés dans le contexte glissant
+MAX_TOKENS = 600
+TEMPERATURE = 0.7
+
+
+# ---------------------------------------------------------------------------
+# Construction du contexte TennisBoss
+# ---------------------------------------------------------------------------
+
+def _top_elo(elo: Dict[str, float], n: int = 10) -> List[tuple]:
+    return sorted(elo.items(), key=lambda x: x[1], reverse=True)[:n]
+
+
+def _player_snapshot(mem: Dict[str, Any], name: str) -> Optional[str]:
+    """Retourne une ligne de stats pour un joueur (si connu)."""
+    prof = (mem.get("players") or {}).get(name)
+    if not prof:
+        return None
+    elo_val = (mem.get("elo") or {}).get(name, 1500)
+    return (
+        f"{name}: serve={prof.get('serve', 0):.2f} "
+        f"ret={prof.get('return1', 0):.2f}/{prof.get('return2', 0):.2f} "
+        f"forme={prof.get('recent', 0):.2f} ELO={elo_val:.0f} "
+        f"(n={prof.get('n', 0)} matchs)"
+    )
+
+
+def _detect_players(message: str, players_lower: Dict[str, str]) -> List[str]:
+    """Détecte les noms de joueurs mentionnés dans le message."""
+    found = []
+    msg_lower = message.lower()
+    for key, original in players_lower.items():
+        if key in msg_lower and original not in found:
+            found.append(original)
+        if len(found) >= 4:
+            break
+    return found
+
+
+def build_context(mem: Dict[str, Any]) -> str:
+    """Contexte statique TennisBoss pour le system prompt."""
+    lines = []
+    n_players = len(mem.get("players") or {})
+    metrics = mem.get("metrics") or {}
+    lines.append(f"Base : {n_players} joueurs (ATP + WTA), 2022-2026")
+    acc = metrics.get("accuracy")
+    if acc:
+        lines.append(f"Précision modèle (1er set) : {acc:.1%} OOS")
+
+    elo = mem.get("elo") or {}
+    if elo:
+        top = _top_elo(elo, 12)
+        lines.append("\nTop ELO global :")
+        for name, rating in top:
+            lines.append(f"  {name}: {rating:.0f}")
+
+    surf = mem.get("elo_surface") or {}
+    for surface in ("clay", "hard", "grass"):
+        if surface in surf and surf[surface]:
+            top_s = _top_elo(surf[surface], 5)
+            lines.append(f"\nTop ELO {surface} :")
+            for name, rating in top_s:
+                lines.append(f"  {name}: {rating:.0f}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Point d'entrée principal
+# ---------------------------------------------------------------------------
+
+def chat(
+    message: str,
+    history: List[Dict[str, str]],
+    mem: Dict[str, Any],
+    lm_url: str = DEFAULT_LM_URL,
+    model: str = DEFAULT_MODEL,
+) -> str:
+    """Envoie un message au LLM local avec contexte TennisBoss enrichi dynamiquement.
+
+    Détecte les joueurs cités dans le message et injecte leurs stats en temps réel.
+    """
+    context = build_context(mem)
+
+    # Détection dynamique des joueurs mentionnés
+    players_lower = {n.lower(): n for n in (mem.get("players") or {})}
+    mentioned = _detect_players(message, players_lower)
+    player_context = ""
+    if mentioned:
+        snapshots = [s for n in mentioned if (s := _player_snapshot(mem, n))]
+        if snapshots:
+            player_context = "\nJoueurs mentionnés dans la question :\n" + "\n".join(snapshots)
+
+    system = f"""Tu es TennisBoss AI, expert en analyse tennis et prédictions de matchs.
+Tu analyses les données réelles du modèle TennisBoss (régression logistique + ELO avec dominance surface).
+
+DONNÉES EN TEMPS RÉEL :
+{context}{player_context}
+
+RÔLE :
+- Analyser forces/faiblesses (serve, retour, forme récente, ELO surface)
+- Comparer des joueurs, expliquer qui est favori et pourquoi
+- Décrypter la logique ELO (une grosse victoire 6-1 6-2 = plus de points qu'un 7-6 7-6)
+- Signaler les valeurs quand notre proba dépasse le marché
+- Identifier les spécialistes de surface
+
+Réponds en français, directement et sans intro superflue. Max 3 paragraphes courts."""
+
+    messages = [{"role": "system", "content": system}]
+    for h in (history or [])[-HISTORY_WINDOW:]:
+        messages.append(h)
+    messages.append({"role": "user", "content": message})
+
+    try:
+        resp = requests.post(
+            lm_url,
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": TEMPERATURE,
+                "max_tokens": MAX_TOKENS,
+                "stream": False,
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except requests.RequestException as exc:
+        log(f"LM Studio inaccessible ({lm_url}): {exc}", "WARN")
+        raise
+    except (KeyError, IndexError) as exc:
+        log(f"Réponse LM Studio inattendue : {exc}", "WARN")
+        raise RuntimeError(f"Réponse invalide du LLM : {exc}") from exc

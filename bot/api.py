@@ -24,8 +24,9 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
-from . import (calibrate, config, datasource, db, elo, features, live_api,
-               memory, namematch, odds_api, predictor, settlement)
+from . import (calibrate, chat as chat_mod, config, datasource, db, elo,
+               features, live_api, memory, namematch, odds_api, predictor,
+               settlement)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -589,6 +590,24 @@ def api_calibration():
     return jsonify({"metrics": metrics, "calibration_k": round(_CALIB_K, 3),
                     "elo_blend": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 2),
                     "recent": recent})
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """Chat IA avec LM Studio (LLM local). Body JSON: {message, history=[]}."""
+    _check_token()
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    history = data.get("history") or []
+    if not message:
+        return jsonify({"error": "message requis"}), 400
+    lm_url = os.environ.get("LM_STUDIO_URL", config.LM_STUDIO_URL)
+    try:
+        reply = chat_mod.chat(message, history, _MEM, lm_url)
+        return jsonify({"reply": reply})
+    except Exception as exc:  # noqa: BLE001
+        log(f"Chat LLM en échec : {exc}", "WARN")
+        return jsonify({"error": f"LM Studio inaccessible : {exc}"}), 503
 
 
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:

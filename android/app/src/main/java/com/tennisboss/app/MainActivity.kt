@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.SettingsStore
+import com.tennisboss.app.ui.ChatScreen
+import com.tennisboss.app.ui.ChatViewModel
 import com.tennisboss.app.ui.PerformanceScreen
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
@@ -54,6 +56,7 @@ fun AppRoot() {
     var tab by remember { mutableIntStateOf(0) }
     // ViewModel de prédiction partagé : la recherche joueurs peut le pré-remplir.
     val predictVM: PredictViewModel = viewModel()
+    val chatVM: ChatViewModel = viewModel()
 
     // Réglages persistants : on restaure l'URL serveur + token au démarrage.
     val context = LocalContext.current
@@ -97,6 +100,12 @@ fun AppRoot() {
                     icon = { Text("📊") },
                     label = { Text("Perf") },
                 )
+                NavigationBarItem(
+                    selected = tab == 5,
+                    onClick = { tab = 5 },
+                    icon = { Text("🤖") },
+                    label = { Text("AI Chat") },
+                )
             }
         },
     ) { padding ->
@@ -126,7 +135,8 @@ fun AppRoot() {
                         },
                     )
                     3 -> ValueScreen()
-                    else -> PerformanceScreen()
+                    4 -> PerformanceScreen()
+                    else -> ChatScreen(chatVM)
                 }
             }
         }

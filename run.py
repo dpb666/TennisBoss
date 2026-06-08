@@ -38,8 +38,11 @@ def cmd_train(args) -> None:
         cfg["tours"] = args.tours
     db.init()
     mem = memory.load()
-    log(f"Apprentissage — années {cfg['years']} | tours {cfg['tours']}")
-    matches = datasource.fetch_matches(cfg["years"], cfg["tours"])
+    challengers = getattr(args, "challengers", False)
+    log(f"Apprentissage — années {cfg['years']} | tours {cfg['tours']}"
+        f"{' + Futures/ITF' if challengers else ''}")
+    matches = datasource.fetch_matches(cfg["years"], cfg["tours"],
+                                       include_challengers=challengers)
     if not matches:
         log("Aucune donnée récupérée (réseau ?). Abandon.", "ERROR")
         sys.exit(1)
@@ -360,6 +363,8 @@ def main() -> None:
     p_train.add_argument("--years", nargs="+", type=int, help="Années à charger")
     p_train.add_argument("--tours", nargs="+", choices=["atp", "wta"],
                          help="Tours à charger (atp wta)")
+    p_train.add_argument("--challengers", action="store_true",
+                         help="Inclure matchs ITF/Futures ATP (~18k matchs/an)")
     p_train.set_defaults(func=cmd_train)
 
     p_pred = sub.add_parser("predict", help="Prédire le 1er set")

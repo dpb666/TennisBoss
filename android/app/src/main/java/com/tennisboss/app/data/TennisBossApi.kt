@@ -1,6 +1,8 @@
 package com.tennisboss.app.data
 
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Query
 
 /** Endpoints exposés par bot/api.py. */
@@ -47,4 +49,7 @@ interface TennisBossApi {
 
     @GET("api/calibration")
     suspend fun calibration(): CalibrationResponse
+
+    @POST("api/chat")
+    suspend fun chat(@Body request: ChatRequest): ChatResponse
 }

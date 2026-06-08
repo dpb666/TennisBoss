@@ -133,12 +133,39 @@ def fetch_year(year: int, tour: str = "atp") -> List[Dict]:
     return matches
 
 
-def fetch_matches(years: List[int], tours: List[str] = ("atp",)) -> List[Dict]:
+def fetch_challengers(years: List[int], tours: List[str] = ("atp",)) -> List[Dict]:
+    """Récupère les matchs Challenger / ITF qualifs de Sackmann (joueurs peu connus)."""
+    all_matches: List[Dict] = []
+    for tour in tours:
+        for year in years:
+            url = config.CHALLENGER_URL.format(tour=tour, year=year)
+            text = _http_get(url)
+            if not text:
+                continue
+            added = 0
+            reader = csv.DictReader(io.StringIO(text))
+            for row in reader:
+                feat = _match_features(row)
+                if feat and feat["winner_name"] and feat["loser_name"]:
+                    feat["tour"] = tour
+                    feat["id"] = f"{tour}-chall-{feat['id']}"
+                    all_matches.append(feat)
+                    added += 1
+            if added:
+                log(f"{tour.upper()} Challenger/ITF {year}: {added} matchs récupérés.")
+    all_matches.sort(key=lambda m: (m["date"], m["id"]))
+    return all_matches
+
+
+def fetch_matches(years: List[int], tours: List[str] = ("atp",),
+                  include_challengers: bool = False) -> List[Dict]:
     """Récupère plusieurs années/tours et trie chronologiquement (sans fuite)."""
     all_matches: List[Dict] = []
     for tour in tours:
         for year in years:
             all_matches.extend(fetch_year(year, tour))
+    if include_challengers:
+        all_matches.extend(fetch_challengers(years, tours))
     all_matches.sort(key=lambda m: (m["date"], m["id"]))
     return all_matches
 
