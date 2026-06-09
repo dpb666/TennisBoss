@@ -15,7 +15,7 @@ import requests
 from .log import log
 
 DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "qwen2.5:7b"   # pas de thinking mode — utiliser qwen3 nécessite Ollama ≥ 0.7
+DEFAULT_MODEL = "qwen2.5:7b"   # qwen3 nécessite mise à jour du service Ollama Windows
 HISTORY_WINDOW = 8
 MAX_TOKENS = 200
 TEMPERATURE = 0.7
