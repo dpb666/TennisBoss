@@ -345,6 +345,18 @@ def cmd_status(_args) -> None:
     print()
 
 
+def cmd_quant(args) -> None:
+    import os
+    os.environ.setdefault("BANKROLL", str(args.bankroll))
+    try:
+        import uvicorn
+    except ImportError:
+        log("uvicorn manquant — pip install 'uvicorn[standard]'", "ERROR")
+        sys.exit(1)
+    log(f"Quant API sur http://{args.host}:{args.port}  bankroll={args.bankroll}")
+    uvicorn.run("app.main:app", host=args.host, port=args.port, reload=False)
+
+
 def cmd_reset(args) -> None:
     paths = [config.MEMORY_FILE, config.MEMORY_FILE + ".corrupt"]
     if args.all:
@@ -404,6 +416,13 @@ def main() -> None:
     p_serve.add_argument("--host", default="0.0.0.0", help="Adresse d'écoute")
     p_serve.add_argument("--port", type=int, default=8000, help="Port")
     p_serve.set_defaults(func=cmd_serve)
+
+    p_quant = sub.add_parser("quant", help="Quant API FastAPI (port 8001)")
+    p_quant.add_argument("--host", default="0.0.0.0")
+    p_quant.add_argument("--port", type=int, default=8001)
+    p_quant.add_argument("--bankroll", type=float, default=1000.0,
+                         help="Bankroll initiale pour le moteur de risque")
+    p_quant.set_defaults(func=cmd_quant)
 
     sub.add_parser("db", help="Contenu de la base + backtests").set_defaults(func=cmd_db)
     sub.add_parser("status", help="État du bot").set_defaults(func=cmd_status)
