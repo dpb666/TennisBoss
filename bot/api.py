@@ -688,6 +688,10 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
                          daemon=True).start()
         log(f"Settlement automatique toutes les {interval}s (auto-calibration).")
 
+    # Self-healing agent (DeepSeek R1 via Ollama)
+    from . import healer as _healer
+    _healer.start(_MEM)
+
     # WebSocket odds-api.io — live scores + settlement instantané
     from .live_api import load_env as _load_env; _load_env()
     odds_key = os.environ.get("ODDS_API_KEY", "").strip()
