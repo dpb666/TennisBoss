@@ -15,10 +15,13 @@ import requests
 from .log import log
 
 DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "qwen2.5:7b"   # Ollama sur port 11434 (ou LM Studio "local-model")
+DEFAULT_MODEL = "qwen3:8b"     # Ollama sur port 11434
 HISTORY_WINDOW = 8              # nb de messages conservés dans le contexte glissant
 MAX_TOKENS = 600
 TEMPERATURE = 0.7
+
+# Endpoint génération native Ollama (contourne le bug de timeout du chat template qwen3)
+_OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +145,16 @@ Réponds en français, directement et sans intro superflue. Max 3 paragraphes co
         messages.append(h)
     messages.append({"role": "user", "content": message})
 
+    # Détecte si on est sur Ollama natif (qwen3 et autres thinking models
+    # ont un bug de timeout sur /v1/chat/completions — on utilise /api/generate).
+    is_ollama = "11434" in lm_url or "ollama" in lm_url.lower()
+    if is_ollama:
+        return _chat_via_generate(model, messages)
+    return _chat_via_openai(lm_url, model, messages)
+
+
+def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
+    """Endpoint OpenAI-compatible (/v1/chat/completions) — LM Studio / OpenAI."""
     try:
         resp = requests.post(
             lm_url,
@@ -161,4 +174,55 @@ Réponds en français, directement et sans intro superflue. Max 3 paragraphes co
         raise
     except (KeyError, IndexError) as exc:
         log(f"Réponse LM Studio inattendue : {exc}", "WARN")
+        raise RuntimeError(f"Réponse invalide du LLM : {exc}") from exc
+
+
+def _build_prompt(messages: list) -> str:
+    """Convertit l'historique en prompt texte pour /api/generate."""
+    parts = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if role == "system":
+            parts.append(f"[Système]\n{content}")
+        elif role == "assistant":
+            parts.append(f"[Assistant]\n{content}")
+        else:
+            parts.append(f"[Utilisateur]\n{content}")
+    parts.append("[Assistant]")
+    return "\n\n".join(parts)
+
+
+def _chat_via_generate(model: str, messages: list) -> str:
+    """Endpoint natif Ollama (/api/generate) avec think:false.
+
+    Contourne le bug de timeout du chat template pour les modèles de réflexion
+    (qwen3, deepseek-r1, etc.).  think:false désactive le raisonnement interne
+    pour des réponses rapides (~5-10s vs 60s+).
+    """
+    prompt = _build_prompt(messages)
+    try:
+        resp = requests.post(
+            _OLLAMA_GENERATE_URL,
+            json={
+                "model":  model,
+                "prompt": prompt,
+                "stream": False,
+                "think":  False,          # désactive <think> pour qwen3
+                "options": {
+                    "temperature":    TEMPERATURE,
+                    "num_predict":    MAX_TOKENS,
+                },
+            },
+            timeout=300,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        # qwen3 sépare thinking et response — on prend uniquement response
+        return (data.get("response") or "").strip()
+    except requests.RequestException as exc:
+        log(f"Ollama /api/generate inaccessible : {exc}", "WARN")
+        raise
+    except (KeyError, ValueError) as exc:
+        log(f"Réponse Ollama inattendue : {exc}", "WARN")
         raise RuntimeError(f"Réponse invalide du LLM : {exc}") from exc
