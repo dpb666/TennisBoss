@@ -603,7 +603,7 @@ def api_chat():
         return jsonify({"reply": reply})
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")
-        return jsonify({"error": f"LM Studio inaccessible : {exc}"}), 503
+        return jsonify({"error": f"LLM inaccessible (modèle: {lm_model}) : {exc}"}), 503
 
 
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
