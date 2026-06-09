@@ -15,7 +15,7 @@ import requests
 from .log import log
 
 DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "qwen3:8b"     # Ollama sur port 11434
+DEFAULT_MODEL = "qwen3:4b"     # Ollama sur port 11434 (4b=2.5GB, rentre dans 6GB VRAM)
 HISTORY_WINDOW = 8              # nb de messages conservés dans le contexte glissant
 MAX_TOKENS = 600
 TEMPERATURE = 0.7
