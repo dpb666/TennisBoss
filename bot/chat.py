@@ -15,13 +15,13 @@ import requests
 from .log import log
 
 DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "qwen3:4b"     # Ollama sur port 11434 (2.5GB, think:false)
-HISTORY_WINDOW = 8              # nb de messages conservés dans le contexte glissant
-MAX_TOKENS = 600
+DEFAULT_MODEL = "qwen2.5:7b"   # pas de thinking mode — utiliser qwen3 nécessite Ollama ≥ 0.7
+HISTORY_WINDOW = 8
+MAX_TOKENS = 200
 TEMPERATURE = 0.7
 
-# Endpoint génération native Ollama (contourne le bug de timeout du chat template qwen3)
-_OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+# Endpoint chat natif Ollama — plus rapide que /api/generate pour les modèles thinking
+_OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
 
 
 # ---------------------------------------------------------------------------
@@ -72,31 +72,18 @@ def _detect_players(message: str, players_lower: Dict[str, str]) -> List[str]:
 
 
 def build_context(mem: Dict[str, Any]) -> str:
-    """Contexte statique TennisBoss pour le system prompt."""
+    """Contexte minimal TennisBoss — optimisé pour LLM local (peu de tokens)."""
     lines = []
-    n_players = len(mem.get("players") or {})
-    metrics = mem.get("metrics") or {}
-    lines.append(f"Base : {n_players} joueurs (ATP + WTA), 2022-2026")
-    acc = metrics.get("accuracy")
-    if acc:
-        lines.append(f"Précision modèle (1er set) : {acc:.1%} OOS")
-
     elo = mem.get("elo") or {}
     if elo:
-        top = _top_elo(elo, 12)
-        lines.append("\nTop ELO global :")
-        for name, rating in top:
-            lines.append(f"  {name}: {rating:.0f}")
-
+        top = _top_elo(elo, 5)
+        lines.append("Top ELO: " + ", ".join(f"{n}={r:.0f}" for n, r in top))
     surf = mem.get("elo_surface") or {}
     for surface in ("clay", "hard", "grass"):
         if surface in surf and surf[surface]:
-            top_s = _top_elo(surf[surface], 5)
-            lines.append(f"\nTop ELO {surface} :")
-            for name, rating in top_s:
-                lines.append(f"  {name}: {rating:.0f}")
-
-    return "\n".join(lines)
+            top_s = _top_elo(surf[surface], 2)
+            lines.append(f"{surface}: " + ", ".join(f"{n}={r:.0f}" for n, r in top_s))
+    return " | ".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -125,28 +112,13 @@ def chat(
         if snapshots:
             player_context = "\nJoueurs mentionnés dans la question :\n" + "\n".join(snapshots)
 
-    system = f"""Tu es TennisBoss AI, expert en analyse tennis et prédictions de matchs.
-Tu analyses les données réelles du modèle TennisBoss (régression logistique + ELO avec dominance surface).
-
-DONNÉES EN TEMPS RÉEL :
-{context}{player_context}
-
-RÔLE :
-- Analyser forces/faiblesses (serve, retour, forme récente, ELO surface)
-- Comparer des joueurs, expliquer qui est favori et pourquoi
-- Décrypter la logique ELO (une grosse victoire 6-1 6-2 = plus de points qu'un 7-6 7-6)
-- Signaler les valeurs quand notre proba dépasse le marché
-- Identifier les spécialistes de surface
-
-Réponds en français, directement et sans intro superflue. Max 3 paragraphes courts."""
+    system = f"TennisBoss AI. Données: {context}{player_context} Réponds en français, 3 phrases max."
 
     messages = [{"role": "system", "content": system}]
     for h in (history or [])[-HISTORY_WINDOW:]:
         messages.append(h)
     messages.append({"role": "user", "content": message})
 
-    # Détecte si on est sur Ollama natif (qwen3 et autres thinking models
-    # ont un bug de timeout sur /v1/chat/completions — on utilise /api/generate).
     is_ollama = "11434" in lm_url or "ollama" in lm_url.lower()
     if is_ollama:
         return _chat_via_generate(model, messages)
@@ -177,52 +149,39 @@ def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
         raise RuntimeError(f"Réponse invalide du LLM : {exc}") from exc
 
 
-def _build_prompt(messages: list) -> str:
-    """Convertit l'historique en prompt texte pour /api/generate."""
-    parts = []
-    for m in messages:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if role == "system":
-            parts.append(f"[Système]\n{content}")
-        elif role == "assistant":
-            parts.append(f"[Assistant]\n{content}")
-        else:
-            parts.append(f"[Utilisateur]\n{content}")
-    parts.append("[Assistant]")
-    return "\n\n".join(parts)
+_THINKING_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 def _chat_via_generate(model: str, messages: list) -> str:
-    """Endpoint natif Ollama (/api/generate) avec think:false.
+    """Endpoint natif Ollama (/api/chat) — applique le chat template du modèle.
 
-    Contourne le bug de timeout du chat template pour les modèles de réflexion
-    (qwen3, deepseek-r1, etc.).  think:false désactive le raisonnement interne
-    pour des réponses rapides (~5-10s vs 60s+).
+    think:false désactive le raisonnement pour qwen3 (Ollama ≥ 0.7).
+    Le champ message.thinking est séparé ; message.content est la réponse nette.
     """
-    prompt = _build_prompt(messages)
     try:
         resp = requests.post(
-            _OLLAMA_GENERATE_URL,
+            _OLLAMA_CHAT_URL,
             json={
                 "model":      model,
-                "prompt":     prompt,
+                "messages":   messages,
                 "stream":     False,
-                "think":      False,      # désactive <think> pour qwen3
-                "keep_alive": "60m",      # garde le modèle en VRAM 60 min
+                "think":      False,
+                "keep_alive": "60m",
                 "options": {
                     "temperature": TEMPERATURE,
                     "num_predict": MAX_TOKENS,
                 },
             },
-            timeout=300,
+            timeout=120,
         )
         resp.raise_for_status()
         data = resp.json()
-        # qwen3 sépare thinking et response — on prend uniquement response
-        return (data.get("response") or "").strip()
+        content = (data.get("message") or {}).get("content") or ""
+        # Supprime les balises <think>…</think> résiduelles si le modèle en génère
+        content = _THINKING_RE.sub("", content).strip()
+        return content
     except requests.RequestException as exc:
-        log(f"Ollama /api/generate inaccessible : {exc}", "WARN")
+        log(f"Ollama /api/chat inaccessible : {exc}", "WARN")
         raise
     except (KeyError, ValueError) as exc:
         log(f"Réponse Ollama inattendue : {exc}", "WARN")
