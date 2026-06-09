@@ -31,9 +31,9 @@ object ApiClient {
         apiOverride?.let { return it }
 
         val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)   // LLM local peut être lent
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(300, TimeUnit.SECONDS)   // LLM local : 60-100s chargement VRAM
+            .writeTimeout(15, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
                 if (apiToken.isNotBlank()) {
