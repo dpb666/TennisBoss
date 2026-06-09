@@ -16,13 +16,14 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.CalibMetrics
 import com.tennisboss.app.data.SettledRecent
-import com.tennisboss.app.ui.components.SkeletonList
+import com.tennisboss.app.ui.components.SkeletonList  // noqa
 
 private val GoodColor = Color(0xFF00E5A0)
 private val BadColor = Color(0xFFFF5C7A)
@@ -36,7 +37,11 @@ private val AccentColor = Color(0xFF4F8CFF)
 @Composable
 fun PerformanceScreen(vm: PerformanceViewModel = viewModel()) {
     LaunchedEffect(Unit) {
-        if (vm.state is PerformanceUiState.Idle) vm.load()
+        vm.load()
+        while (true) {
+            delay(30_000)
+            vm.load()
+        }
     }
 
     Column(
@@ -45,10 +50,10 @@ fun PerformanceScreen(vm: PerformanceViewModel = viewModel()) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("📊 Performance du modèle", style = MaterialTheme.typography.headlineSmall,
+        Text("📊 Performance de l'IA", style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold)
         Text(
-            "Mesuré sur les matchs réellement terminés.",
+            "Suivi de la précision des prédictions algorithmiques.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -72,7 +77,7 @@ fun PerformanceScreen(vm: PerformanceViewModel = viewModel()) {
 
 @Composable
 private fun Content(m: CalibMetrics, k: Double, recent: List<SettledRecent>) {
-    if (m.n == 0) {
+    if (m.n == 0 && recent.isEmpty()) {
         Text(
             "Pas encore de match réglé. La calibration se fera automatiquement " +
                 "dès que des matchs suivis seront terminés.",
@@ -83,6 +88,15 @@ private fun Content(m: CalibMetrics, k: Double, recent: List<SettledRecent>) {
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (m.n == 0 && recent.isNotEmpty()) {
+            item {
+                Text(
+                    "Matchs réglés en attente d'appariement aux prédictions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -57,12 +57,12 @@ fun PredictScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            "🎾 TennisBoss",
+            "🎾 TennisBoss AI",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            "Prédiction du 1er set",
+            "Prédiction du 1er set par Intelligence Artificielle",
             style = MaterialTheme.typography.titleMedium,
         )
 
@@ -90,7 +90,7 @@ fun PredictScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = vm.state !is PredictUiState.Loading,
         ) {
-            Text("Prédire")
+            Text("Analyser avec l'IA")
         }
 
         when (val s = vm.state) {
@@ -119,7 +119,7 @@ private fun ResultCard(d: PredictResponse) {
 
             Spacer(Modifier.height(4.dp))
             Text(
-                d.first_set.verdict,
+                "🤖 Verdict de l'IA : " + d.first_set.verdict,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )

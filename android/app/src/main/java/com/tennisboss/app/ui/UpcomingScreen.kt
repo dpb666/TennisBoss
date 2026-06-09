@@ -61,7 +61,7 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            "Matchs à venir",
+            "Matchs à venir (Analyse IA)",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )

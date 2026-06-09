@@ -57,10 +57,10 @@ fun ValueScreen(vm: ValueViewModel = viewModel()) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("💎 Value bets", style = MaterialTheme.typography.headlineSmall,
+                Text("💎 Value bets (IA)", style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold)
                 Text(
-                    "EV = proba modèle (match) × cote − 1",
+                    "Détection d'anomalies par IA",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
