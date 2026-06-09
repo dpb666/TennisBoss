@@ -55,16 +55,12 @@ def _load_state() -> None:
         except Exception as exc:  # noqa: BLE001
             log(f"Backfill surface ignoré ({exc}).", "WARN")
 
-    # ELO global + ELO par surface, depuis l'archive chronologique.
-    _MEM["elo"] = {}
-    _MEM["elo_surface"] = {"hard": {}, "clay": {}, "grass": {}}
-    for r in db.all_matches_chrono():
-        m = r["margin"]
-        mult = elo.mult_from_margin(m) if m is not None else 1.0
-        elo.update(_MEM["elo"], r["winner"], r["loser"], mult=mult)
-        surf = r["surface"]
-        if surf in _MEM["elo_surface"]:
-            elo.update(_MEM["elo_surface"][surf], r["winner"], r["loser"], mult=mult)
+    # ELO global + ELO par surface avec K dynamique + dominance.
+    rows = db.all_matches_chrono()
+    _MEM["elo"], _ = elo.build_dynamic(rows)
+    _MEM["elo_surface"] = {}
+    for surf in ("hard", "clay", "grass"):
+        _MEM["elo_surface"][surf], _ = elo.build_dynamic(rows, surface_key=surf)
     # Rejeu des matchs réglés sur l'ELO global (apprentissage continu, survit aux reboots).
     known = _MEM["players"]
     replayed = 0

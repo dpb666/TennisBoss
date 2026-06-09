@@ -129,8 +129,10 @@ def cmd_backtest(args) -> None:
     if args.tours:
         cfg["tours"] = args.tours
     db.init()
-    log(f"Backtest — années {cfg['years']} | tours {cfg['tours']}")
-    matches = datasource.fetch_matches(cfg["years"], cfg["tours"])
+    challengers = getattr(args, "challengers", False)
+    log(f"Backtest — années {cfg['years']} | tours {cfg['tours']}{' + Futures/ITF' if challengers else ''}")
+    matches = datasource.fetch_matches(cfg["years"], cfg["tours"],
+                                       include_challengers=challengers)
     if not matches:
         log("Aucune donnée récupérée. Abandon.", "ERROR")
         sys.exit(1)
@@ -383,6 +385,8 @@ def main() -> None:
     p_bt = sub.add_parser("backtest", help="Backtest hors-échantillon (archivé)")
     p_bt.add_argument("--years", nargs="+", type=int, help="Années à charger")
     p_bt.add_argument("--tours", nargs="+", choices=["atp", "wta"], help="Tours")
+    p_bt.add_argument("--challengers", action="store_true",
+                      help="Inclure les Futures/ITF ATP dans le backtest")
     p_bt.set_defaults(func=cmd_backtest)
 
     p_up = sub.add_parser("upcoming", help="Matchs à venir (live) + prédiction 1er set")

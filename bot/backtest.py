@@ -26,16 +26,19 @@ def _safe_log(p: float) -> float:
 
 
 def _build_elo(matches: List[Dict]) -> tuple:
-    """Construit ELO global et par surface à partir d'une liste de matchs."""
+    """Construit ELO global et par surface avec K dynamique + dominance."""
     ratings: Dict[str, float] = {}
+    n_played: Dict[str, int] = {}
     surf_ratings: Dict[str, Dict[str, float]] = defaultdict(dict)
+    surf_n: Dict[str, Dict[str, int]] = defaultdict(dict)
     for m in matches:
         mult = elo_mod.mult_from_margin(m.get("margin") or 0)
-        elo_mod.update(ratings, m["winner_name"], m["loser_name"], mult=mult)
+        elo_mod.update_dynamic(ratings, n_played, m["winner_name"], m["loser_name"], mult=mult)
         surf = (m.get("surface") or "").lower()
         if surf in ("hard", "clay", "grass"):
-            elo_mod.update(surf_ratings[surf], m["winner_name"], m["loser_name"], mult=mult)
-    return ratings, dict(surf_ratings)
+            elo_mod.update_dynamic(surf_ratings[surf], surf_n[surf],
+                                   m["winner_name"], m["loser_name"], mult=mult)
+    return ratings, dict(surf_ratings), n_played, dict(surf_n)
 
 
 def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[str, Any]:
@@ -55,8 +58,8 @@ def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[
         _train_one(mem, m, lr, reg, alpha)
     weights, bias = mem["weights"], mem["bias"]
 
-    # ELO construit sur les matchs d'entraînement (avec dominance)
-    elo_ratings, elo_surface = _build_elo(train)
+    # ELO construit sur les matchs d'entraînement (K dynamique + dominance)
+    elo_ratings, elo_surface, elo_n, elo_surf_n = _build_elo(train)
     blend = predictor.ELO_BLEND
 
     # --- Phase test : poids GELÉS, ELO mis à jour match après match ----------
@@ -98,16 +101,17 @@ def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[
         logloss_elo += -_safe_log(p_win_elo)
         brier_elo += (1.0 - p_win_elo) ** 2
 
-        # Mise à jour profils et ELO live
+        # Mise à jour profils et ELO live (K dynamique)
         tour = m.get("tour")
         features.update_profile(mem, n1, m["winner"], True, alpha, tour)
         features.update_profile(mem, n2, m["loser"], False, alpha, tour)
         mult = elo_mod.mult_from_margin(m.get("margin") or 0)
-        elo_mod.update(elo_ratings, n1, n2, mult=mult)
+        elo_mod.update_dynamic(elo_ratings, elo_n, n1, n2, mult=mult)
         if surf in ("hard", "clay", "grass"):
             if surf not in elo_surface:
                 elo_surface[surf] = {}
-            elo_mod.update(elo_surface[surf], n1, n2, mult=mult)
+                elo_surf_n[surf] = {}
+            elo_mod.update_dynamic(elo_surface[surf], elo_surf_n[surf], n1, n2, mult=mult)
 
     report = {
         "span": f"{matches[0]['date']}..{matches[-1]['date']}",
