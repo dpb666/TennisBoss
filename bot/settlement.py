@@ -12,14 +12,40 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from . import db, elo, features, live_api, predictor
+from . import db, elo, features, live_api, odds_api, predictor
 
 
 def run_settlement(mem: Dict[str, Any],
                    resolve: Callable[[str], Optional[str]],
                    days_back: int = 2) -> Dict[str, Any]:
-    """Enregistre les matchs terminés récents avec la prédiction du modèle."""
+    """Enregistre les matchs terminés récents avec la prédiction du modèle.
+
+    Sources : API-Tennis (primaire) + odds-api.io /events?status=settled (secondaire).
+    """
     results = live_api.fetch_results({"live_api_provider": "api-tennis"}, days_back)
+
+    # Compléter avec les résultats odds-api.io (disponibles 24h après la fin du match)
+    settled_odds = odds_api.fetch_settled_events()
+    existing_keys = {r.get("event_key") for r in results}
+    for e in settled_odds:
+        eid = str(e.get("id") or "")
+        if eid and eid not in existing_keys:
+            home, away = e.get("home", ""), e.get("away", "")
+            scores = e.get("scores") or {}
+            home_s = scores.get("home", 0)
+            away_s = scores.get("away", 0)
+            winner = "p1" if home_s > away_s else ("p2" if away_s > home_s else None)
+            if winner and home and away:
+                results.append({
+                    "event_key": f"odds_{eid}",
+                    "player1": home, "player2": away,
+                    "winner": winner,
+                    "final_score": f"{home_s} - {away_s}",
+                    "sets": [], "status": "finished",
+                    "tournament": e.get("league", ""), "round": "",
+                    "date": e.get("date", ""), "tour": "atp", "is_doubles": False,
+                    "finished": True,
+                })
     added = 0
     for r in results:
         ek = r.get("event_key")

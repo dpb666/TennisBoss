@@ -149,7 +149,10 @@ def is_enabled() -> bool:
 
 
 def fetch_tennis_events(upcoming_only: bool = True) -> List[Dict[str, Any]]:
-    """Liste des événements tennis (id, home, away, date, league, status). Caché 60 s."""
+    """Liste des événements tennis (id, home, away, date, league, status). Caché 60 s.
+
+    v3 update: /events renvoie les 14 prochains jours par défaut (jusqu'à 5000 events).
+    """
     key = _key()
     if not key:
         return []
@@ -159,6 +162,21 @@ def fetch_tennis_events(upcoming_only: bool = True) -> List[Dict[str, Any]]:
     if upcoming_only:
         events = [e for e in events
                   if e.get("status") in ("pending", "live", "inplay", "not_started")]
+    return events
+
+
+def fetch_settled_events() -> List[Dict[str, Any]]:
+    """Résultats terminés des dernières 24h (v3 update: /events?status=settled).
+
+    Complément à API-Tennis pour le settlement : source cotes avec résultats.
+    """
+    key = _key()
+    if not key:
+        return []
+    events = _get("/events", {"sport": "tennis", "status": "settled", "apiKey": key},
+                  ttl=300)  # résultats terminés changent peu, cache 5min
+    if not isinstance(events, list):
+        return []
     return events
 
 
