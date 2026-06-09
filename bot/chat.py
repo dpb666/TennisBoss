@@ -128,9 +128,19 @@ def chat(
         if snapshots:
             player_context = "\nJoueurs mentionnés dans la question :\n" + "\n".join(snapshots)
 
+    # Recherche web si la question porte sur des données fraîches
+    from .search import needs_search, web_search
+    web_context = ""
+    if needs_search(message):
+        snippets = web_search(message)
+        if snippets:
+            web_context = f"\nWeb (récent):\n{snippets}"
+            log(f"Web search injecté ({len(snippets)} chars)", "INFO")
+
     lang = _detect_lang(message)
     reply_instr = "Reply in English, max 3 sentences." if lang == "en" else "Réponds en français, 3 phrases max."
-    system = f"TennisBoss AI. Data: {context}{player_context} {reply_instr}"
+    web_instr = " Use the web results above to answer — do not say you lack real-time data." if web_context else ""
+    system = f"TennisBoss AI. Data: {context}{player_context}{web_context} {reply_instr}{web_instr}"
 
     messages = [{"role": "system", "content": system}]
     for h in (history or [])[-HISTORY_WINDOW:]:
