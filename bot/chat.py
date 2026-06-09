@@ -71,6 +71,22 @@ def _detect_players(message: str, players_lower: Dict[str, str]) -> List[str]:
     return found
 
 
+_FR_WORDS = frozenset(
+    "qui va le la les est sont sur avec pour dans au aux du des mais ou donc "
+    "ne pas très bien aussi même plus moins quel quelle quels quelles".split()
+)
+_EN_WORDS = frozenset(
+    "who will the is are on with for in at of and but or not very well also "
+    "more less what which how when where why should would could can".split()
+)
+
+def _detect_lang(text: str) -> str:
+    """Retourne 'fr' ou 'en' selon la langue détectée (heuristique rapide)."""
+    words = set(text.lower().split())
+    score = sum(1 for w in words if w in _EN_WORDS) - sum(1 for w in words if w in _FR_WORDS)
+    return "en" if score > 0 else "fr"
+
+
 def build_context(mem: Dict[str, Any]) -> str:
     """Contexte minimal TennisBoss — optimisé pour LLM local (peu de tokens)."""
     lines = []
@@ -112,7 +128,9 @@ def chat(
         if snapshots:
             player_context = "\nJoueurs mentionnés dans la question :\n" + "\n".join(snapshots)
 
-    system = f"TennisBoss AI. Données: {context}{player_context} Réponds en français, 3 phrases max."
+    lang = _detect_lang(message)
+    reply_instr = "Reply in English, max 3 sentences." if lang == "en" else "Réponds en français, 3 phrases max."
+    system = f"TennisBoss AI. Data: {context}{player_context} {reply_instr}"
 
     messages = [{"role": "system", "content": system}]
     for h in (history or [])[-HISTORY_WINDOW:]:
