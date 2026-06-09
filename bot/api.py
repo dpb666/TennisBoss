@@ -606,6 +606,42 @@ def api_chat():
         return jsonify({"error": f"LLM inaccessible (modèle: {lm_model}) : {exc}"}), 503
 
 
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    """Upload d'un fichier (PDF/CSV/TXT) — retourne le texte extrait.
+
+    Multipart: champ 'file'. La question optionnelle 'message' permet de
+    poser une question sur le fichier directement dans la même requête.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "champ 'file' manquant"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "fichier vide"}), 400
+    try:
+        from .file_parser import parse
+        text, ftype = parse(f.filename, f.read())
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 415
+    except Exception as exc:
+        return jsonify({"error": f"Erreur lecture fichier : {exc}"}), 500
+
+    message = (request.form.get("message") or "").strip()
+    if not message:
+        return jsonify({"extracted_text": text, "type": ftype})
+
+    # Question posée sur le fichier → injecter le texte dans le chat
+    lm_url   = os.environ.get("LM_STUDIO_URL",   config.LM_STUDIO_URL)
+    lm_model = os.environ.get("LM_STUDIO_MODEL", config.LM_STUDIO_MODEL)
+    augmented = f"{message}\n\n[Contenu du fichier {f.filename}]\n{text}"
+    try:
+        reply = chat_mod.chat(augmented, [], _MEM, lm_url, model=lm_model)
+        return jsonify({"reply": reply, "extracted_text": text, "type": ftype})
+    except Exception as exc:
+        log(f"Chat upload LLM en échec : {exc}", "WARN")
+        return jsonify({"error": f"LLM inaccessible : {exc}"}), 503
+
+
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
     ev = odds_api.find_event(odds_index, raw1, raw2)
     if not ev:
@@ -652,4 +688,36 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
                          daemon=True).start()
         log(f"Settlement automatique toutes les {interval}s (auto-calibration).")
 
+    # WebSocket odds-api.io — live scores + settlement instantané
+    from .live_api import load_env as _load_env; _load_env()
+    odds_key = os.environ.get("ODDS_API_KEY", "").strip()
+    if odds_key:
+        from . import odds_ws
+        odds_ws.start(
+            api_key=odds_key,
+            on_status=_ws_on_status,
+        )
+
     app.run(host=host, port=port, threaded=True)
+
+
+def _ws_on_status(msg: dict) -> None:
+    """Callback WebSocket : règle immédiatement un match settled."""
+    if msg.get("status") != "settled":
+        return
+    scores = msg.get("scores") or {}
+    home_s = scores.get("home", 0)
+    away_s = scores.get("away", 0)
+    if home_s == away_s:
+        return
+    eid = str(msg.get("id", ""))
+    if not eid or settlement.db.settled_exists(f"ws_{eid}"):
+        return
+
+    from .log import log
+    log(f"WS settled: event {eid} ({home_s}-{away_s})", "INFO")
+    # Déclencher un settlement ciblé au prochain cycle (simple flag)
+    _WS_PENDING.add(eid)
+
+
+_WS_PENDING: set = set()

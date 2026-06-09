@@ -1,5 +1,7 @@
 package com.tennisboss.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -51,8 +54,15 @@ import com.tennisboss.app.data.ChatMessage
 
 @Composable
 fun ChatScreen(vm: ChatViewModel = viewModel()) {
+    val context = LocalContext.current
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
+
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { vm.uploadFile(context, it, "Analyse ce fichier et résume les informations clés") }
+    }
 
     // Scroll automatique au dernier message
     LaunchedEffect(vm.messages.size) {
@@ -135,6 +145,13 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Bouton upload fichier
+            IconButton(
+                onClick = { filePicker.launch("*/*") },
+                enabled = !vm.loading,
+            ) {
+                Text("📎", fontSize = 20.sp)
+            }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
