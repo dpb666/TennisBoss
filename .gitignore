@@ -5,6 +5,13 @@ logs/
 # Firebase (retiré du build — fichier orphelin, ne pas versionner)
 android/app/google-services.json
 
+# Android build artifacts
+*.apk
+*.aab
+*.bundle
+android/app/build/
+android/.gradle/
+
 # Python
 __pycache__/
 *.py[cod]

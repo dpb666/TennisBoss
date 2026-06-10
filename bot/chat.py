@@ -128,14 +128,23 @@ def chat(
         if snapshots:
             player_context = "\nJoueurs mentionnés dans la question :\n" + "\n".join(snapshots)
 
-    # Recherche web si la question porte sur des données fraîches
+    # Recherche web si la question porte sur des données fraîches (cap 10s)
     from .search import needs_search, web_search
+    import threading
     web_context = ""
     if needs_search(message):
-        snippets = web_search(message)
+        _result: list = []
+        def _do_search():
+            _result.append(web_search(message))
+        t = threading.Thread(target=_do_search, daemon=True)
+        t.start()
+        t.join(timeout=10)
+        snippets = _result[0] if _result else None
         if snippets:
             web_context = f"\nWeb (récent):\n{snippets}"
             log(f"Web search injecté ({len(snippets)} chars)", "INFO")
+        elif not _result:
+            log("Web search timeout (>10s) — ignoré", "WARN")
 
     lang = _detect_lang(message)
     reply_instr = "Reply in English, max 3 sentences." if lang == "en" else "Réponds en français, 3 phrases max."

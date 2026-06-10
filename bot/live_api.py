@@ -42,7 +42,7 @@ def _cached_request(params: Dict[str, Any], ttl: float) -> Optional[Any]:
     if hit and hit[0] > now:
         return hit[1]
     try:
-        resp = requests.get(API_TENNIS_URL, params=params, timeout=20)
+        resp = requests.get(API_TENNIS_URL, params=params, timeout=8)
         resp.raise_for_status()
         payload = resp.json()
     except (requests.RequestException, ValueError) as exc:

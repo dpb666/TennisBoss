@@ -18,19 +18,19 @@ from .log import log
 # Configuration
 HEALTH_URL      = "http://127.0.0.1:8000/health"
 OLLAMA_URL      = "http://127.0.0.1:11434/api/chat"
-HEALER_MODEL    = "deepseek-r1:8b"
-HEALER_FALLBACK = "qwen2.5:7b"   # utilisé si deepseek-r1:8b pas encore dispo
+HEALER_MODEL    = "qwen2.5:7b"    # même modèle que le chat — pas de chargement concurrent
+HEALER_FALLBACK = "deepseek-r1:8b"
 LOG_FILE        = Path("/tmp/serve.log")
 SERVE_CMD       = ["python3", "run.py", "serve"]
 
 HEALTH_INTERVAL    = 60    # secondes entre chaque ping
-LOG_INTERVAL       = 300   # analyse logs toutes les 5 min
+LOG_INTERVAL       = 900   # analyse logs toutes les 15 min
 ACCURACY_INTERVAL  = 1800  # check précision toutes les 30 min
 LOG_TAIL_LINES     = 50    # dernières lignes de log à analyser
 
 _running = False
-_last_log_check    = 0.0
-_last_accuracy_check = 0.0
+_last_log_check: float = 0.0
+_last_accuracy_check: float = 0.0
 _server_proc: Optional[subprocess.Popen] = None
 
 
@@ -54,6 +54,10 @@ def stop() -> None:
 
 def _loop(mem: Dict[str, Any]) -> None:
     global _last_log_check, _last_accuracy_check
+    # Délai initial : laisser le serveur démarrer et le modèle chat se charger
+    time.sleep(120)
+    _last_log_check = time.time()
+    _last_accuracy_check = time.time()
     while _running:
         now = time.time()
         try:
