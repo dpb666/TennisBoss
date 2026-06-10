@@ -26,7 +26,7 @@ from flask import Flask, jsonify, request
 
 from . import (auto_learner, calibrate, chat as chat_mod, config, datasource,
                db, elo, features, live_api, memory, namematch, odds_api,
-               predictor, settlement)
+               predictor, sackmann_feeder, settlement)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -597,6 +597,24 @@ def api_learn_run():
         return jsonify({"status": "ok", "learning": result})
     except Exception as e:  # noqa: BLE001
         log(f"auto-learning error: {e}", "ERROR")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/ingest/sackmann")
+def api_ingest_sackmann():
+    """Ingest Sackmann tennis data (GitHub) : ATP & WTA 2022-2026."""
+    start_year = int(request.args.get("start_year", 2022))
+    end_year = int(request.args.get("end_year", 2026))
+    try:
+        counts = sackmann_feeder.ingest_year_range(start_year, end_year)
+        return jsonify({
+            "status": "ok",
+            "ingest": counts,
+            "message": f"Ingested {counts['inserted']} new matches, "
+                      f"{counts['duplicates']} duplicates, {counts['skipped']} skipped (unknown players)"
+        })
+    except Exception as e:  # noqa: BLE001
+        log(f"sackmann ingest error: {e}", "ERROR")
         return jsonify({"error": str(e)}), 500
 
 
