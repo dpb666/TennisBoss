@@ -17,7 +17,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
+from app.api import realtime_ws
 from app.core.engine import init_engine
+from bot import realtime, realtime_alerts
 
 # ---------------------------------------------------------------------------
 # Shared application state (populated at startup)
@@ -63,6 +65,17 @@ async def lifespan(app: FastAPI):
     init_engine(bankroll)
     logger.info("Risk engine initialised — bankroll=%.2f", bankroll)
 
+    # Real-time settlement engine + alerts
+    realtime_alerts.init()
+    engine = realtime.init(_MEM)
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        loop.create_task(engine.start())
+        logger.info("Real-time settlement engine started.")
+    except Exception as e:
+        logger.warning("Could not start async engine: %s", e)
+
     yield
 
     # ---- shutdown ----------------------------------------------------------
@@ -90,6 +103,7 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api/v2")
+app.include_router(realtime_ws.router, prefix="/api/v2")
 
 # Root redirect to docs
 @app.get("/", include_in_schema=False)

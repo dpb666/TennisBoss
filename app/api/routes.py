@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.core.engine import BettingEngine, get_risk_engine
@@ -134,3 +135,11 @@ def health():
         "elo_loaded":     bool(_MEM.get("elo")),
         "cache_size":     cache.size(),
     }
+
+
+@router.get("/dashboard", include_in_schema=False)
+def dashboard():
+    """Serve real-time ROI dashboard."""
+    import os
+    dashboard_path = os.path.join(os.path.dirname(__file__), "..", "static", "realtime-dashboard.html")
+    return FileResponse(dashboard_path, media_type="text/html")
