@@ -1,0 +1,19 @@
+[Unit]
+Description=TennisBoss Scheduler (learn + ingest + monitor)
+After=tennisboss.service
+
+[Service]
+Type=simple
+User=tennisboss
+WorkingDirectory=/opt/tennisboss
+Environment="PATH=/opt/tennisboss/.venv/bin"
+ExecStart=/opt/tennisboss/.venv/bin/python3 -c "from bot.scheduler import run_scheduler; run_scheduler()"
+Restart=always
+RestartSec=10s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tennisboss-scheduler
+
+[Install]
+WantedBy=multi-user.target

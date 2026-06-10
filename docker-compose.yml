@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  tennisboss:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./state:/app/state
+      - ./logs:/app/logs
+    environment:
+      - TENNISBOSS_LOG_LEVEL=INFO
+      - ODDS_API_KEY=${ODDS_API_KEY:-}
+      - AT_API_KEY=${AT_API_KEY:-}
+      - LM_STUDIO_URL=http://localhost:1234/v1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Optional: LM Studio for local LLM (chat endpoint)
+  # lm-studio:
+  #   image: lmstudio/lmstudio:latest
+  #   ports:
+  #     - "1234:1234"
+  #   volumes:
+  #     - ./models:/root/.cache/lm-studio/models
+
+  # Optional: Monitoring + cron jobs (future)
+  # tennis-scheduler:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.scheduler
+  #   environment:
+  #     - API_URL=http://tennisboss:8000
+  #   depends_on:
+  #     - tennisboss
