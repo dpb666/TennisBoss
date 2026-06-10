@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
-from app.api import realtime_ws
+from app.api import realtime_ws, trading_routes, risk_routes, chat_routes
 from app.core.engine import init_engine
 from bot import realtime, realtime_alerts
 
@@ -76,6 +76,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not start async engine: %s", e)
 
+    # Trading engines
+    trading_routes.init_trading_engines()
+    logger.info("Trading engines initialized.")
+
+    # Risk engines
+    risk_routes.init_risk_engines()
+    logger.info("Risk engines initialized.")
+
     yield
 
     # ---- shutdown ----------------------------------------------------------
@@ -104,6 +112,9 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api/v2")
 app.include_router(realtime_ws.router, prefix="/api/v2")
+app.include_router(trading_routes.router)
+app.include_router(risk_routes.router)
+app.include_router(chat_routes.router)
 
 # Root redirect to docs
 @app.get("/", include_in_schema=False)
