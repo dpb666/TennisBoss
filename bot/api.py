@@ -24,9 +24,9 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
-from . import (calibrate, chat as chat_mod, config, datasource, db, elo,
-               features, live_api, memory, namematch, odds_api, predictor,
-               settlement)
+from . import (auto_learner, calibrate, chat as chat_mod, config, datasource,
+               db, elo, features, live_api, memory, namematch, odds_api,
+               predictor, settlement)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -586,6 +586,18 @@ def api_calibration():
     return jsonify({"metrics": metrics, "calibration_k": round(_CALIB_K, 3),
                     "elo_blend": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 2),
                     "recent": recent})
+
+
+@app.post("/api/learn/run")
+def api_learn_run():
+    """Déclenche un cycle d'auto-learning : tuning par surface + k-fold eval."""
+    try:
+        learner = auto_learner.AutoLearner()
+        result = learner.run_full_cycle()
+        return jsonify({"status": "ok", "learning": result})
+    except Exception as e:  # noqa: BLE001
+        log(f"auto-learning error: {e}", "ERROR")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/chat", methods=["POST"])
