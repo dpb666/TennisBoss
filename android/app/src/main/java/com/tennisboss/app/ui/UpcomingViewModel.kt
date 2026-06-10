@@ -51,7 +51,10 @@ class UpcomingViewModel : ViewModel() {
                 }
                 UpcomingUiState.Success(sortUpcoming(resp.matches))
             } catch (e: HttpException) {
-                UpcomingUiState.Error("Erreur serveur (HTTP ${e.code()}).")
+                when (e.code()) {
+                    429 -> UpcomingUiState.Error("Cotes rate-limitées. Cache disponible si rechargement.")
+                    else -> UpcomingUiState.Error("Erreur serveur (HTTP ${e.code()}).")
+                }
             } catch (e: Exception) {
                 UpcomingUiState.Error("Connexion impossible : ${e.message}")
             }

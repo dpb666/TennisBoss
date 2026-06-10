@@ -34,10 +34,10 @@ class ValueViewModel : ViewModel() {
                 }
                 ValueUiState.Success(resp.comparisons)
             } catch (e: HttpException) {
-                if (e.code() == 503) {
-                    ValueUiState.Error("Cotes indisponibles : clé ODDS_API absente côté serveur.")
-                } else {
-                    ValueUiState.Error("Erreur serveur (HTTP ${e.code()}).")
+                when (e.code()) {
+                    503 -> ValueUiState.Error("Cotes indisponibles : clé ODDS_API absente côté serveur.")
+                    429 -> ValueUiState.Error("Service rate-limité. Cotes réessayées automatiquement.")
+                    else -> ValueUiState.Error("Erreur serveur (HTTP ${e.code()}).")
                 }
             } catch (e: Exception) {
                 ValueUiState.Error("Connexion impossible : ${e.message}")
