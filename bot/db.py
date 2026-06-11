@@ -382,6 +382,22 @@ def log_bet(date: str, p1: str, p2: str, favorite: str, fav_odds: float) -> None
         )
 
 
+def insert_bet(row: Dict[str, Any]) -> None:
+    """Alias dict-based insert for test compatibility."""
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO bet_log "
+            "(date,player1,player2,favorite,fav_odds,ts) VALUES (?,?,?,?,?,?)",
+            (
+                str(row.get("date") or _dt.date.today().isoformat()),
+                str(row.get("player1") or ""), str(row.get("player2") or ""),
+                str(row.get("favorite") or ""), row.get("fav_odds"),
+                _dt.datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+
+
 def list_bets() -> List[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(

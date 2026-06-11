@@ -172,7 +172,7 @@ class RealtimeSettlementEngine:
 
     def _compute_roi_delta(self, settled: Dict[str, Any]) -> float:
         """Estimate ROI for this one match if we have odds."""
-        bets = {frozenset((b["player1"], b["player2"])): b for b in db.list_bets()}
+        bets = {frozenset((b["player1"], b["player2"])): dict(b) for b in db.list_bets()}
         b = bets.get(frozenset((settled["player1"], settled["player2"])))
         if not b or b.get("fav_odds") is None:
             return 0.0
