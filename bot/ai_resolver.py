@@ -156,6 +156,14 @@ def _resolve_ranking(raw: str) -> Tuple[Optional[str], float]:
 
 _WIKI_API = "https://en.wikipedia.org/w/api.php"
 
+# Titres d'articles qui ne sont PAS des joueurs (tournois, circuits, saisons).
+# Un nom de personne ne contient ni chiffre ni ces mots-clés.
+_NON_PERSON = re.compile(
+    r"\d|\b(tour|open|cup|championship|championships|masters|tournament|"
+    r"challenger|itf|atp|wta|grand slam|olympics|davis|billie jean)\b",
+    re.I,
+)
+
 def _resolve_wikipedia(raw: str) -> Tuple[Optional[str], float, Optional[Dict]]:
     """Search Wikipedia for the player, parse infobox for basic stats."""
     try:
@@ -193,6 +201,8 @@ def _resolve_wikipedia(raw: str) -> Tuple[Optional[str], float, Optional[Dict]]:
 
         # Clean up full name from title
         full = re.sub(r'\(.*?\)', '', title).strip()
+        if _NON_PERSON.search(full):
+            return None, 0.0, None  # article de tournoi/circuit, pas un joueur
         conf = 0.80 if tour_m else 0.60
         return full, conf, profile
 

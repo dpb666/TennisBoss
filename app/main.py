@@ -86,6 +86,8 @@ async def lifespan(app: FastAPI):
     logger.info("Risk engines initialized.")
 
     # WebSocket odds-api.io v3 — live scores + settlement instantané
+    from bot.live_api import load_env
+    load_env()  # ODDS_API_KEY vit dans .env, pas forcément dans os.environ
     odds_key = os.environ.get("ODDS_API_KEY", "").strip()
     if odds_key:
         try:
