@@ -158,11 +158,28 @@ def calibration_metrics() -> Dict[str, Any]:
         profits.append((b["fav_odds"] - 1.0) if won else -1.0)
     roi = round(sum(profits) / len(profits), 4) if profits else None
 
+    # ROI value : mise 1u sur chaque value pick blendé (stratégie value betting).
+    # On joint sur TOUS les réglés (pas seulement "judged") : un pick reste un
+    # pari même si le modèle n'avait pas de prédiction enregistrée.
+    picks = {frozenset((p["player1"], p["player2"])): p for p in db.list_value_picks()}
+    v_profits = []
+    for r in rows:
+        if r["winner"] is None:
+            continue
+        p = picks.get(frozenset((r["player1"], r["player2"])))
+        if not p or not p["odds"] or p["odds"] <= 1.0:
+            continue
+        won = (r["winner"] == p["side"])
+        v_profits.append((p["odds"] - 1.0) if won else -1.0)
+    roi_value = round(sum(v_profits) / len(v_profits), 4) if v_profits else None
+
     return {
         "n": n,
         "accuracy": _acc(judged),
         "roi": roi,
         "roi_n": len(profits),
+        "roi_value": roi_value,
+        "roi_value_n": len(v_profits),
         "brier": brier,
         "atp_acc": _acc([r for r in judged if r["tour"] == "atp"]),
         "wta_acc": _acc([r for r in judged if r["tour"] == "wta"]),

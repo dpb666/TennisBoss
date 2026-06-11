@@ -81,6 +81,28 @@ class TestCalibrationMetrics(unittest.TestCase):
         self.assertEqual(m["roi_n"], 2)
         self.assertAlmostEqual(m["roi"], (0.5 - 1.0) / 2, places=4)
 
+    def test_roi_value_depuis_value_picks(self):
+        # Pick outsider B coté 3.0, B gagne -> +2.0 ; pick D coté 2.5, C gagne -> -1.
+        db.insert_settled({"event_key": "1", "date": "d", "tour": "atp",
+                           "tournament": "T", "player1": "A", "player2": "B",
+                           "winner": "B", "final_score": "", "sets": [],
+                           "pred_favorite": "A", "pred_prob1": 60.0, "correct": 0})
+        db.log_value_pick("d", "A", "B", "B", 3.0, 5.2)
+        db.insert_settled({"event_key": "2", "date": "d", "tour": "atp",
+                           "tournament": "T", "player1": "C", "player2": "D",
+                           "winner": "C", "final_score": "", "sets": [],
+                           "pred_favorite": "C", "pred_prob1": 55.0, "correct": 1})
+        db.log_value_pick("d", "C", "D", "D", 2.5, 3.1)
+        m = settlement.calibration_metrics()
+        self.assertEqual(m["roi_value_n"], 2)
+        self.assertAlmostEqual(m["roi_value"], (2.0 - 1.0) / 2, places=4)
+
+    def test_roi_value_sans_picks(self):
+        self._settle("1", "atp", "A", "A", 70.0, 1)
+        m = settlement.calibration_metrics()
+        self.assertIsNone(m["roi_value"])
+        self.assertEqual(m["roi_value_n"], 0)
+
     def test_precision_et_segments(self):
         self._settle("1", "atp", "A", "A", 70.0, 1)   # favori clair, correct
         self._settle("2", "atp", "B", "Z", 65.0, 0)   # favori clair, raté

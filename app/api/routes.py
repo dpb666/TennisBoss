@@ -407,6 +407,14 @@ def value_ai(
         best_side = n1 if ev1 >= ev2 else n2
         best_odds = ho if ev1 >= ev2 else ao
 
+        # Paper-trading : capture le value pick blendé (ROI au settlement).
+        if source == "bookmaker" and best_ev > 0 and best_odds:
+            try:
+                _db.log_value_pick(ev.get("date", ""), n1, n2, best_side,
+                                   best_odds, round(best_ev * 100, 1))
+            except Exception:
+                pass
+
         if value_only and best_ev <= 0:
             continue
         if best_ev < min_ev:

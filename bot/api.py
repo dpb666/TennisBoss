@@ -506,6 +506,15 @@ def api_value():
             except Exception:  # noqa: BLE001
                 pass
 
+        # Paper-trading : capture le value pick blendé (ROI mesuré au settlement).
+        if best_ev > 0:
+            pick_odds = ho if best_side == n1 else ao
+            try:
+                db.log_value_pick(e.get("date", ""), n1, n2, best_side,
+                                  pick_odds, round(best_ev * 100, 1))
+            except Exception:  # noqa: BLE001
+                pass
+
         out.append({
             "player1": n1, "player2": n2,
             "league": (e.get("league") or {}).get("name", ""),

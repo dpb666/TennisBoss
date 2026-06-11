@@ -106,6 +106,16 @@ CREATE TABLE IF NOT EXISTS bet_log (
     ts       TEXT,
     PRIMARY KEY (player1, player2)
 );
+CREATE TABLE IF NOT EXISTS value_picks (
+    date     TEXT,
+    player1  TEXT,
+    player2  TEXT,
+    side     TEXT,      -- joueur misé (best_ev > 0 sur la proba blendée)
+    odds     REAL,      -- cote captée au moment du pick
+    ev       REAL,      -- EV blendée (%) au moment du pick
+    ts       TEXT,
+    PRIMARY KEY (player1, player2)
+);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
 CREATE INDEX IF NOT EXISTS idx_settled_date ON settled_matches(date);
@@ -402,6 +412,26 @@ def list_bets() -> List[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(
             "SELECT date,player1,player2,favorite,fav_odds FROM bet_log").fetchall()
+
+
+# --- Paper-trading des picks blendés (stratégie value) ----------------------
+def log_value_pick(date: str, p1: str, p2: str, side: str,
+                   odds: float, ev: float) -> None:
+    """Capture un value pick (EV blendée > 0) pour mesurer son ROI au settlement."""
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO value_picks "
+            "(date,player1,player2,side,odds,ev,ts) VALUES (?,?,?,?,?,?,?)",
+            (date, p1, p2, side, odds, ev,
+             _dt.datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def list_value_picks() -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT date,player1,player2,side,odds,ev FROM value_picks").fetchall()
 
 
 # --- Historique des prédictions --------------------------------------------
