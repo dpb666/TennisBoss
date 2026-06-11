@@ -289,6 +289,25 @@ def value_ai(
     if not events:
         return {"count": 0, "results": [], "resolver_cache": cache_stats()}
 
+    # Le cap [:30] prendrait les 30 premiers événements dans l'ordre API (ITF
+    # d'abord, jamais cotés par les bookmakers du plan). On exclut les doubles
+    # et les matchs live (le modèle est pré-match : comparé à des cotes live
+    # qui intègrent le score, l'EV serait absurde), puis on scanne ATP/WTA en
+    # premier, ensuite Challenger/125K, enfin le reste.
+    events = [e for e in events
+              if "/" not in (e.get("home", "") + e.get("away", ""))
+              and e.get("status") in ("pending", "not_started")]
+
+    def _league_prio(e: Dict[str, Any]) -> int:
+        lg = (e.get("league") or {}).get("name", "")
+        if lg.startswith(("ATP - ", "WTA - ")):
+            return 0
+        if "Challenger" in lg or "125K" in lg:
+            return 1
+        return 2
+
+    events.sort(key=_league_prio)
+
     # Calibration factor (temperature scaling)
     # Sanity-clamp: k must be in [0.5, 2.0] — outside this range the DB value
     # is stale/broken and we fall back to neutral (k=1.0).
