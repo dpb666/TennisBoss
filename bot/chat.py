@@ -112,21 +112,24 @@ def chat(
     mem: Dict[str, Any],
     lm_url: str = DEFAULT_LM_URL,
     model: str = DEFAULT_MODEL,
+    extra_context: str = "",
 ) -> str:
     """Envoie un message au LLM local avec contexte TennisBoss enrichi dynamiquement.
 
-    Détecte les joueurs cités dans le message et injecte leurs stats en temps réel.
+    extra_context : bloc pré-construit (prédiction, H2H, stats joueur) injecté directement,
+    court-circuite la détection automatique de joueurs.
     """
     context = build_context(mem)
 
-    # Détection dynamique des joueurs mentionnés
-    players_lower = {n.lower(): n for n in (mem.get("players") or {})}
-    mentioned = _detect_players(message, players_lower)
+    # Détection automatique des joueurs seulement si pas de contexte externe fourni
     player_context = ""
-    if mentioned:
-        snapshots = [s for n in mentioned if (s := _player_snapshot(mem, n))]
-        if snapshots:
-            player_context = "\nJoueurs mentionnés dans la question :\n" + "\n".join(snapshots)
+    if not extra_context:
+        players_lower = {n.lower(): n for n in (mem.get("players") or {})}
+        mentioned = _detect_players(message, players_lower)
+        if mentioned:
+            snapshots = [s for n in mentioned if (s := _player_snapshot(mem, n))]
+            if snapshots:
+                player_context = "\nJoueurs mentionnés :\n" + "\n".join(snapshots)
 
     # Recherche web si la question porte sur des données fraîches (cap 10s)
     from .search import needs_search, web_search
@@ -149,7 +152,12 @@ def chat(
     lang = _detect_lang(message)
     reply_instr = "Reply in English, max 3 sentences." if lang == "en" else "Réponds en français, 3 phrases max."
     web_instr = " Use the web results above to answer — do not say you lack real-time data." if web_context else ""
-    system = f"TennisBoss AI. Data: {context}{player_context}{web_context} {reply_instr}{web_instr}"
+    extra_instr = " Base your answer strictly on the TennisBoss data provided." if extra_context else ""
+    extra_block = f"\n\nTennisBoss data:\n{extra_context}" if extra_context else ""
+    system = (
+        f"TennisBoss AI. Global ELO: {context}{player_context}"
+        f"{extra_block}{web_context} {reply_instr}{web_instr}{extra_instr}"
+    )
 
     messages = [{"role": "system", "content": system}]
     for h in (history or [])[-HISTORY_WINDOW:]:

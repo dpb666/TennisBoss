@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 
 from app.core.engine import BettingEngine, get_risk_engine
 from app.data import odds as odds_mod
-from app.data import cache
+from app.data import cache, market_snap
+from app.analytics import spreads, arbitrage, sharp_money, clv
 
 router = APIRouter()
 
@@ -97,6 +98,141 @@ def record_result(req: BetResultRequest):
     get_risk_engine().record_result(req.stake, req.won, req.match)
     return {"recorded": True, "bankroll": get_risk_engine().bankroll}
 
+
+# ---------------------------------------------------------------------------
+# Analytics endpoints (Phase 1: edge detection)
+# ---------------------------------------------------------------------------
+
+@router.post("/v2/spread-analysis")
+def analyze_spread(req: MatchRequest, engine: BettingEngine = Depends(get_engine)):
+	"""Analyze spread: model vs implied probability."""
+	odds1, odds2 = req.odds1, req.odds2
+	if not (odds1 and odds2):
+		live = odds_mod.fetch_match_odds(req.player1, req.player2)
+		if live:
+			odds1, odds2 = live
+		else:
+			raise HTTPException(status_code=400, detail="Odds required")
+
+	# Get model probability
+	engine_result = engine.analyze_match(
+		player1=req.player1,
+		player2=req.player2,
+		surface=req.surface,
+		odds1=odds1,
+		odds2=odds2,
+	)
+
+	prob1 = engine_result.get("consensus_prob", 0.5)
+	prob2 = 1.0 - prob1
+
+	# Spread analysis for both sides
+	spread_s1 = spreads.spread_analysis(prob1, odds1, odds2, confidence=engine_result.get("confidence", 0.75))
+	spread_s2 = spreads.spread_analysis(prob2, odds2, odds1, confidence=engine_result.get("confidence", 0.75))
+
+	return {
+		"match": f"{req.player1} vs {req.player2}",
+		"model_prob_p1": prob1,
+		"model_prob_p2": prob2,
+		"odds_p1": odds1,
+		"odds_p2": odds2,
+		"spread_p1": spread_s1,
+		"spread_p2": spread_s2,
+		"recommendation": spread_s1["recommendation"] if spread_s1["ev"] > spread_s2["ev"] else spread_s2["recommendation"],
+	}
+
+
+@router.post("/v2/arbitrage-check")
+def check_arbitrage(req: MatchRequest):
+	"""Detect arbitrage across odds."""
+	odds1, odds2 = req.odds1, req.odds2
+	if not (odds1 and odds2):
+		live = odds_mod.fetch_match_odds(req.player1, req.player2)
+		if live:
+			odds1, odds2 = live
+		else:
+			raise HTTPException(status_code=400, detail="Odds required")
+
+	result = arbitrage.check_arbitrage(odds1, odds2, threshold=0.01)
+
+	return {
+		"match": f"{req.player1} vs {req.player2}",
+		"odds": {"side1": odds1, "side2": odds2},
+		**result,
+	}
+
+
+@router.get("/v2/market-analysis")
+def market_analysis(
+	player1: str = Query(...),
+	player2: str = Query(...),
+	surface: Optional[str] = Query(None),
+	odds1: Optional[float] = Query(None),
+	odds2: Optional[float] = Query(None),
+	engine: BettingEngine = Depends(get_engine),
+):
+	"""Combined market analysis: spreads + arb + engine consensus."""
+	if not (odds1 and odds2):
+		live = odds_mod.fetch_match_odds(player1, player2)
+		if live:
+			odds1, odds2 = live
+
+	# Get engine consensus
+	engine_result = engine.analyze_match(
+		player1=player1,
+		player2=player2,
+		surface=surface,
+		odds1=odds1,
+		odds2=odds2,
+	)
+
+	prob1 = engine_result.get("consensus_prob", 0.5)
+
+	# Analytics
+	spread_s1 = spreads.spread_analysis(prob1, odds1, odds2)
+	arb = arbitrage.check_arbitrage(odds1, odds2)
+
+	return {
+		"match": f"{player1} vs {player2}",
+		"model_consensus": {
+			"prob_p1": prob1,
+			"confidence": engine_result.get("confidence", 0.75),
+		},
+		"spread": spread_s1,
+		"arbitrage": arb,
+		"recommendation": engine_result.get("recommendation", "PASS"),
+	}
+
+
+@router.post("/v2/record-market-snapshot")
+def record_snapshot(
+	match_id: str,
+	odds_side1: float,
+	odds_side2: float,
+	volume: float = 0.0,
+	is_sharp: bool = False,
+):
+	"""Record a market snapshot for line movement tracking."""
+	import os
+	db_path = os.environ.get("DB_PATH", "bot/state.db")
+	snapshot_id = market_snap.record_snapshot(
+		db_path,
+		match_id,
+		odds_side1,
+		odds_side2,
+		volume,
+		is_sharp,
+	)
+	return {"snapshot_id": snapshot_id, "match_id": match_id}
+
+
+@router.get("/v2/line-movement")
+def get_line_movement(match_id: str = Query(...)):
+	"""Get line movement stats for a match."""
+	import os
+	db_path = os.environ.get("DB_PATH", "bot/state.db")
+	result = market_snap.line_movement_stats(db_path, match_id)
+	return result
 
 @router.get("/risk-status")
 def risk_status():

@@ -316,9 +316,10 @@ def insert_settled(row: Dict[str, Any]) -> bool:
             " sets,pred_favorite,pred_prob1,correct,settled_ts) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                row.get("event_key"), row.get("date", ""), row.get("tour", ""),
-                row.get("tournament", ""), row.get("player1", ""), row.get("player2", ""),
-                row.get("winner", ""), row.get("final_score", ""),
+                str(row.get("event_key") or ""), str(row.get("date") or ""),
+                str(row.get("tour") or ""), str(row.get("tournament") or ""),
+                str(row.get("player1") or ""), str(row.get("player2") or ""),
+                str(row.get("winner") or ""), str(row.get("final_score") or ""),
                 json.dumps(row.get("sets", [])),
                 row.get("pred_favorite"), row.get("pred_prob1"),
                 row.get("correct"),
