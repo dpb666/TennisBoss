@@ -279,7 +279,7 @@ def value_ai(
     NOTE: resolve_match() peut être coûteux (web scraping). On limit à 30 matches.
     """
     from app.main import _MEM
-    from bot import odds_api, predictor, features, db as _db
+    from bot import calibrate, odds_api, predictor, features, db as _db
     from bot.ai_resolver import resolve_match, cache_stats
 
     if not odds_api.is_enabled():
@@ -309,21 +309,20 @@ def value_ai(
     events.sort(key=_league_prio)
 
     # Calibration factor (temperature scaling)
-    # Sanity-clamp: k must be in [0.5, 2.0] — outside this range the DB value
-    # is stale/broken and we fall back to neutral (k=1.0).
+    # Sanity-clamp aligné sur les bornes de calibrate.fit_temperature [0.1, 3.0] :
+    # un modèle très sur-confiant donne légitimement k≈0.2 (validé k=0.19 sur 93
+    # matchs). Hors bornes -> valeur corrompue, fallback neutre k=1.0.
     try:
         raw_k = float(_db.get_meta("match_calib_k") or 1.0)
-        calib_k = raw_k if 0.5 <= raw_k <= 2.0 else 1.0
+        calib_k = raw_k if 0.1 <= raw_k <= 3.0 else 1.0
     except Exception:
         calib_k = 1.0
 
     def _calib(p: float) -> float:
-        import math
-        p = max(0.01, min(0.99, p))  # clamp before logit
-        if calib_k == 1.0:
-            return p
-        logit = math.log(p / (1 - p)) / calib_k
-        return 1 / (1 + math.exp(-logit))
+        # p_cal = sigmoid(k·logit(p)) — k<1 rapproche de 50 % (sur-confiance).
+        # NE PAS réimplémenter : une version locale divisait par k au lieu de
+        # multiplier, ce qui AMPLIFIAIT la sur-confiance (93 % -> 100 %).
+        return calibrate.calibrated_prob(p, calib_k)
 
     results: List[Dict[str, Any]] = []
 
