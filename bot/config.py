@@ -51,12 +51,16 @@ SACKMANN_URL = (
     "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
     "{tour}_matches_{year}.csv"
 )
-# Matchs ITF / Futures ATP (même format CSV, ~18 000 matchs/an).
-# Couvre les joueurs moins connus absents du tableau principal.
-# Seulement ATP : pas d'équivalent WTA dans le repo Sackmann (404 ignoré).
+# ATP Futures/Challengers (~18 000 matchs/an, joueurs peu connus).
 CHALLENGER_URL = (
     "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
     "{tour}_matches_futures_{year}.csv"
+)
+# WTA ITF circuit (W15–W100) — même format CSV, fichier distinct du repo WTA.
+# Couvre les joueuses ITF absentes du tableau principal WTA.
+WTA_ITF_URL = (
+    "https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/"
+    "wta_matches_qual_itf_{year}.csv"
 )
 # Endpoint "live" (souvent bloqué par Cloudflare -> géré par le self-healing).
 SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"

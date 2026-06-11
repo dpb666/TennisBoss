@@ -134,25 +134,36 @@ def fetch_year(year: int, tour: str = "atp") -> List[Dict]:
 
 
 def fetch_challengers(years: List[int], tours: List[str] = ("atp",)) -> List[Dict]:
-    """Récupère les matchs Challenger / ITF qualifs de Sackmann (joueurs peu connus)."""
+    """Récupère les matchs Challenger/Futures ATP et ITF Women WTA de Sackmann."""
     all_matches: List[Dict] = []
     for tour in tours:
         for year in years:
-            url = config.CHALLENGER_URL.format(tour=tour, year=year)
-            text = _http_get(url)
-            if not text:
-                continue
-            added = 0
-            reader = csv.DictReader(io.StringIO(text))
-            for row in reader:
-                feat = _match_features(row)
-                if feat and feat["winner_name"] and feat["loser_name"]:
-                    feat["tour"] = tour
-                    feat["id"] = f"{tour}-chall-{feat['id']}"
-                    all_matches.append(feat)
-                    added += 1
-            if added:
-                log(f"{tour.upper()} Challenger/ITF {year}: {added} matchs récupérés.")
+            # WTA uses a separate ITF qual file (W15–W100 circuit)
+            if tour == "wta":
+                urls = [
+                    config.WTA_ITF_URL.format(year=year),
+                    config.CHALLENGER_URL.format(tour=tour, year=year),  # qual fallback
+                ]
+            else:
+                urls = [config.CHALLENGER_URL.format(tour=tour, year=year)]
+
+            for url in urls:
+                text = _http_get(url)
+                if not text:
+                    continue
+                added = 0
+                reader = csv.DictReader(io.StringIO(text))
+                for row in reader:
+                    feat = _match_features(row)
+                    if feat and feat["winner_name"] and feat["loser_name"]:
+                        feat["tour"] = tour
+                        feat["id"] = f"{tour}-chall-{feat['id']}"
+                        all_matches.append(feat)
+                        added += 1
+                if added:
+                    label = "WTA ITF" if "qual_itf" in url else f"{tour.upper()} Challenger"
+                    log(f"{label} {year}: {added} matchs récupérés.")
+                    break  # vrai fallback : la 2e URL dupliquerait les IDs
     all_matches.sort(key=lambda m: (m["date"], m["id"]))
     return all_matches
 

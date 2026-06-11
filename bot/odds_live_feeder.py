@@ -115,19 +115,10 @@ class LiveOddsFeeder:
 			return None
 
 	def _get_upcoming_matches(self) -> list[dict]:
-		"""Fetch upcoming matches from live odds API.
-
-		This is a placeholder that can be connected to:
-		- Odds API (theOddsAPI.com)
-		- ESPN API
-		- Sports Radar
-		- Custom bookmaker feeds
-		"""
-		# For testing: return mock matches
+		"""Fetch upcoming matches with live odds from odds-api.io."""
 		try:
-			# Try to fetch from Odds API if available
-			from app.data import odds_mod
-			matches = odds_mod.fetch_upcoming_matches(days=2)
+			from app.data.odds import fetch_upcoming_matches
+			matches = fetch_upcoming_matches(days=2)
 			return matches or self._mock_matches()
 		except Exception:
 			return self._mock_matches()

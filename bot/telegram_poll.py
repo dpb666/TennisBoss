@@ -14,7 +14,7 @@ load_dotenv()
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 API_URL = os.environ.get("CHAT_API_URL", "http://127.0.0.1:8001/api/chat")
-POLL_TIMEOUT = 30  # long-poll seconds
+POLL_TIMEOUT = 10  # short-poll — avoids WSL2 TCP resets on idle long-polls
 
 TG_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -78,6 +78,9 @@ def main():
     offset = 0
     while True:
         updates = tg_get_updates(offset)
+        if not updates:
+            time.sleep(2)
+            continue
         for upd in updates:
             offset = upd["update_id"] + 1
             msg = upd.get("message", {})

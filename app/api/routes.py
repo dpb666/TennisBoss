@@ -261,6 +261,168 @@ def bet_history(limit: int = Query(default=50, le=500)):
         raise HTTPException(500, detail=str(exc))
 
 
+@router.get("/value-ai")
+def value_ai(
+    limit:      int           = Query(default=15, ge=1, le=50),
+    min_ev:     float         = Query(default=0.0,  description="Filtre EV minimum (ex: 0.03 = +3%)"),
+    min_conf:   float         = Query(default=0.0,  description="Confiance resolver minimum (0–1)"),
+    value_only: bool          = Query(default=False, description="Retourner seulement les value bets EV>0"),
+):
+    """Scanner de value bets hybride — couverture totale via AI resolver (timeout guard).
+
+    Pour chaque match tennis live/upcoming :
+      1. AI Resolver tente de résoudre les deux joueurs (DB → Wikipedia → peer inference)
+      2. Si bookmaker disponible → EV réel (proba modèle × cote marché − 1)
+      3. Sinon → EV synthétique (écart modèle vs cote fair)
+    Résultats triés par EV décroissant.
+
+    NOTE: resolve_match() peut être coûteux (web scraping). On limit à 30 matches.
+    """
+    from app.main import _MEM
+    from bot import odds_api, predictor, features, db as _db
+    from bot.ai_resolver import resolve_match, cache_stats
+
+    if not odds_api.is_enabled():
+        raise HTTPException(status_code=503, detail="ODDS_API_KEY absente")
+
+    events = odds_api.fetch_tennis_events(upcoming_only=True)
+    if not events:
+        return {"count": 0, "results": [], "resolver_cache": cache_stats()}
+
+    # Calibration factor (temperature scaling)
+    # Sanity-clamp: k must be in [0.5, 2.0] — outside this range the DB value
+    # is stale/broken and we fall back to neutral (k=1.0).
+    try:
+        raw_k = float(_db.get_meta("match_calib_k") or 1.0)
+        calib_k = raw_k if 0.5 <= raw_k <= 2.0 else 1.0
+    except Exception:
+        calib_k = 1.0
+
+    def _calib(p: float) -> float:
+        import math
+        p = max(0.01, min(0.99, p))  # clamp before logit
+        if calib_k == 1.0:
+            return p
+        logit = math.log(p / (1 - p)) / calib_k
+        return 1 / (1 + math.exp(-logit))
+
+    results: List[Dict[str, Any]] = []
+
+    # Copie locale : les profils synthétiques (peer inference) injectés pour la
+    # prédiction ne doivent pas polluer la mémoire globale du serveur.
+    mem = dict(_MEM)
+    mem["players"] = dict(_MEM.get("players") or {})
+
+    for ev in events[:30]:  # GUARD: cap à 30 matches pour éviter timeout resolve_match
+        home_raw = ev.get("home", "")
+        away_raw = ev.get("away", "")
+        league   = (ev.get("league") or {}).get("name", "")
+
+        # ── Resolve players ──────────────────────────────────────────────
+        p1r, p2r = resolve_match(home_raw, away_raw, mem, league=league)
+        conf = min(p1r.confidence, p2r.confidence)
+        if conf < min_conf:
+            continue
+
+        n1, n2 = p1r.resolved, p2r.resolved
+
+        # Inject peer profiles if needed
+        players = mem["players"]
+        if p1r.profile and n1 not in players:
+            players[n1] = p1r.profile
+        if p2r.profile and n2 not in players:
+            players[n2] = p2r.profile
+
+        # ── Model prediction ──────────────────────────────────────────────
+        try:
+            f1 = features.feature_vector(features.get_profile(mem, n1))
+            f2 = features.feature_vector(features.get_profile(mem, n2))
+            r  = predictor.predict(mem, n1, f1, n2, f2)
+            pm1 = _calib(predictor.set_to_match_prob(r["prob1"] / 100.0))
+            pm2 = 1.0 - pm1
+        except Exception:
+            continue
+
+        # ── Market odds (optional) ────────────────────────────────────────
+        mw = odds_api.fetch_match_winner(ev["id"])
+
+        # Only trust EV vs real odds when BOTH players are reliably resolved.
+        # Peer-inferred profiles (conf < 0.60) produce unreliable probabilities.
+        reliable = p1r.confidence >= 0.60 and p2r.confidence >= 0.60
+
+        if mw and reliable:
+            ho, ao = mw["home_odds"], mw["away_odds"]
+            ev1 = pm1 * ho - 1.0
+            ev2 = pm2 * ao - 1.0
+            source = "bookmaker"
+            books  = mw["books"]
+        elif mw and not reliable:
+            ho, ao = mw["home_odds"], mw["away_odds"]
+            ev1 = ev2 = 0.0
+            source = "bookmaker_low_conf"
+            books  = mw["books"]
+        else:
+            # Synthetic: model IS the market — no edge by definition,
+            # but we surface the fair odds so the user sees the full picture.
+            # Guard: only show fair odds when model is not near-certain (avoid 1/~0).
+            ho = round(1 / pm1, 2) if pm1 >= 0.02 else None
+            ao = round(1 / pm2, 2) if pm2 >= 0.02 else None
+            ev1 = ev2 = 0.0
+            source = "model_only"
+            books  = []
+
+        best_ev   = max(ev1, ev2)
+        best_side = n1 if ev1 >= ev2 else n2
+        best_odds = ho if ev1 >= ev2 else ao
+
+        if value_only and best_ev <= 0:
+            continue
+        if best_ev < min_ev:
+            continue
+
+        results.append({
+            "player1":      n1,
+            "player2":      n2,
+            "raw1":         home_raw,
+            "raw2":         away_raw,
+            "league":       league,
+            "status":       ev.get("status", ""),
+            "date":         ev.get("date", ""),
+            # Resolution quality
+            "resolver": {
+                "p1_source": p1r.source, "p1_conf": round(p1r.confidence, 2),
+                "p2_source": p2r.source, "p2_conf": round(p2r.confidence, 2),
+            },
+            # Model
+            "model_prob1":  round(pm1 * 100, 1),
+            "model_prob2":  round(pm2 * 100, 1),
+            # Market
+            "odds":         {"home": ho, "away": ao, "books": books},
+            "market_prob1": round(mw["home_prob"] * 100, 1) if mw else None,
+            "market_prob2": round(mw["away_prob"] * 100, 1) if mw else None,
+            # Value
+            "ev1":          round(ev1 * 100, 1),
+            "ev2":          round(ev2 * 100, 1),
+            "best_side":    best_side if best_ev > 0 else None,
+            "best_ev":      round(best_ev * 100, 1),
+            "best_odds":    best_odds,
+            "value":        best_ev > 0,
+            "source":       source,
+            "confidence":   round(conf, 2),
+        })
+
+    results.sort(key=lambda x: (x["value"], x["best_ev"]), reverse=True)
+    results = results[:limit]
+
+    return {
+        "count":          len(results),
+        "value_count":    sum(1 for r in results if r["value"]),
+        "calib_k":        round(calib_k, 3),
+        "results":        results,
+        "resolver_cache": cache_stats(),
+    }
+
+
 @router.get("/health")
 def health():
     from app.main import _MEM
