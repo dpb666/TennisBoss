@@ -38,10 +38,12 @@ _MEM: Dict[str, Any] = {}
 _INDEX: Dict[str, Any] = {}
 # Facteur de calibration appris (temperature scaling). 1.0 = inchangé.
 _CALIB_K: float = 1.0
+# Poids modèle dans le blend modèle/marché (0 = marché pur, 1 = modèle pur).
+_MKT_W: float = calibrate.DEFAULT_MARKET_BLEND_W
 
 
 def _load_state() -> None:
-    global _MEM, _INDEX, _CALIB_K
+    global _MEM, _INDEX, _CALIB_K, _MKT_W
     bootstrap()
     db.init()
     _MEM = memory.load()
@@ -80,6 +82,11 @@ def _load_state() -> None:
         _CALIB_K = float(db.get_meta("match_calib_k") or 1.0)
     except (TypeError, ValueError):
         _CALIB_K = 1.0
+    try:
+        _MKT_W = float(db.get_meta("market_blend_w")
+                       or calibrate.DEFAULT_MARKET_BLEND_W)
+    except (TypeError, ValueError):
+        _MKT_W = calibrate.DEFAULT_MARKET_BLEND_W
     try:
         _MEM["elo_blend"] = float(db.get_meta("elo_blend") or predictor.ELO_BLEND)
     except (TypeError, ValueError):
@@ -478,8 +485,13 @@ def api_value():
         pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))  # proba match calibrée (J1)
         pm2 = 1.0 - pm1                                         # (J2)
         ho, ao = mw["home_odds"], mw["away_odds"]
-        ev1 = pm1 * ho - 1.0
-        ev2 = pm2 * ao - 1.0
+        # Blend modèle/marché : le marché (sans vig) sert de prior, le modèle
+        # ajuste selon son poids appris. L'EV est calculée sur la proba blendée,
+        # sinon un modèle faible voit du "value" sur tous les outsiders.
+        pb1 = calibrate.blend_probs(pm1, mw["home_prob"], _MKT_W)
+        pb2 = 1.0 - pb1
+        ev1 = pb1 * ho - 1.0
+        ev2 = pb2 * ao - 1.0
 
         if ev1 >= ev2:
             best_side, best_ev = n1, ev1
@@ -500,6 +512,8 @@ def api_value():
             "model_first_set_prob1": r["prob1"],
             "model_match_prob1": round(pm1 * 100, 1),
             "model_match_prob2": round(pm2 * 100, 1),
+            "blend_match_prob1": round(pb1 * 100, 1),
+            "blend_match_prob2": round(pb2 * 100, 1),
             "market_match_prob1": round(mw["home_prob"] * 100, 1),
             "market_match_prob2": round(mw["away_prob"] * 100, 1),
             "odds": {"home": ho, "away": ao, "books": mw["books"]},
@@ -518,7 +532,9 @@ def api_value():
         "count": len(out),
         "comparisons": out,
         "calibration_k": round(_CALIB_K, 3),
-        "note": "proba match calibrée (best-of-3 + temperature) ; EV = proba×cote − 1",
+        "market_blend_w": round(_MKT_W, 2),
+        "note": ("proba match calibrée (best-of-3 + temperature), blendée au "
+                 "marché (poids modèle w) ; EV = proba_blend×cote − 1"),
     })
 
 
@@ -543,8 +559,8 @@ def _blend_samples() -> list:
 
 
 def _refit_calibration() -> Dict[str, Any]:
-    """Réajuste le facteur de calibration k ET le poids ELO β sur les matchs réglés."""
-    global _CALIB_K
+    """Réajuste k (température), β (poids ELO) et w (blend marché) sur les réglés."""
+    global _CALIB_K, _MKT_W
     fit = calibrate.fit_temperature(db.list_settled(limit=100000))
     if fit.get("fitted"):
         _CALIB_K = float(fit["k"])
@@ -555,7 +571,12 @@ def _refit_calibration() -> Dict[str, Any]:
         _MEM["elo_blend"] = float(bfit["elo_blend"])
         db.set_meta("elo_blend", _MEM["elo_blend"])
 
-    return {"temperature": fit, "blend": bfit}
+    mfit = calibrate.fit_market_blend(settlement.market_blend_samples(_CALIB_K))
+    if mfit.get("fitted") and mfit.get("market_blend_w") is not None:
+        _MKT_W = float(mfit["market_blend_w"])
+        db.set_meta("market_blend_w", _MKT_W)
+
+    return {"temperature": fit, "blend": bfit, "market_blend": mfit}
 
 
 @app.get("/api/settlement/run")
@@ -584,6 +605,7 @@ def api_calibration():
         "pred_favorite": r["pred_favorite"], "correct": r["correct"],
     } for r in db.list_settled(limit=25)]
     return jsonify({"metrics": metrics, "calibration_k": round(_CALIB_K, 3),
+                    "market_blend_w": round(_MKT_W, 2),
                     "elo_blend": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 2),
                     "recent": recent})
 

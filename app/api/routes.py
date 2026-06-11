@@ -318,6 +318,14 @@ def value_ai(
     except Exception:
         calib_k = 1.0
 
+    # Poids modèle dans le blend modèle/marché (appris sur bet_log×settled).
+    try:
+        blend_w = float(_db.get_meta("market_blend_w")
+                        or calibrate.DEFAULT_MARKET_BLEND_W)
+        blend_w = min(1.0, max(0.0, blend_w))
+    except Exception:
+        blend_w = calibrate.DEFAULT_MARKET_BLEND_W
+
     def _calib(p: float) -> float:
         # p_cal = sigmoid(k·logit(p)) — k<1 rapproche de 50 % (sur-confiance).
         # NE PAS réimplémenter : une version locale divisait par k au lieu de
@@ -370,12 +378,17 @@ def value_ai(
 
         if mw and reliable:
             ho, ao = mw["home_odds"], mw["away_odds"]
-            ev1 = pm1 * ho - 1.0
-            ev2 = pm2 * ao - 1.0
+            # EV sur la proba blendée marché/modèle : un modèle faible comparé
+            # brut au marché verrait du "value" sur tous les outsiders.
+            pb1 = calibrate.blend_probs(pm1, mw["home_prob"], blend_w)
+            pb2 = 1.0 - pb1
+            ev1 = pb1 * ho - 1.0
+            ev2 = pb2 * ao - 1.0
             source = "bookmaker"
             books  = mw["books"]
         elif mw and not reliable:
             ho, ao = mw["home_odds"], mw["away_odds"]
+            pb1 = pb2 = None
             ev1 = ev2 = 0.0
             source = "bookmaker_low_conf"
             books  = mw["books"]
@@ -385,6 +398,7 @@ def value_ai(
             # Guard: only show fair odds when model is not near-certain (avoid 1/~0).
             ho = round(1 / pm1, 2) if pm1 >= 0.02 else None
             ao = round(1 / pm2, 2) if pm2 >= 0.02 else None
+            pb1 = pb2 = None
             ev1 = ev2 = 0.0
             source = "model_only"
             books  = []
@@ -414,6 +428,8 @@ def value_ai(
             # Model
             "model_prob1":  round(pm1 * 100, 1),
             "model_prob2":  round(pm2 * 100, 1),
+            "blend_prob1":  round(pb1 * 100, 1) if pb1 is not None else None,
+            "blend_prob2":  round(pb2 * 100, 1) if pb2 is not None else None,
             # Market
             "odds":         {"home": ho, "away": ao, "books": books},
             "market_prob1": round(mw["home_prob"] * 100, 1) if mw else None,
@@ -436,6 +452,7 @@ def value_ai(
         "count":          len(results),
         "value_count":    sum(1 for r in results if r["value"]),
         "calib_k":        round(calib_k, 3),
+        "blend_w":        round(blend_w, 2),
         "results":        results,
         "resolver_cache": cache_stats(),
     }

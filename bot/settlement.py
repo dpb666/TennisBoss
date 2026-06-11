@@ -95,6 +95,32 @@ def _acc(rows: List[Any]) -> Optional[float]:
     return round(sum(r["correct"] for r in judged) / len(judged), 4)
 
 
+def market_blend_samples(calib_k: float) -> List[tuple]:
+    """Échantillons (p_modèle_calibrée, p_marché, issue) pour fit_market_blend.
+
+    Jointure settled_matches × bet_log (même clé que le ROI). p_marché = 1/cote
+    du favori captée au pick — légère surestimation (vig inclus, ~1-2 pts sur
+    Betfair Exchange), négligeable pour régler un scalaire sur ~250 points.
+    """
+    from . import calibrate
+
+    bets = {frozenset((b["player1"], b["player2"])): b for b in db.list_bets()}
+    samples: List[tuple] = []
+    for r in db.list_settled(limit=100000):
+        if r["correct"] is None or r["pred_prob1"] is None:
+            continue
+        b = bets.get(frozenset((r["player1"], r["player2"])))
+        if not b or not b["fav_odds"] or b["fav_odds"] <= 1.0:
+            continue
+        p1 = r["pred_prob1"] / 100.0
+        p_model = p1 if b["favorite"] == r["player1"] else 1.0 - p1
+        p_model = calibrate.calibrated_prob(p_model, calib_k)
+        p_market = min(0.99, 1.0 / float(b["fav_odds"]))
+        y = 1.0 if r["winner"] == b["favorite"] else 0.0
+        samples.append((p_model, p_market, y))
+    return samples
+
+
 def calibration_metrics() -> Dict[str, Any]:
     """Agrège les matchs réglés : précision globale, par tour, favoris/serrés, Brier."""
     rows = db.list_settled(limit=100000)

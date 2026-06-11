@@ -77,5 +77,53 @@ class TestTuneBlend(unittest.TestCase):
         self.assertLessEqual(fit["elo_blend"], 0.5)
 
 
+class TestMarketBlend(unittest.TestCase):
+    def test_blend_extremes(self):
+        # w=1 -> modèle pur ; w=0 -> marché pur ; entre les deux -> intermédiaire.
+        self.assertAlmostEqual(calibrate.blend_probs(0.8, 0.3, 1.0), 0.8, places=6)
+        self.assertAlmostEqual(calibrate.blend_probs(0.8, 0.3, 0.0), 0.3, places=6)
+        mid = calibrate.blend_probs(0.8, 0.3, 0.5)
+        self.assertGreater(mid, 0.3)
+        self.assertLess(mid, 0.8)
+
+    def test_blend_w_clampe(self):
+        self.assertAlmostEqual(calibrate.blend_probs(0.8, 0.3, 5.0), 0.8, places=6)
+        self.assertAlmostEqual(calibrate.blend_probs(0.8, 0.3, -1.0), 0.3, places=6)
+
+    def test_marche_informatif_donne_w_faible(self):
+        # Issues tirées des probas marché, modèle bruité -> w optimal ~0.
+        import random
+        rng = random.Random(42)
+        samples = []
+        for _ in range(400):
+            p_mkt = rng.uniform(0.2, 0.9)
+            y = 1.0 if rng.random() < p_mkt else 0.0
+            p_model = min(0.95, max(0.05, p_mkt + rng.uniform(-0.35, 0.35)))
+            samples.append((p_model, p_mkt, y))
+        fit = calibrate.fit_market_blend(samples)
+        self.assertTrue(fit["fitted"])
+        self.assertLessEqual(fit["market_blend_w"], 0.35)
+        self.assertLessEqual(fit["logloss_best"], fit["logloss_model"])
+
+    def test_modele_informatif_donne_w_fort(self):
+        # Issues tirées des probas modèle, marché bruité -> w optimal élevé.
+        import random
+        rng = random.Random(7)
+        samples = []
+        for _ in range(400):
+            p_model = rng.uniform(0.2, 0.9)
+            y = 1.0 if rng.random() < p_model else 0.0
+            p_mkt = min(0.95, max(0.05, p_model + rng.uniform(-0.35, 0.35)))
+            samples.append((p_model, p_mkt, y))
+        fit = calibrate.fit_market_blend(samples)
+        self.assertTrue(fit["fitted"])
+        self.assertGreaterEqual(fit["market_blend_w"], 0.65)
+
+    def test_pas_assez_de_donnees(self):
+        fit = calibrate.fit_market_blend([(0.6, 0.5, 1.0)] * 10)
+        self.assertFalse(fit["fitted"])
+        self.assertIsNone(fit["market_blend_w"])
+
+
 if __name__ == "__main__":
     unittest.main()

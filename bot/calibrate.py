@@ -43,6 +43,55 @@ def calibrated_prob(p: float, k: float) -> float:
     return _sigmoid(k * _logit(p))
 
 
+# Poids modèle par défaut tant que fit_market_blend n'a pas appris (modèle
+# faible vs marché -> prior prudent, surtout du marché).
+DEFAULT_MARKET_BLEND_W = 0.2
+
+
+def blend_probs(p_model: float, p_market: float, w: float) -> float:
+    """Mélange modèle/marché en logit : sigmoid(w·logit(modèle) + (1−w)·logit(marché)).
+
+    w=0 -> marché pur ; w=1 -> modèle pur. Le marché sert de prior, le modèle
+    n'écarte la proba que proportionnellement à son poids appris.
+    """
+    w = _clamp(w, 0.0, 1.0)
+    return _sigmoid(w * _logit(p_model) + (1.0 - w) * _logit(p_market))
+
+
+def fit_market_blend(samples: List[Tuple[float, float, float]],
+                     min_n: int = 30) -> Dict[str, Any]:
+    """Cherche le poids modèle w qui minimise la log-loss du blend modèle/marché.
+
+    `samples` : (p_modèle_calibrée, p_marché, issue 0/1), probas dans (0,1).
+    Grille w ∈ [0, 1] pas 0.05. Rapporte aussi la log-loss marché pur (w=0)
+    et modèle pur (w=1) pour juger si le modèle apporte quelque chose.
+    """
+    if len(samples) < min_n:
+        return {"market_blend_w": None, "n": len(samples), "fitted": False,
+                "note": f"Pas assez de paris réglés pour régler w (min {min_n})."}
+
+    def ll(w: float) -> float:
+        tot = 0.0
+        for pm, pk, y in samples:
+            p = _clamp(blend_probs(pm, pk, w), _EPS, 1 - _EPS)
+            tot += -(y * math.log(p) + (1 - y) * math.log(1 - p))
+        return tot / len(samples)
+
+    grid = [i / 20.0 for i in range(0, 21)]   # 0.00 .. 1.00
+    best = min(grid, key=ll)
+    return {
+        "market_blend_w": round(best, 2),
+        "n": len(samples),
+        "fitted": True,
+        "logloss_market": round(ll(0.0), 4),
+        "logloss_model": round(ll(1.0), 4),
+        "logloss_best": round(ll(best), 4),
+        "interpretation": ("le modèle n'apporte rien (marché pur)" if best == 0.0 else
+                           "modèle dominant" if best >= 0.5 else
+                           "le modèle ajuste le marché à la marge"),
+    }
+
+
 def tune_blend(samples: List[Tuple[float, float, float]],
                min_n: int = 20) -> Dict[str, Any]:
     """Cherche le poids ELO β qui minimise la log-loss.
