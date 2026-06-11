@@ -119,13 +119,22 @@ CREATE TABLE IF NOT EXISTS value_picks (
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
 CREATE INDEX IF NOT EXISTS idx_settled_date ON settled_matches(date);
+-- player_record / player_recent_matches / head_to_head filtrent sur winner/loser
+-- (sinon scan complet des ~80 000 matchs à chaque prédiction/H2H).
+CREATE INDEX IF NOT EXISTS idx_matches_winner ON matches(winner);
+CREATE INDEX IF NOT EXISTS idx_matches_loser ON matches(loser);
 """
 
 
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(config.DB_FILE)
+    # timeout=15s : 3 process (quant, bot, supervisor) écrivent en concurrence
+    # sur /mnt/c — laisse le temps d'acquérir le verrou plutôt que "database is
+    # locked". synchronous=NORMAL est sûr et rapide EN MODE WAL (établi par init).
+    conn = sqlite3.connect(config.DB_FILE, timeout=15.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=15000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     try:
         yield conn
         conn.commit()
@@ -135,7 +144,13 @@ def connect() -> Iterator[sqlite3.Connection]:
 
 def init() -> None:
     """Crée la base et le schéma si nécessaire (idempotent)."""
+    # WAL persiste dans l'en-tête du fichier : une seule fois suffit, mais on le
+    # (ré)affirme à chaque init au cas où la base aurait été créée en mode delete.
     with connect() as conn:
+        mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if mode != "wal":
+            log(f"Attention : WAL indisponible (mode={mode}) — concurrence fragile.",
+                "WARN")
         conn.executescript(_SCHEMA)
         # Migrations idempotentes (bases déjà créées sans ces colonnes).
         for col, ddl in (
@@ -149,7 +164,38 @@ def init() -> None:
                 conn.execute(ddl)
             except sqlite3.OperationalError:
                 pass  # colonne déjà présente
+    # Auto-réparation : quick_check rate les corruptions d'index (vu le 2026-06-11),
+    # donc integrity_check complet ; REINDEX si nécessaire. Mais integrity_check
+    # coûte ~13s sur /mnt/c (lecture de toute la base) : on le borne à 1×/24h via
+    # meta, sinon 3 process × chaque démarrage = surcoût inacceptable.
+    import time as _t
+    try:
+        last = float(get_meta("last_integrity_check") or 0.0)
+    except (TypeError, ValueError):
+        last = 0.0
+    if _t.time() - last > 86400:
+        health = health_check(repair=True)
+        set_meta("last_integrity_check", str(_t.time()))
+        if not health["ok"]:
+            log(f"Base : corruption détectée {health['problems'][:2]} — "
+                f"réparée={health['repaired']}.", "WARN")
     log(f"Base SQLite prête : {config.DB_FILE}")
+
+
+def health_check(repair: bool = False) -> Dict[str, Any]:
+    """Vérifie l'intégrité de la base. Si `repair`, REINDEX en cas de corruption
+    d'index (cause la plus fréquente sur /mnt/c). Renvoie l'état."""
+    with connect() as conn:
+        rows = conn.execute("PRAGMA integrity_check").fetchall()
+        problems = [r[0] for r in rows if r[0] != "ok"]
+        repaired = False
+        if problems and repair:
+            conn.execute("REINDEX")
+            conn.commit()
+            rows2 = conn.execute("PRAGMA integrity_check").fetchall()
+            problems = [r[0] for r in rows2 if r[0] != "ok"]
+            repaired = not problems
+    return {"ok": not problems, "problems": problems, "repaired": repaired}
 
 
 # --- Archive des matchs ----------------------------------------------------
