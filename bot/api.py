@@ -671,7 +671,11 @@ def api_chat():
     lm_url = os.environ.get("LM_STUDIO_URL", config.LM_STUDIO_URL)
     lm_model = os.environ.get("LM_STUDIO_MODEL", config.LM_STUDIO_MODEL)
     try:
-        reply = chat_mod.chat(message, history, _MEM, lm_url, model=lm_model)
+        # Injecte la prédiction calibrée / fiche joueur si des joueurs sont cités
+        # (sinon le LLM n'a que des stats brutes et invente des probabilités).
+        extra = chat_mod.build_match_context(message, _MEM)
+        reply = chat_mod.chat(message, history, _MEM, lm_url, model=lm_model,
+                              extra_context=extra)
         return jsonify({"reply": reply})
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")

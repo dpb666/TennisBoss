@@ -46,26 +46,36 @@ def _player_snapshot(mem: Dict[str, Any], name: str) -> Optional[str]:
     )
 
 
+def _tokens(text: str) -> set:
+    """Mots du texte (\\w, sépare sur espaces ET traits d'union/ponctuation)."""
+    return set(re.findall(r"\w+", text.lower()))
+
+
 def _detect_players(message: str, players_lower: Dict[str, str]) -> List[str]:
-    """Détecte les noms de joueurs mentionnés (nom complet ou nom de famille seul)."""
-    found = []
-    msg_lower = message.lower()
-    # Index lastname → original pour le matching partiel
-    lastname_map: Dict[str, str] = {}
-    for key, original in players_lower.items():
-        parts = key.split()
-        if parts:
-            lastname_map.setdefault(parts[-1], original)
+    """Détecte les joueurs mentionnés par MOTS ENTIERS (nom complet ou famille).
+
+    Match par tokens, pas par sous-chaîne : sinon "fiche" matchait le nom de
+    famille "He", "sur"/"est" matchaient des noms courts, etc. Les noms de
+    famille seuls doivent faire ≥3 lettres par token (évite les faux positifs).
+    """
+    found: List[str] = []
+    msg_tokens = _tokens(message)
+    if not msg_tokens:
+        return found
 
     for key, original in players_lower.items():
         if original in found:
             continue
-        if key in msg_lower:          # nom complet
+        parts = key.split()
+        if not parts:
+            continue
+        name_tokens = _tokens(key)
+        last_tokens = _tokens(parts[-1])
+        if name_tokens and name_tokens <= msg_tokens:            # nom complet
             found.append(original)
-        else:                          # nom de famille seul (ex: "sinner" → "Jannik Sinner")
-            parts = key.split()
-            if parts and parts[-1] in msg_lower and original not in found:
-                found.append(original)
+        elif (last_tokens and last_tokens <= msg_tokens          # nom de famille seul
+              and all(len(t) >= 3 for t in last_tokens)):
+            found.append(original)
         if len(found) >= 4:
             break
     return found
@@ -100,6 +110,79 @@ def build_context(mem: Dict[str, Any]) -> str:
             top_s = _top_elo(surf[surface], 2)
             lines.append(f"{surface}: " + ", ".join(f"{n}={r:.0f}" for n, r in top_s))
     return " | ".join(lines)
+
+
+def _calib_k(mem: Dict[str, Any]) -> float:
+    """Facteur de calibration appris (mémoire d'abord, sinon DB). Bornes [0.1,3]."""
+    try:
+        k = mem.get("match_calib_k")
+        if k is None:
+            from . import db
+            k = float(db.get_meta("match_calib_k") or 1.0)
+        k = float(k)
+        return k if 0.1 <= k <= 3.0 else 1.0
+    except Exception:
+        return 1.0
+
+
+def build_match_context(message: str, mem: Dict[str, Any]) -> str:
+    """Contexte prédiction/joueur CALIBRÉ pour le chat (sans appel réseau).
+
+    Détecte les joueurs cités et injecte la prédiction match best-of-3 calibrée
+    + H2H (2 joueurs) ou la fiche ELO/forme (1 joueur). Sans ça, le LLM du
+    téléphone n'a que des stats brutes et invente des probabilités.
+    Pas de cotes live ici (1 appel API/message épuiserait le quota).
+    """
+    try:
+        from . import predictor, features, db
+        players_lower = {n.lower(): n for n in (mem.get("players") or {})}
+        names = _detect_players(message, players_lower)[:2]
+    except Exception:
+        return ""
+
+    if not names:
+        return ""
+
+    k = _calib_k(mem)
+    try:
+        if len(names) >= 2:
+            n1, n2 = names[0], names[1]
+            f1 = features.feature_vector(features.get_profile(mem, n1))
+            f2 = features.feature_vector(features.get_profile(mem, n2))
+            r = predictor.predict(mem, n1, f1, n2, f2)
+            pm1 = _calibrated(predictor.set_to_match_prob(r["prob1"] / 100.0), k)
+            h2h = db.head_to_head(n1, n2)
+            w1 = sum(1 for row in h2h if row["winner"] == n1)
+            w2 = sum(1 for row in h2h if row["winner"] == n2)
+            elo = mem.get("elo") or {}
+            return (
+                f"Match {n1} vs {n2}\n"
+                f"Proba match (calibrée) : {n1} {pm1*100:.0f}% | {n2} {(1-pm1)*100:.0f}%\n"
+                f"Favori : {r['favorite'] or 'très serré'}\n"
+                f"H2H : {n1} {w1}-{w2} {n2} ({w1+w2} matchs)\n"
+                f"ELO : {n1}={elo.get(n1,1500):.0f} {n2}={elo.get(n2,1500):.0f}"
+            )
+        n = names[0]
+        prof = features.get_profile(mem, n)
+        feat = features.feature_vector(prof)
+        rec = db.player_record(n)
+        elo = (mem.get("elo") or {}).get(n, 1500)
+        total = rec["wins"] + rec["losses"]
+        wr = rec["wins"] / total * 100 if total else 0.0
+        return (
+            f"Joueur {n}\n"
+            f"ELO : {elo:.0f} | Record : {rec['wins']}V-{rec['losses']}D ({wr:.0f}%)\n"
+            f"Serve {feat['serve']:.2f} Retour {feat['return1']:.2f}/{feat['return2']:.2f} "
+            f"Forme {feat['recent']:.2f}"
+        )
+    except Exception as exc:
+        log(f"build_match_context: {exc}", "WARN")
+        return ""
+
+
+def _calibrated(p: float, k: float) -> float:
+    from . import calibrate
+    return calibrate.calibrated_prob(p, k)
 
 
 # ---------------------------------------------------------------------------

@@ -263,6 +263,27 @@ def _resolve_player(name: str, mem: Dict[str, Any]) -> Optional[str]:
     return namematch.resolve(name, index)
 
 
+def _calib_blend_params() -> Tuple[float, float]:
+    """Lit (k calibration, w blend marché) appris, mêmes bornes que /value-ai.
+
+    Sans ça, le chat afficherait les probas brutes sur-confiantes du modèle et
+    des EV absurdes — incohérent avec /api/value et /value-ai.
+    """
+    from bot import db, calibrate
+    try:
+        k = float(db.get_meta("match_calib_k") or 1.0)
+        if not (0.1 <= k <= 3.0):
+            k = 1.0
+    except (TypeError, ValueError):
+        k = 1.0
+    try:
+        w = float(db.get_meta("market_blend_w") or calibrate.DEFAULT_MARKET_BLEND_W)
+        w = min(1.0, max(0.0, w))
+    except (TypeError, ValueError):
+        w = calibrate.DEFAULT_MARKET_BLEND_W
+    return k, w
+
+
 def _detect_players_from_mem(text: str, mem: Dict[str, Any]) -> List[str]:
     """Détecte jusqu'à 2 joueurs connus dans un texte libre."""
     from bot import chat as c
@@ -272,7 +293,7 @@ def _detect_players_from_mem(text: str, mem: Dict[str, Any]) -> List[str]:
 
 def _predict_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
     """Prédiction 1er set + match + H2H depuis le moteur local."""
-    from bot import predictor, features, db
+    from bot import predictor, features, db, calibrate
 
     n1 = _resolve_player(p1, mem) or p1
     n2 = _resolve_player(p2, mem) or p2
@@ -282,9 +303,11 @@ def _predict_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
         f2 = features.feature_vector(features.get_profile(mem, n2))
         r = predictor.predict(mem, n1, f1, n2, f2)
 
-        # Proba match best-of-3
+        # Proba match best-of-3, CALIBRÉE (temperature scaling appris) — sinon le
+        # chat sur-vendrait la confiance du modèle (ex. 93 % au lieu de 60 %).
+        k, _ = _calib_blend_params()
         p_set1 = r["prob1"] / 100.0
-        p_match1 = predictor.set_to_match_prob(p_set1)
+        p_match1 = calibrate.calibrated_prob(predictor.set_to_match_prob(p_set1), k)
         p_match2 = 1.0 - p_match1
 
         # H2H
@@ -299,7 +322,7 @@ def _predict_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
         lines = [
             f"Match : {n1} vs {n2}",
             f"1er set : {n1} {r['prob1']:.1f}% | {n2} {r['prob2']:.1f}%",
-            f"Match (best-of-3) : {n1} {p_match1*100:.1f}% | {n2} {p_match2*100:.1f}%",
+            f"Match (best-of-3, calibré) : {n1} {p_match1*100:.1f}% | {n2} {p_match2*100:.1f}%",
             f"Favori : {r['favorite'] or 'très serré'}",
             f"H2H ({w1+w2} confrontations) : {n1} {w1}–{w2} {n2}",
         ]
@@ -376,7 +399,7 @@ def _fetch_match_odds(n1: str, n2: str) -> Optional[Tuple[float, float]]:
 
 def _value_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
     """EV du match si les cotes sont disponibles."""
-    from bot import odds_api, predictor, features
+    from bot import odds_api, predictor, features, calibrate
 
     n1 = _resolve_player(p1, mem) or p1
     n2 = _resolve_player(p2, mem) or p2
@@ -392,19 +415,27 @@ def _value_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
         f1 = features.feature_vector(features.get_profile(mem, n1))
         f2 = features.feature_vector(features.get_profile(mem, n2))
         r = predictor.predict(mem, n1, f1, n2, f2)
-        pm1 = predictor.set_to_match_prob(r["prob1"] / 100.0)
-        pm2 = 1.0 - pm1
 
-        ev1 = round(pm1 * o1 - 1, 4)
-        ev2 = round(pm2 * o2 - 1, 4)
-        impl1 = round(1 / o1 * 100, 1)
-        impl2 = round(1 / o2 * 100, 1)
+        # Proba marché sans vig (normalisée), comme home_prob côté odds_api.
+        inv1, inv2 = 1.0 / o1, 1.0 / o2
+        pmkt1 = inv1 / (inv1 + inv2)
+
+        # Modèle calibré, PUIS blendé au marché : l'EV doit se calculer sur la
+        # proba blendée (sinon un modèle faible voit du value sur tout outsider).
+        k, w = _calib_blend_params()
+        pm1 = calibrate.calibrated_prob(predictor.set_to_match_prob(r["prob1"] / 100.0), k)
+        pb1 = calibrate.blend_probs(pm1, pmkt1, w)
+        pb2 = 1.0 - pb1
+
+        ev1 = round(pb1 * o1 - 1, 4)
+        ev2 = round(pb2 * o2 - 1, 4)
 
         lines = [
             f"Value {n1} vs {n2}",
             f"Cotes : {n1}={o1}  {n2}={o2}",
-            f"Proba modèle match : {n1} {pm1*100:.1f}% | {n2} {pm2*100:.1f}%",
-            f"Proba implicite marché : {n1} {impl1}% | {n2} {impl2}%",
+            f"Proba modèle (calibré) : {n1} {pm1*100:.1f}% | {n2} {(1-pm1)*100:.1f}%",
+            f"Proba blend (modèle+marché) : {n1} {pb1*100:.1f}% | {n2} {pb2*100:.1f}%",
+            f"Proba implicite marché : {n1} {pmkt1*100:.1f}% | {n2} {(1-pmkt1)*100:.1f}%",
             f"EV {n1} : {ev1:+.3f}  EV {n2} : {ev2:+.3f}",
             f"{'✅ VALUE ' + (n1 if ev1 >= ev2 else n2) if max(ev1, ev2) > 0 else '❌ Pas de value'}",
         ]
@@ -417,7 +448,7 @@ def _value_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
 
 def _value_list_context(mem: Dict[str, Any]) -> str:
     """Top value bets actuels (liste courte)."""
-    from bot import odds_api, predictor, features
+    from bot import odds_api, predictor, features, calibrate
 
     if not odds_api.is_enabled():
         return "Odds API désactivée — configure ODDS_API_KEY."
@@ -426,13 +457,25 @@ def _value_list_context(mem: Dict[str, Any]) -> str:
         if not events:
             return "Aucun événement live trouvé."
 
-        index = odds_api.build_event_index(events)
+        # Mêmes garde-fous que /value-ai : singles pré-match d'abord, ATP/WTA
+        # avant Challenger/ITF (les bookmakers du plan ne cotent pas l'ITF), et
+        # cap à 12 appels /odds (budget 100 req/h).
+        events = [e for e in events
+                  if "/" not in (e.get("home", "") + e.get("away", ""))
+                  and e.get("status") in ("pending", "not_started")]
+
+        def _prio(e: Dict[str, Any]) -> int:
+            lg = (e.get("league") or {}).get("name", "")
+            if lg.startswith(("ATP - ", "WTA - ")):
+                return 0
+            return 1 if ("Challenger" in lg or "125K" in lg) else 2
+        events.sort(key=_prio)
+
+        k, w = _calib_blend_params()
         results = []
-        for ev in list(events)[:15]:
-            n1_raw = ev.get("home", "")
-            n2_raw = ev.get("away", "")
-            r1 = _resolve_player(n1_raw, mem)
-            r2 = _resolve_player(n2_raw, mem)
+        for ev in events[:12]:
+            r1 = _resolve_player(ev.get("home", ""), mem)
+            r2 = _resolve_player(ev.get("away", ""), mem)
             if not (r1 and r2):
                 continue
             mw = odds_api.fetch_match_winner(ev.get("id") or ev.get("eventId"))
@@ -442,9 +485,10 @@ def _value_list_context(mem: Dict[str, Any]) -> str:
             f1 = features.feature_vector(features.get_profile(mem, r1))
             f2 = features.feature_vector(features.get_profile(mem, r2))
             r = predictor.predict(mem, r1, f1, r2, f2)
-            pm1 = predictor.set_to_match_prob(r["prob1"] / 100.0)
-            ev1 = pm1 * o1 - 1
-            ev2 = (1 - pm1) * o2 - 1
+            pm1 = calibrate.calibrated_prob(predictor.set_to_match_prob(r["prob1"] / 100.0), k)
+            pb1 = calibrate.blend_probs(pm1, mw["home_prob"], w)
+            ev1 = pb1 * o1 - 1
+            ev2 = (1 - pb1) * o2 - 1
             best = max(ev1, ev2)
             if best > 0:
                 side = r1 if ev1 >= ev2 else r2
