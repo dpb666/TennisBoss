@@ -32,6 +32,10 @@ from .bootstrap import bootstrap
 from .log import log
 
 app = Flask(__name__)
+# Borne la taille des requêtes (upload /api/upload) : sans limite, un POST de
+# plusieurs Go saturerait la RAM (f.read() charge tout en mémoire). 16 Mo suffit
+# pour les PDF/CSV/TXT attendus.
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 # Mémoire chargée une fois au démarrage (modèle + profils joueurs).
 _MEM: Dict[str, Any] = {}
@@ -101,9 +105,16 @@ def _calib(p_match: float) -> float:
 # --- CORS + auth -----------------------------------------------------------
 @app.after_request
 def _cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    # Pas de CORS par défaut : le client Android (OkHttp) ignore complètement
+    # CORS, donc le wildcard `*` ne profitait qu'aux navigateurs — et permettait
+    # à n'importe quel site web visité sur le réseau de lire l'API (vol de
+    # données en drive-by, surtout quand l'auth est absente). On n'autorise une
+    # origine que si elle est explicitement configurée.
+    origin = os.environ.get("TENNISBOSS_CORS_ORIGIN", "").strip()
+    if origin:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return resp
 
 
@@ -738,7 +749,17 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     _load_state()
     from .log import log
 
+    # Charge .env AVANT toute lecture de token : _auth() lit os.environ à chaque
+    # requête, il faut donc que TENNISBOSS_API_TOKEN y soit présent dès le départ.
+    from .live_api import load_env as _load_env
+    _load_env()
+
     token = os.environ.get("TENNISBOSS_API_TOKEN", "").strip()
+    if not token and host not in ("127.0.0.1", "localhost"):
+        log("SÉCURITÉ : API exposée sur le LAN SANS token (TENNISBOSS_API_TOKEN "
+            "absent du .env) — tout le réseau peut lire les données ET déclencher "
+            "/api/settlement/run, /api/learn/run, /api/upload. Définissez un token.",
+            "WARN")
     log(f"API REST sur http://{host}:{port}  (auth token: {'OUI' if token else 'non'})")
     log(f"{len(_MEM['players'])} joueurs chargés. Endpoints sous /api/ + /health.")
 
