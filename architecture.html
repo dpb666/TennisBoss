@@ -1,0 +1,260 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TennisBoss — Architecture</title>
+<style>
+  :root {
+    --bg: #0A0E14;
+    --fg: #e5e7eb;
+    --muted: #6b7280;
+    --line: #374151;
+    --neon: #00E5A0;
+    --blue: #4F8CFF;
+    --yellow: #FBBF24;
+    --red: #EF4444;
+    --purple: #8B5CF6;
+    --neutral: #1a2235;
+    --card: #111827;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  main { max-width: 1020px; margin: 28px auto; padding: 0 16px; }
+  svg { width: 100%; height: auto; display: block; }
+</style>
+<main>
+<svg viewBox="0 0 960 660" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- arrow markers -->
+    <marker id="arr-neon" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#00E5A0"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#4F8CFF"/>
+    </marker>
+    <marker id="arr-red" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#EF4444"/>
+    </marker>
+    <marker id="arr-yellow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#FBBF24"/>
+    </marker>
+    <marker id="arr-muted" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#4B5563"/>
+    </marker>
+  </defs>
+
+  <!-- ══════════════════════════════════════
+       TITLE
+  ══════════════════════════════════════ -->
+  <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#00E5A0">TennisBoss — Architecture</text>
+  <text x="480" y="46" text-anchor="middle" font-size="11" fill="#6b7280">Android App · FastAPI Backend · Telegram Bot · Ollama LLM</text>
+
+  <!-- ══════════════════════════════════════
+       ZONE: ANDROID APP (left)
+  ══════════════════════════════════════ -->
+  <rect x="20" y="65" width="175" height="320" rx="10" fill="none" stroke="#4F8CFF" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.7"/>
+  <text x="107" y="83" text-anchor="middle" font-size="11" font-weight="700" fill="#4F8CFF">📱 ANDROID APP</text>
+  <text x="107" y="95" text-anchor="middle" font-size="9" fill="#6b7280">Kotlin · Compose · Material3</text>
+
+  <!-- Android screens -->
+  <rect x="34" y="105" width="148" height="30" rx="5" fill="#111827" stroke="#4F8CFF" stroke-width="1"/>
+  <text x="108" y="124" text-anchor="middle" font-size="11" fill="#e5e7eb">🎯 Prédire</text>
+
+  <rect x="34" y="143" width="148" height="30" rx="5" fill="#111827" stroke="#4F8CFF" stroke-width="1"/>
+  <text x="108" y="162" text-anchor="middle" font-size="11" fill="#e5e7eb">📋 Matchs</text>
+
+  <rect x="34" y="181" width="148" height="30" rx="5" fill="#111827" stroke="#4F8CFF" stroke-width="1"/>
+  <text x="108" y="200" text-anchor="middle" font-size="11" fill="#e5e7eb">👤 Joueurs</text>
+
+  <rect x="34" y="219" width="148" height="30" rx="5" fill="#111827" stroke="#4F8CFF" stroke-width="1"/>
+  <text x="108" y="238" text-anchor="middle" font-size="11" fill="#00E5A0">💎 Value</text>
+
+  <rect x="34" y="257" width="148" height="30" rx="5" fill="#111827" stroke="#4F8CFF" stroke-width="1"/>
+  <text x="108" y="276" text-anchor="middle" font-size="11" fill="#e5e7eb">📊 Perf</text>
+
+  <rect x="34" y="295" width="148" height="30" rx="5" fill="#111827" stroke="#4F8CFF" stroke-width="1"/>
+  <text x="108" y="314" text-anchor="middle" font-size="11" fill="#6b7280">💬 Chat (UI)</text>
+
+  <text x="34" y="350" font-size="9" fill="#6b7280">Retrofit · DataStore</text>
+  <text x="34" y="362" font-size="9" fill="#6b7280">SettingsStore · BetBuilderView</text>
+  <text x="34" y="374" font-size="9" fill="#6b7280">ExplainView · H2HView</text>
+
+  <!-- Android → API arrow -->
+  <line x1="195" y1="225" x2="272" y2="225" stroke="#4F8CFF" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="233" y="218" text-anchor="middle" font-size="9" fill="#4F8CFF">REST</text>
+  <text x="233" y="228" text-anchor="middle" font-size="9" fill="#6b7280">/api/*</text>
+
+  <!-- ══════════════════════════════════════
+       ZONE: FASTAPI BACKEND (center)
+  ══════════════════════════════════════ -->
+  <rect x="275" y="65" width="410" height="510" rx="10" fill="none" stroke="#00E5A0" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.7"/>
+  <text x="480" y="83" text-anchor="middle" font-size="11" font-weight="700" fill="#00E5A0">⚙️  FASTAPI BACKEND</text>
+  <text x="480" y="95" text-anchor="middle" font-size="9" fill="#6b7280">app/main.py · Python · uvicorn</text>
+
+  <!-- API Routes -->
+  <rect x="288" y="105" width="185" height="115" rx="6" fill="#0f1c2e" stroke="#00E5A0" stroke-width="1"/>
+  <text x="380" y="120" text-anchor="middle" font-size="10" font-weight="700" fill="#00E5A0">API Routes</text>
+  <text x="297" y="135" font-size="9" fill="#a3adbd">/api/predict · /api/upcoming</text>
+  <text x="297" y="148" font-size="9" fill="#a3adbd">/api/value · /api/h2h</text>
+  <text x="297" y="161" font-size="9" fill="#a3adbd">/api/player · /api/calibration</text>
+  <text x="297" y="174" font-size="9" fill="#a3adbd">/v2/spread-analysis · /v2/arb</text>
+  <text x="297" y="187" font-size="9" fill="#a3adbd">/v2/trading/* · /v2/risk/*</text>
+  <text x="297" y="200" font-size="9" fill="#a3adbd">/api/settlement/run · /api/chat</text>
+  <text x="297" y="213" font-size="9" fill="#6b7280">routes.py / trading_routes / risk_routes</text>
+
+  <!-- Chat Routes -->
+  <rect x="288" y="230" width="185" height="85" rx="6" fill="#0f1c2e" stroke="#FBBF24" stroke-width="1"/>
+  <text x="380" y="245" text-anchor="middle" font-size="10" font-weight="700" fill="#FBBF24">Chat Routes</text>
+  <text x="297" y="260" font-size="9" fill="#a3adbd">/api/chat → chat.py → Ollama</text>
+  <text x="297" y="273" font-size="9" fill="#a3adbd">/tg-webhook → telegram_handler</text>
+  <text x="297" y="286" font-size="9" fill="#a3adbd">/tg-chat (test direct)</text>
+  <text x="297" y="299" font-size="9" fill="#a3adbd">/tg-sessions/&lt;id&gt;</text>
+  <text x="297" y="310" font-size="9" fill="#6b7280">chat_routes.py</text>
+
+  <!-- Core Engine -->
+  <rect x="288" y="330" width="185" height="80" rx="6" fill="#0f1c2e" stroke="#8B5CF6" stroke-width="1"/>
+  <text x="380" y="345" text-anchor="middle" font-size="10" font-weight="700" fill="#8B5CF6">Core Engine</text>
+  <text x="297" y="360" font-size="9" fill="#a3adbd">predictor · ELO · calibrate</text>
+  <text x="297" y="373" font-size="9" fill="#a3adbd">settlement · learner · features</text>
+  <text x="297" y="386" font-size="9" fill="#a3adbd">value · consensus · risk</text>
+  <text x="297" y="399" font-size="9" fill="#6b7280">bot/ modules</text>
+
+  <!-- Analytics -->
+  <rect x="288" y="425" width="185" height="70" rx="6" fill="#0f1c2e" stroke="#00E5A0" stroke-width="1" opacity="0.7"/>
+  <text x="380" y="440" text-anchor="middle" font-size="10" font-weight="700" fill="#00E5A0">Analytics + Trading + Risk</text>
+  <text x="297" y="455" font-size="9" fill="#a3adbd">spreads · arb · sharp · CLV</text>
+  <text x="297" y="468" font-size="9" fill="#a3adbd">kelly · positions · hedge</text>
+  <text x="297" y="481" font-size="9" fill="#a3adbd">greeks · drawdown · scenarios</text>
+
+  <!-- SQLite DB (inside backend zone) -->
+  <rect x="288" y="507" width="185" height="55" rx="6" fill="#0f1c2e" stroke="#6b7280" stroke-width="1"/>
+  <text x="380" y="522" text-anchor="middle" font-size="10" font-weight="700" fill="#e5e7eb">🗄  SQLite DB</text>
+  <text x="297" y="537" font-size="9" fill="#a3adbd">matches · predictions · players</text>
+  <text x="297" y="550" font-size="9" fill="#a3adbd">settled_matches · bet_log · meta</text>
+
+  <!-- Internal arrows inside backend -->
+  <line x1="380" y1="220" x2="380" y2="228" stroke="#00E5A0" stroke-width="1.5" marker-end="url(#arr-neon)"/>
+  <line x1="380" y1="315" x2="380" y2="328" stroke="#FBBF24" stroke-width="1.5" marker-end="url(#arr-yellow)"/>
+  <line x1="380" y1="410" x2="380" y2="423" stroke="#8B5CF6" stroke-width="1.5" marker-end="url(#arr-muted)"/>
+  <line x1="380" y1="495" x2="380" y2="505" stroke="#00E5A0" stroke-width="1.5" marker-end="url(#arr-neon)"/>
+
+  <!-- Routes → Core Engine (vertical link right side) -->
+  <line x1="473" y1="220" x2="473" y2="328" stroke="#8B5CF6" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arr-muted)"/>
+  <text x="476" y="278" font-size="9" fill="#8B5CF6">calls</text>
+
+  <!-- Chat routes → Core Engine (MISSING link — red dashed) -->
+  <line x1="380" y1="315" x2="473" y2="330" stroke="#EF4444" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arr-red)"/>
+
+  <!-- ══════════════════════════════════════
+       ZONE: TELEGRAM BOT (right top)
+  ══════════════════════════════════════ -->
+  <rect x="700" y="65" width="245" height="250" rx="10" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.7"/>
+  <text x="822" y="83" text-anchor="middle" font-size="11" font-weight="700" fill="#FBBF24">🤖 TELEGRAM BOT</text>
+
+  <!-- Telegram user -->
+  <rect x="714" y="95" width="218" height="36" rx="6" fill="#111827" stroke="#FBBF24" stroke-width="1"/>
+  <text x="823" y="116" text-anchor="middle" font-size="11" fill="#e5e7eb">👤 User Telegram</text>
+
+  <!-- Webhook -->
+  <rect x="714" y="147" width="218" height="36" rx="6" fill="#111827" stroke="#FBBF24" stroke-width="1"/>
+  <text x="823" y="162" text-anchor="middle" font-size="11" fill="#FBBF24">/tg-webhook</text>
+  <text x="823" y="175" text-anchor="middle" font-size="9" fill="#6b7280">telegram_handler.py</text>
+
+  <!-- Session/history -->
+  <rect x="714" y="198" width="218" height="36" rx="6" fill="#111827" stroke="#FBBF24" stroke-width="1"/>
+  <text x="823" y="213" text-anchor="middle" font-size="11" fill="#e5e7eb">Session SQLite</text>
+  <text x="823" y="225" text-anchor="middle" font-size="9" fill="#6b7280">/tmp/tg_sessions.db · 20 msgs</text>
+
+  <!-- Agent router -->
+  <rect x="714" y="249" width="218" height="52" rx="6" fill="#111827" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="823" y="266" text-anchor="middle" font-size="11" fill="#EF4444">agent_router.py</text>
+  <text x="823" y="279" text-anchor="middle" font-size="9" fill="#EF4444">@stats_agent → STUB</text>
+  <text x="823" y="292" text-anchor="middle" font-size="9" fill="#EF4444">@odds_agent  → STUB</text>
+
+  <!-- Arrows inside TG zone -->
+  <line x1="823" y1="131" x2="823" y2="145" stroke="#FBBF24" stroke-width="1.5" marker-end="url(#arr-yellow)"/>
+  <line x1="823" y1="183" x2="823" y2="196" stroke="#FBBF24" stroke-width="1.5" marker-end="url(#arr-yellow)"/>
+  <line x1="823" y1="234" x2="823" y2="247" stroke="#FBBF24" stroke-width="1.5" marker-end="url(#arr-yellow)"/>
+
+  <!-- TG webhook → FastAPI chat routes -->
+  <line x1="700" y1="163" x2="685" y2="270" stroke="#FBBF24" stroke-width="2" marker-end="url(#arr-yellow)"/>
+  <text x="680" y="215" text-anchor="end" font-size="9" fill="#FBBF24">POST</text>
+
+  <!-- ══════════════════════════════════════
+       ZONE: OLLAMA LLM (right bottom)
+  ══════════════════════════════════════ -->
+  <rect x="700" y="335" width="245" height="120" rx="10" fill="none" stroke="#8B5CF6" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.7"/>
+  <text x="822" y="353" text-anchor="middle" font-size="11" font-weight="700" fill="#8B5CF6">🧠 OLLAMA (local)</text>
+  <text x="822" y="365" text-anchor="middle" font-size="9" fill="#6b7280">localhost:11434 · Windows WSL</text>
+
+  <rect x="714" y="375" width="218" height="34" rx="6" fill="#111827" stroke="#8B5CF6" stroke-width="1"/>
+  <text x="823" y="396" text-anchor="middle" font-size="11" fill="#e5e7eb">qwen2.5:7b</text>
+
+  <rect x="714" y="418" width="218" height="28" rx="6" fill="#111827" stroke="#8B5CF6" stroke-width="1"/>
+  <text x="823" y="436" text-anchor="middle" font-size="10" fill="#a3adbd">context: top ELO + surface ELO</text>
+
+  <!-- chat.py → Ollama arrow -->
+  <line x1="685" y1="287" x2="700" y2="390" stroke="#8B5CF6" stroke-width="2" marker-end="url(#arr-muted)"/>
+  <text x="710" y="340" font-size="9" fill="#8B5CF6">/api/chat</text>
+
+  <!-- ══════════════════════════════════════
+       ZONE: EXTERNAL DATA (bottom)
+  ══════════════════════════════════════ -->
+  <rect x="20" y="475" width="245" height="110" rx="10" fill="none" stroke="#6b7280" stroke-width="1.2" stroke-dasharray="6 4" opacity="0.6"/>
+  <text x="142" y="493" text-anchor="middle" font-size="11" font-weight="700" fill="#6b7280">🌐 DONNÉES EXTERNES</text>
+
+  <rect x="33" y="502" width="110" height="30" rx="5" fill="#111827" stroke="#6b7280" stroke-width="1"/>
+  <text x="88" y="521" text-anchor="middle" font-size="10" fill="#e5e7eb">odds-api.io</text>
+
+  <rect x="150" y="502" width="105" height="30" rx="5" fill="#111827" stroke="#6b7280" stroke-width="1"/>
+  <text x="202" y="521" text-anchor="middle" font-size="10" fill="#e5e7eb">api-tennis.com</text>
+
+  <text x="33" y="550" font-size="9" fill="#6b7280">cotes live · rate-limit 100/h</text>
+  <text x="33" y="562" font-size="9" fill="#6b7280">Sackmann archive (16k matchs)</text>
+  <text x="33" y="574" font-size="9" fill="#6b7280">fixtures · live scores · résultats</text>
+
+  <!-- External → Backend arrow -->
+  <line x1="265" y1="530" x2="285" y2="530" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arr-muted)"/>
+
+  <!-- ══════════════════════════════════════
+       MISSING LINK CALLOUT (big red box)
+  ══════════════════════════════════════ -->
+  <rect x="480" y="230" width="200" height="90" rx="8" fill="#1a0a0a" stroke="#EF4444" stroke-width="2"/>
+  <text x="580" y="250" text-anchor="middle" font-size="11" font-weight="700" fill="#EF4444">❌ LIEN MANQUANT</text>
+  <text x="580" y="265" text-anchor="middle" font-size="10" fill="#EF4444">Chat → données réelles</text>
+  <line x1="488" y1="278" x2="500" y2="278" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="504" y="282" font-size="9" fill="#fca5a5">predict, H2H, ELO → non injecté</text>
+  <line x1="488" y1="293" x2="500" y2="293" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="504" y="297" font-size="9" fill="#fca5a5">@stats_agent → "pending"</text>
+  <line x1="488" y1="308" x2="500" y2="308" stroke="#EF4444" stroke-width="1.5"/>
+  <text x="504" y="312" font-size="9" fill="#fca5a5">agent_router stub → None</text>
+
+  <!-- Arrow from callout to Chat Routes -->
+  <line x1="480" y1="270" x2="475" y2="270" stroke="#EF4444" stroke-width="1.5" marker-end="url(#arr-red)"/>
+
+  <!-- ══════════════════════════════════════
+       LEGEND
+  ══════════════════════════════════════ -->
+  <rect x="700" y="470" width="245" height="100" rx="8" fill="#111827" stroke="#374151" stroke-width="1"/>
+  <text x="714" y="487" font-size="10" font-weight="700" fill="#e5e7eb">Légende</text>
+
+  <line x1="714" y1="500" x2="740" y2="500" stroke="#00E5A0" stroke-width="2" marker-end="url(#arr-neon)"/>
+  <text x="745" y="504" font-size="9" fill="#e5e7eb">Flux de données fonctionnel</text>
+
+  <line x1="714" y1="515" x2="740" y2="515" stroke="#4F8CFF" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="745" y="519" font-size="9" fill="#e5e7eb">App Android → API</text>
+
+  <line x1="714" y1="530" x2="740" y2="530" stroke="#EF4444" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arr-red)"/>
+  <text x="745" y="534" font-size="9" fill="#EF4444">Lien manquant / STUB</text>
+
+  <line x1="714" y1="545" x2="740" y2="545" stroke="#FBBF24" stroke-width="2" marker-end="url(#arr-yellow)"/>
+  <text x="745" y="549" font-size="9" fill="#e5e7eb">Telegram webhook</text>
+
+  <line x1="714" y1="560" x2="740" y2="560" stroke="#8B5CF6" stroke-width="2" marker-end="url(#arr-muted)"/>
+  <text x="745" y="564" font-size="9" fill="#e5e7eb">Chat → Ollama LLM</text>
+
+</svg>
+</main>
