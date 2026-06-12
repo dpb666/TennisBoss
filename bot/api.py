@@ -410,6 +410,9 @@ def api_predict():
         "first_set": {
             "prob1": r["prob1"], "prob2": r["prob2"],
             "favorite": r["favorite"], "verdict": r["verdict"],
+            "surface": r["surface"],
+            "confidence": r["confidence"],
+            "confidence_label": r["confidence_label"],
         },
         "explain": _explain(n1, f1, n2, f2),
         "h2h": _h2h_payload(n1, n2, limit=5),
@@ -453,6 +456,9 @@ def api_upcoming():
                 "player1": n1, "player2": n2,
                 "prob1": r["prob1"], "prob2": r["prob2"],
                 "favorite": r["favorite"],
+                "surface": r["surface"],
+                "confidence": r["confidence"],
+                "confidence_label": r["confidence_label"],
                 # Cible 1er set (cote juste >= 1.60 = zone jouable).
                 "first_set_prob": round(fs_prob * 100, 1),
                 "fair_odds": fair_odds,

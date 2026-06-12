@@ -80,6 +80,34 @@ def elo_logit(mem: Dict[str, Any], name1: str, name2: str,
     return blend * combined
 
 
+_CONF_MIN_MATCHES = 30
+
+
+def confidence_score(mem: Dict[str, Any], name1: str, name2: str, z: float) -> float:
+    """Score de confiance [0..1] de la prédiction.
+
+    Combine deux signaux :
+    - data_conf  : fiabilité des profils (sature à _CONF_MIN_MATCHES matchs chacun)
+    - margin_conf: amplitude du logit z (|z|=2 => très tranché)
+    """
+    players = mem.get("players") or {}
+    n1 = int(players.get(name1, {}).get("n", 0))
+    n2 = int(players.get(name2, {}).get("n", 0))
+    data_conf = min(min(n1, n2), _CONF_MIN_MATCHES) / _CONF_MIN_MATCHES
+    margin_conf = min(abs(z) * 0.5, 1.0)
+    return round(0.6 * data_conf + 0.4 * margin_conf, 2)
+
+
+def confidence_label(score: float) -> str:
+    if score < 0.40:
+        return "faible"
+    if score < 0.65:
+        return "modérée"
+    if score < 0.80:
+        return "bonne"
+    return "élevée"
+
+
 def predict(
     mem: Dict[str, Any],
     name1: str,
@@ -105,6 +133,7 @@ def predict(
     else:
         verdict = f"🏆 {name2} favori pour gagner le 1er set"
         favorite = name2
+    conf = confidence_score(mem, name1, name2, z)
     return {
         "player1": name1,
         "player2": name2,
@@ -114,4 +143,7 @@ def predict(
         "score2": round(s2, 4),
         "favorite": favorite,
         "verdict": verdict,
+        "surface": surface,
+        "confidence": conf,
+        "confidence_label": confidence_label(conf),
     }

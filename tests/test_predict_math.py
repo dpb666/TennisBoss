@@ -120,11 +120,42 @@ class TestPredictorProbability(unittest.TestCase):
         self.assertAlmostEqual(p1 + p2, 1.0, places=9)
 
     def test_symetrie(self):
-        # Deux joueurs identiques -> 50/50.
         w = {"serve": 1.0, "return1": 1.0, "return2": 1.0, "recent": 1.0}
         f = {"serve": 0.6, "return1": 0.6, "return2": 0.6, "recent": 0.6}
         p1, p2, _, _ = predictor.probability(w, 0.0, f, f)
         self.assertAlmostEqual(p1, 0.5, places=9)
+
+
+class TestConfidence(unittest.TestCase):
+    def _mem(self, n1=0, n2=0):
+        return {
+            "weights": {"serve": 1.0, "return1": 1.0, "return2": 1.0, "recent": 1.0},
+            "bias": 0.0,
+            "players": {"A": {"n": n1}, "B": {"n": n2}},
+        }
+
+    def test_borne_entre_0_et_1(self):
+        for n in (0, 5, 30, 100):
+            c = predictor.confidence_score(self._mem(n, n), "A", "B", z=1.0)
+            self.assertGreaterEqual(c, 0.0)
+            self.assertLessEqual(c, 1.0)
+
+    def test_plus_de_matchs_plus_confiant(self):
+        c_peu = predictor.confidence_score(self._mem(2, 2), "A", "B", z=0.5)
+        c_bcp = predictor.confidence_score(self._mem(30, 30), "A", "B", z=0.5)
+        self.assertGreater(c_bcp, c_peu)
+
+    def test_grand_z_augmente_confiance(self):
+        mem = self._mem(10, 10)
+        c_proche = predictor.confidence_score(mem, "A", "B", z=0.1)
+        c_tranché = predictor.confidence_score(mem, "A", "B", z=2.5)
+        self.assertGreater(c_tranché, c_proche)
+
+    def test_labels(self):
+        self.assertEqual(predictor.confidence_label(0.2), "faible")
+        self.assertEqual(predictor.confidence_label(0.5), "modérée")
+        self.assertEqual(predictor.confidence_label(0.7), "bonne")
+        self.assertEqual(predictor.confidence_label(0.9), "élevée")
 
 
 if __name__ == "__main__":
