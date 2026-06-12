@@ -25,6 +25,12 @@ android {
         }
     }
 
+    packaging {
+        // WSL build : le NDK installé est Windows-only (pas de linux-x86_64 llvm-strip).
+        // Le stripping des .so est ignoré — sans impact fonctionnel en debug.
+        jniLibs { keepDebugSymbols += "**/*.so" }
+    }
+
     buildFeatures {
         compose = true
     }
