@@ -155,10 +155,13 @@ def build_match_context(message: str, mem: Dict[str, Any]) -> str:
             w1 = sum(1 for row in h2h if row["winner"] == n1)
             w2 = sum(1 for row in h2h if row["winner"] == n2)
             elo = mem.get("elo") or {}
+            surf = r.get("surface") or "?"
             return (
                 f"Match {n1} vs {n2}\n"
+                f"Surface : {surf}\n"
                 f"Proba match (calibrée) : {n1} {pm1*100:.0f}% | {n2} {(1-pm1)*100:.0f}%\n"
                 f"Favori : {r['favorite'] or 'très serré'}\n"
+                f"Confiance : {r.get('confidence_label','?')} ({r.get('confidence',0):.0%})\n"
                 f"H2H : {n1} {w1}-{w2} {n2} ({w1+w2} matchs)\n"
                 f"ELO : {n1}={elo.get(n1,1500):.0f} {n2}={elo.get(n2,1500):.0f}"
             )

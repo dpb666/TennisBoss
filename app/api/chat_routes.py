@@ -155,12 +155,12 @@ def _route_chat(user_id: int, message: str, history: list, agent: Optional[str])
 def _stats_agent(message: str, history: list) -> str:
     """@stats_agent : analyse joueur/match depuis les données réelles."""
     from app.main import _MEM
-    # Supprimer le tag de la question
     clean = message.replace("@stats_agent", "").strip()
 
     players = _detect_players_from_mem(clean, _MEM)
+    surface = tg.extract_match_context(clean).get("surface")
     if len(players) >= 2:
-        ctx = _predict_context(players[0], players[1], _MEM)
+        ctx = _predict_context(players[0], players[1], _MEM, surface=surface)
     elif len(players) == 1:
         ctx = _player_context(players[0], _MEM)
     else:
@@ -216,9 +216,10 @@ def _analyzer_agent(message: str, history: list) -> str:
     clean = message.replace("@analyzer_agent", "").strip()
 
     players = _detect_players_from_mem(clean, _MEM)
+    surface = tg.extract_match_context(clean).get("surface")
     ctx_parts = []
     if len(players) >= 2:
-        ctx_parts.append(_predict_context(players[0], players[1], _MEM))
+        ctx_parts.append(_predict_context(players[0], players[1], _MEM, surface=surface))
         ctx_parts.append(_value_context(players[0], players[1], _MEM))
     ctx = "\n".join(p for p in ctx_parts if p)
 
@@ -291,7 +292,8 @@ def _detect_players_from_mem(text: str, mem: Dict[str, Any]) -> List[str]:
     return c._detect_players(text, players_lower)[:2]
 
 
-def _predict_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
+def _predict_context(p1: str, p2: str, mem: Dict[str, Any],
+                     surface: Optional[str] = None) -> str:
     """Prédiction 1er set + match + H2H depuis le moteur local."""
     from bot import predictor, features, db, calibrate
 
@@ -301,16 +303,13 @@ def _predict_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
     try:
         f1 = features.feature_vector(features.get_profile(mem, n1))
         f2 = features.feature_vector(features.get_profile(mem, n2))
-        r = predictor.predict(mem, n1, f1, n2, f2)
+        r = predictor.predict(mem, n1, f1, n2, f2, surface=surface)
 
-        # Proba match best-of-3, CALIBRÉE (temperature scaling appris) — sinon le
-        # chat sur-vendrait la confiance du modèle (ex. 93 % au lieu de 60 %).
         k, _ = _calib_blend_params()
         p_set1 = r["prob1"] / 100.0
         p_match1 = calibrate.calibrated_prob(predictor.set_to_match_prob(p_set1), k)
         p_match2 = 1.0 - p_match1
 
-        # H2H
         h2h_rows = db.head_to_head(n1, n2)
         w1 = sum(1 for row in h2h_rows if row["winner"] == n1)
         w2 = sum(1 for row in h2h_rows if row["winner"] == n2)
@@ -319,18 +318,20 @@ def _predict_context(p1: str, p2: str, mem: Dict[str, Any]) -> str:
             for row in h2h_rows[:3]
         ]
 
+        surf_label = r["surface"] or surface or "non déterminée"
         lines = [
             f"Match : {n1} vs {n2}",
+            f"Surface : {surf_label}",
             f"1er set : {n1} {r['prob1']:.1f}% | {n2} {r['prob2']:.1f}%",
             f"Match (best-of-3, calibré) : {n1} {p_match1*100:.1f}% | {n2} {p_match2*100:.1f}%",
             f"Favori : {r['favorite'] or 'très serré'}",
+            f"Confiance modèle : {r['confidence_label']} ({r['confidence']:.0%})",
             f"H2H ({w1+w2} confrontations) : {n1} {w1}–{w2} {n2}",
         ]
         if last3:
             lines.append("Dernières confrontations :")
             lines.extend(last3)
 
-        # ELO
         elo = mem.get("elo") or {}
         if n1 in elo or n2 in elo:
             lines.append(
@@ -507,8 +508,9 @@ def _value_list_context(mem: Dict[str, Any]) -> str:
 def _build_match_context(message: str, mem: Dict[str, Any]) -> str:
     """Contexte automatique : si 2 joueurs détectés → prédiction + H2H."""
     players = _detect_players_from_mem(message, mem)
+    surface = tg.extract_match_context(message).get("surface")
     if len(players) >= 2:
-        return _predict_context(players[0], players[1], mem)
+        return _predict_context(players[0], players[1], mem, surface=surface)
     if len(players) == 1:
         return _player_context(players[0], mem)
     return ""
@@ -532,19 +534,60 @@ def _help_text() -> str:
     )
 
 
+def _fmt_telegram_html(text: str) -> str:
+    """Formate une réponse TennisBoss en HTML Telegram.
+
+    Règles :
+    - Lignes "Clé : valeur" → clé en <b>
+    - Pourcentages et cotes → <b>
+    - ✅/❌ laissés tels quels (Unicode supporté)
+    - Caractères réservés HTML (<>&) échappés.
+    """
+    import re
+    import html as _html
+
+    lines = []
+    for raw in text.split("\n"):
+        line = _html.escape(raw)
+        # "Clé : valeur" → <b>Clé</b> : valeur
+        line = re.sub(r"^(<b>)?([^:<\n]{2,30})(</b>)? : ", r"<b>\2</b> : ", line)
+        # Pourcentages : "67.5%" → "<b>67.5%</b>"
+        line = re.sub(r"(\d+\.?\d*%)", r"<b>\1</b>", line)
+        # Cotes numériques type "cote 1.85" ou "=1.85"
+        line = re.sub(r"(cote|=)(\s?)(\d+\.\d{2})\b", r"\1\2<b>\3</b>", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
 async def _send_telegram_async(chat_id: int, text: str):
     import aiohttp
     if not TELEGRAM_BOT_TOKEN:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    formatted = _fmt_telegram_html(text)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url,
-                json={"chat_id": chat_id, "text": text},
+                json={
+                    "chat_id": chat_id,
+                    "text": formatted,
+                    "parse_mode": "HTML",
+                },
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 if resp.status != 200:
-                    log(f"Telegram API {resp.status}: {await resp.text()}", "WARN")
+                    body = await resp.text()
+                    if "can't parse" in body.lower():
+                        # Repli en texte brut si le HTML est mal formé
+                        async with session.post(
+                            url,
+                            json={"chat_id": chat_id, "text": text},
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as r2:
+                            if r2.status != 200:
+                                log(f"Telegram API {r2.status} (plain fallback)", "WARN")
+                    else:
+                        log(f"Telegram API {resp.status}: {body}", "WARN")
     except aiohttp.ClientError as e:
         log(f"Telegram send error: {e}", "WARN")
