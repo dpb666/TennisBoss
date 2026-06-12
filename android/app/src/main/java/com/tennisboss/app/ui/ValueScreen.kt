@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ValueComparison
+import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SkeletonList
 
 private val GoodColor = Color(0xFF00E5A0)   // EV+
@@ -81,7 +82,24 @@ fun ValueScreen(vm: ValueViewModel = viewModel()) {
                 is ValueUiState.Error ->
                     Text(s.message, color = MaterialTheme.colorScheme.error)
                 is ValueUiState.Success -> {
-                    if (s.comparisons.isEmpty()) {
+                    if (s.rateLimited) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "⏳ Limite API atteinte",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFFB800),
+                            )
+                            Text(
+                                s.rateLimitMessage.ifBlank {
+                                    "Quota odds-api.io épuisé. " +
+                                        s.retryInS?.let { "Réessayer dans ${it}s." }.orEmpty()
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else if (s.comparisons.isEmpty()) {
                         Text(
                             "Aucune value pour le moment (cotes momentanément indisponibles " +
                                 "ou aucun match coté). Tire vers le bas pour réessayer.",
@@ -120,6 +138,10 @@ private fun ValueCard(c: ValueComparison) {
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
                 )
+                if (c.confidence_label.isNotBlank()) {
+                    ConfidenceBadge(c.confidence_label, c.confidence)
+                    Spacer(Modifier.size(6.dp))
+                }
                 EvBadge(c.best_ev, c.value)
             }
 

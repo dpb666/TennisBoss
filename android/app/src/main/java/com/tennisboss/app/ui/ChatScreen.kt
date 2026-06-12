@@ -267,22 +267,25 @@ private fun TypingIndicator() {
 
 @Composable
 private fun SuggestionChips(onSelect: (String) -> Unit) {
-    val suggestions = listOf(
-        "Qui sont les meilleurs joueurs sur terre battue ?",
-        "Compare Sinner et Alcaraz",
-        "Quel joueur a le meilleur ELO en ce moment ?",
-        "Explique comment fonctionne le système ELO de TennisBoss",
+    data class Chip(val label: String, val query: String)
+    val chips = listOf(
+        Chip("📊 Stats match",    "@stats_agent Sinner vs Alcaraz"),
+        Chip("💎 Value bets",     "@odds_agent meilleurs value bets du moment"),
+        Chip("🔬 Analyse",        "@analyzer_agent Djokovic vs Sinner sur terre"),
+        Chip("🎾 Top ELO",        "Quels sont les meilleurs joueurs ELO en ce moment ?"),
+        Chip("🏟 Surface",        "Qui domine sur gazon cette saison ?"),
+        Chip("📈 Forme récente",  "Compare la forme de Alcaraz et Zverev"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        suggestions.forEach { s ->
+        chips.forEach { chip ->
             Surface(
-                onClick = { onSelect(s) },
+                onClick = { onSelect(chip.query) },
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    s,
+                    chip.label,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

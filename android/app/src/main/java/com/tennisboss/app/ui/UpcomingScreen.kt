@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.Prediction
 import com.tennisboss.app.ui.components.BetBuilderView
+import com.tennisboss.app.ui.components.ConfidenceBadge
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -179,9 +180,6 @@ private fun MatchCard(m: UpcomingMatch) {
 
             val pred = m.prediction
             if (pred != null) {
-                val maxProb = Math.max(pred.prob1, pred.prob2)
-                val isHighConfidence = maxProb > 65.0
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -194,24 +192,28 @@ private fun MatchCard(m: UpcomingMatch) {
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    if (isHighConfidence) {
-                        Text(
-                            "🔥 TOP PICK",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFE65100),
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
+                    if (pred.confidence_label.isNotBlank()) {
+                        ConfidenceBadge(pred.confidence_label, pred.confidence)
                     }
                 }
-                
+
                 pred.favorite?.let {
                     Text(
                         "🏆 Favori : $it",
                         style = MaterialTheme.typography.bodySmall,
-                        fontWeight = if (isHighConfidence) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isHighConfidence) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Normal,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                pred.surface?.let { surf ->
+                    if (surf.isNotBlank()) {
+                        Text(
+                            "🏟 Surface : $surf",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
 
                 // Cible 1er set : favori jouable à cote juste >= 1.60.

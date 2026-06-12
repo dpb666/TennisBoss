@@ -80,6 +80,9 @@ data class FirstSet(
     val prob2: Double,
     val favorite: String?,
     val verdict: String,
+    val surface: String? = null,
+    val confidence: Double = 0.0,
+    val confidence_label: String = "",
 )
 
 /** Un facteur du modèle et sa contribution exacte à la prédiction. */
@@ -149,6 +152,9 @@ data class Prediction(
     val prob1: Double,
     val prob2: Double,
     val favorite: String?,
+    val surface: String? = null,
+    val confidence: Double = 0.0,
+    val confidence_label: String = "",
     // Cible 1er set (cote juste = 1/proba ; jouable si >= 1.60)
     val first_set_prob: Double? = null,
     val fair_odds: Double? = null,
@@ -209,9 +215,13 @@ data class ValueComparison(
     val player1: String = "",
     val player2: String = "",
     val league: String = "",
+    val confidence: Double = 0.0,
+    val confidence_label: String = "",
     val model_first_set_prob1: Double = 0.0,
     val model_match_prob1: Double = 0.0,
     val model_match_prob2: Double = 0.0,
+    val blend_match_prob1: Double = 0.0,
+    val blend_match_prob2: Double = 0.0,
     val market_match_prob1: Double = 0.0,
     val market_match_prob2: Double = 0.0,
     val odds: ValueOdds = ValueOdds(),
@@ -225,6 +235,9 @@ data class ValueComparison(
 data class ValueResponse(
     val count: Int = 0,
     val comparisons: List<ValueComparison> = emptyList(),
+    val rate_limited: Boolean = false,
+    val retry_in_s: Int? = null,
+    val message: String = "",
     val note: String = "",
 )
 
