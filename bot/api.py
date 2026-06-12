@@ -482,10 +482,23 @@ def api_value():
     """Compare le modèle au marché et calcule l'EV (espérance de gain) réelle.
 
     EV(parier J) = proba_match_modèle(J) × cote(J) − 1.  EV > 0 = value (+).
+    min_confidence (float, défaut 0.4) : ignore les picks sous ce seuil de confiance.
     """
     limit = min(int(request.args.get("limit", 10)), 30)
+    min_conf = float(request.args.get("min_confidence", 0.4))
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
+
+    rl = odds_api.rate_limit_status()
+    if rl["remaining"] is not None and rl["remaining"] == 0 and rl["reset_in_s"]:
+        return jsonify({
+            "count": 0,
+            "comparisons": [],
+            "rate_limited": True,
+            "retry_in_s": rl["reset_in_s"],
+            "message": f"Limite API atteinte — réessayer dans {rl['reset_in_s']}s",
+        })
+
     events = odds_api.fetch_tennis_events(upcoming_only=True)
     out = []
     for e in events:
@@ -498,6 +511,9 @@ def api_value():
         f1 = features.feature_vector(features.get_profile(_MEM, n1))
         f2 = features.feature_vector(features.get_profile(_MEM, n2))
         r = predictor.predict(_MEM, n1, f1, n2, f2)
+
+        if r["confidence"] < min_conf:
+            continue
 
         pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))  # proba match calibrée (J1)
         pm2 = 1.0 - pm1                                         # (J2)
@@ -535,6 +551,8 @@ def api_value():
         out.append({
             "player1": n1, "player2": n2,
             "league": (e.get("league") or {}).get("name", ""),
+            "confidence": r["confidence"],
+            "confidence_label": r["confidence_label"],
             "model_first_set_prob1": r["prob1"],
             "model_match_prob1": round(pm1 * 100, 1),
             "model_match_prob2": round(pm2 * 100, 1),
@@ -557,8 +575,10 @@ def api_value():
     return jsonify({
         "count": len(out),
         "comparisons": out,
+        "rate_limited": False,
         "calibration_k": round(_CALIB_K, 3),
         "market_blend_w": round(_MKT_W, 2),
+        "min_confidence": round(min_conf, 2),
         "note": ("proba match calibrée (best-of-3 + temperature), blendée au "
                  "marché (poids modèle w) ; EV = proba_blend×cote − 1"),
     })

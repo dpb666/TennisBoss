@@ -121,12 +121,28 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
     _update_rl(r)
 
     if r.status_code == 429:
-        if not _RL["reset"] or _RL["reset"] < now:
-            _RL["reset"] = now + 60
+        reset_at = _RL["reset"] if (_RL["reset"] and _RL["reset"] > now) else now + 10
         _RL["remaining"] = 0
-        log(f"odds-api 429 — appels suspendus ~"
-            f"{rate_limit_status()['reset_in_s']}s.", "WARN")
-        return hit[1] if hit else None
+        _RL["reset"] = reset_at
+        wait = reset_at - time.time()
+        if 0 < wait <= 3:
+            log(f"odds-api 429 — reset dans {wait:.1f}s, on patiente puis on retente.", "WARN")
+            time.sleep(wait + 0.2)
+            try:
+                r = requests.get(f"{BASE}{path}", params=params, timeout=20)
+            except requests.RequestException:
+                return hit[1] if hit else None
+            _update_rl(r)
+            if r.status_code == 429:
+                log("odds-api 429 persistant après retry.", "WARN")
+                return hit[1] if hit else None
+            if r.status_code != 200:
+                return hit[1] if hit else None
+            _RL["remaining"] = None
+        else:
+            log(f"odds-api 429 — appels suspendus ~"
+                f"{rate_limit_status()['reset_in_s']}s.", "WARN")
+            return hit[1] if hit else None
     if r.status_code != 200:
         return hit[1] if hit else None
     try:
