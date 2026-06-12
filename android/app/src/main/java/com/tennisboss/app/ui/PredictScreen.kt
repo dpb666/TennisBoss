@@ -180,22 +180,18 @@ private fun ProbabilityRow(name: String, prob: Double, matches: Int) {
     }
 }
 
-/** Réglages serveur persistants (URL + token), repliables. */
+/** Réglages serveur persistants (URL seulement), repliables. */
 @Composable
 private fun ServerSettings(store: SettingsStore, scope: CoroutineScope) {
     var expanded by remember { mutableStateOf(false) }
 
     // Valeurs persistées (source de vérité). Les champs locaux sont seedés dessus.
     val savedUrl by store.baseUrlFlow.collectAsState(initial = ApiClient.baseUrl)
-    val savedToken by store.tokenFlow.collectAsState(initial = ApiClient.apiToken)
     var urlEdit by remember { mutableStateOf<String?>(null) }
-    var tokenEdit by remember { mutableStateOf<String?>(null) }
     val url = urlEdit ?: savedUrl
-    val token = tokenEdit ?: savedToken
 
     // Applique la valeur persistée au client réseau.
     LaunchedEffect(savedUrl) { ApiClient.baseUrl = savedUrl }
-    LaunchedEffect(savedToken) { ApiClient.apiToken = savedToken }
 
     Column(
         modifier = Modifier
@@ -231,20 +227,10 @@ private fun ServerSettings(store: SettingsStore, scope: CoroutineScope) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
-                value = token,
-                onValueChange = {
-                    tokenEdit = it
-                    ApiClient.apiToken = it
-                    scope.launch { store.setToken(it) }
-                },
-                label = { Text("Token API (optionnel)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
             Text(
                 "Sauvegardé automatiquement. Émulateur : http://10.0.2.2:8000/ · " +
-                    "téléphone : http://IP_DU_PC:8000/",
+                    "téléphone : http://IP_DU_PC:8000/ · " +
+                    "Token : stocké localement et non exposé via l'UI.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )

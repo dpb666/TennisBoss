@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.SettingsStore
+import com.tennisboss.app.data.TokenManager
 import com.tennisboss.app.ui.ChatScreen
 import com.tennisboss.app.ui.ChatViewModel
 import com.tennisboss.app.ui.PerformanceScreen
@@ -58,13 +59,14 @@ fun AppRoot() {
     val predictVM: PredictViewModel = viewModel()
     val chatVM: ChatViewModel = viewModel()
 
-    // Réglages persistants : on restaure l'URL serveur + token au démarrage.
+    // Réglages persistants : on restaure l'URL serveur au démarrage.
+    // Le token est chargé depuis TokenManager (variables de build ou stockage chiffré).
     val context = LocalContext.current
     val store = remember { SettingsStore(context) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         ApiClient.baseUrl = store.baseUrlFlow.first()
-        ApiClient.apiToken = store.tokenFlow.first()
+        TokenManager.initialize(context)
     }
 
     Scaffold(
