@@ -14,11 +14,17 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Token API — lire depuis la variable d'env TENNISBOSS_API_TOKEN ou vide en local.
-        // À remplir lors de la compilation : gradle build -PTENNISBOSS_API_TOKEN="..."
-        val tokenEnv = System.getenv("TENNISBOSS_API_TOKEN") ?: ""
-        val tokenProp = project.findProperty("TENNISBOSS_API_TOKEN")?.toString() ?: tokenEnv
-        buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"$tokenProp\"")
+        // Token API — priorité : local.properties > variable d'env > gradle property.
+        // local.properties est gitignore et lu automatiquement par Android Studio.
+        val localProps = java.util.Properties().also { props ->
+            val f = rootProject.file("local.properties")
+            if (f.exists()) f.inputStream().use { props.load(it) }
+        }
+        val token = localProps.getProperty("TENNISBOSS_API_TOKEN")
+            ?: System.getenv("TENNISBOSS_API_TOKEN")
+            ?: project.findProperty("TENNISBOSS_API_TOKEN")?.toString()
+            ?: ""
+        buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"$token\"")
     }
 
     buildTypes {

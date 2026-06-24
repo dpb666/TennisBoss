@@ -7,6 +7,9 @@ set -u
 cd "$(dirname "$0")/.."
 mkdir -p logs
 
+# Charge le token depuis .env si présent
+[ -f .env ] && source .env
+
 start_one() {
     local name="$1" port="$2" cmd="$3" log="$4" health="$5"
     if ss -tln | grep -q ":${port} "; then
@@ -17,7 +20,9 @@ start_one() {
     nohup ${cmd} > "${log}" 2>&1 &
     for _ in $(seq 1 20); do
         sleep 1
-        if curl -fs --max-time 3 "http://127.0.0.1:${port}${health}" > /dev/null 2>&1; then
+        if curl -fs --max-time 3 \
+            -H "X-API-Token: ${TENNISBOSS_API_TOKEN:-}" \
+            "http://127.0.0.1:${port}${health}" > /dev/null 2>&1; then
             echo "[${name}] OK sur ${port} (log: ${log})"
             return 0
         fi
@@ -29,7 +34,7 @@ start_one() {
 
 rc=0
 start_one "quant"  8001 "python3 run.py quant"                              "logs/quant.log" "/api/v2/health" || rc=1
-start_one "bot"    8000 "python3 run.py serve --host 0.0.0.0 --port 8000"   "logs/serve.log" "/api/status"    || rc=1
+start_one "bot"    8000 "python3 run.py serve --host 0.0.0.0 --port 8000"   "logs/serve.log" "/health"        || rc=1
 
 # Supervisor (boucle apprentissage/self-healing) — pas de port, check par process.
 if pgrep -f "run.py start" > /dev/null; then

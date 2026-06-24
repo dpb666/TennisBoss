@@ -185,12 +185,9 @@ private fun ProbabilityRow(name: String, prob: Double, matches: Int) {
 private fun ServerSettings(store: SettingsStore, scope: CoroutineScope) {
     var expanded by remember { mutableStateOf(false) }
 
-    // Valeurs persistées (source de vérité). Les champs locaux sont seedés dessus.
     val savedUrl by store.baseUrlFlow.collectAsState(initial = ApiClient.baseUrl)
     var urlEdit by remember { mutableStateOf<String?>(null) }
     val url = urlEdit ?: savedUrl
-
-    // Applique la valeur persistée au client réseau.
     LaunchedEffect(savedUrl) { ApiClient.baseUrl = savedUrl }
 
     Column(
@@ -228,9 +225,7 @@ private fun ServerSettings(store: SettingsStore, scope: CoroutineScope) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "Sauvegardé automatiquement. Émulateur : http://10.0.2.2:8000/ · " +
-                    "téléphone : http://IP_DU_PC:8000/ · " +
-                    "Token : stocké localement et non exposé via l'UI.",
+                "Sauvegardé automatiquement. Émulateur : http://10.0.2.2:8000/ · téléphone : http://IP_DU_PC:8000/",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )
