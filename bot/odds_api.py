@@ -36,6 +36,8 @@ RL_SAFETY = 5
 _CACHE: Dict[str, tuple] = {}
 # Budget rate-limit connu d'après les en-têtes des dernières réponses.
 _RL: Dict[str, Any] = {"remaining": None, "reset": 0.0}
+# Anti-spam : timestamp du dernier log "budget bas" pour éviter 44 lignes identiques.
+_RL_WARN_AT: float = 0.0
 
 
 def _cache_key(path: str, params: Dict[str, Any]) -> str:
@@ -108,8 +110,11 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
         return hit[1]                       # cache frais
 
     if not _budget_ok():
-        log(f"odds-api: budget bas (reste {_RL['remaining']}, reset "
-            f"{rate_limit_status()['reset_in_s']}s) — on sert le cache.", "WARN")
+        global _RL_WARN_AT
+        if time.time() - _RL_WARN_AT > 60:  # log au max 1 fois/minute
+            log(f"odds-api: budget bas (reste {_RL['remaining']}, reset "
+                f"{rate_limit_status()['reset_in_s']}s) — on sert le cache.", "WARN")
+            _RL_WARN_AT = time.time()
         return hit[1] if hit else None      # stale plutôt que rien
 
     try:
