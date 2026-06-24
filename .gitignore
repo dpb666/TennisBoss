@@ -12,6 +12,9 @@ android/app/google-services.json
 android/app/build/
 android/.gradle/
 
+# Deployment docs with secrets
+TOKEN_DEPLOYMENT.md
+
 # Python
 __pycache__/
 *.py[cod]
