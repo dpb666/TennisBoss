@@ -19,20 +19,36 @@ object ApiClient {
 
     @Volatile
     var baseUrl: String = "http://192.168.0.94:8000/"
+        set(value) {
+            if (field != value) {
+                field = value
+                _cached = null  // invalide le cache si l'URL change
+            }
+        }
 
     @Volatile
     var apiToken: String = ""
+        set(value) {
+            if (field != value) {
+                field = value
+                _cached = null  // invalide le cache si le token change
+            }
+        }
 
     /** Implémentation injectable pour les tests (court-circuite Retrofit). */
     @Volatile
     var apiOverride: TennisBossApi? = null
 
+    @Volatile
+    private var _cached: TennisBossApi? = null
+
     fun create(): TennisBossApi {
         apiOverride?.let { return it }
+        _cached?.let { return it }
 
         val client = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(300, TimeUnit.SECONDS)   // LLM local : 60-100s chargement VRAM
+            .readTimeout(300, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
@@ -49,5 +65,6 @@ object ApiClient {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(TennisBossApi::class.java)
+            .also { _cached = it }
     }
 }

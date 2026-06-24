@@ -24,8 +24,8 @@ API_TENNIS_URL = "https://api.api-tennis.com/tennis/"
 
 # API-Tennis n'expose pas d'en-tête rate-limit -> on protège le quota par un
 # simple cache TTL (mono-utilisateur, tennis uniquement).
-TTL_FIXTURES = 60      # matchs à venir / live
-TTL_RESULTS = 300      # résultats terminés (changent peu)
+TTL_FIXTURES = 300     # matchs à venir / live (5 min — API-Tennis quota)
+TTL_RESULTS = 600      # résultats terminés (changent peu)
 _CACHE: Dict[str, tuple] = {}
 
 
@@ -156,6 +156,51 @@ def _parse_result(m: Dict[str, Any]) -> Dict[str, Any]:
         "is_doubles": "doubles" in etype,
         "finished": finished,
     }
+
+
+def parse_odds_events_as_fixtures(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convertit les événements odds-api.io en format fixture standard.
+
+    Filtre les matchs non terminés (pending/live).
+    Utilisé comme fallback quand API-Tennis n'est pas disponible.
+    """
+    out = []
+    for e in events:
+        status = (e.get("status") or "").lower()
+        if status not in ("pending", "live", "not_started", "inplay"):
+            continue
+        home = (e.get("home") or "").strip()
+        away = (e.get("away") or "").strip()
+        if not home or not away:
+            continue
+        league_name = (e.get("league") or {}).get("name", "")
+        league_slug = (e.get("league") or {}).get("slug", "")
+        combined = (league_name + " " + league_slug).lower()
+        is_doubles = " / " in home or " / " in away or "double" in combined
+        tour = "wta" if "wta" in combined else ("atp" if "atp" in combined else "")
+        # Parse ISO date -> date + time
+        raw_date = e.get("date", "")
+        try:
+            import datetime as _dt2
+            dt = _dt2.datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+            date_str = dt.strftime("%Y-%m-%d")
+            time_str = dt.strftime("%H:%M")
+        except Exception:
+            date_str = raw_date[:10]
+            time_str = raw_date[11:16]
+        out.append({
+            "player1": home,
+            "player2": away,
+            "tournament": league_name,
+            "round": "",
+            "date": date_str,
+            "time": time_str,
+            "live": status in ("live", "inplay"),
+            "event_key": e.get("id"),
+            "is_doubles": is_doubles,
+            "tour": tour,
+        })
+    return out
 
 
 def _parse_fixture(m: Dict[str, Any]) -> Dict[str, Any]:

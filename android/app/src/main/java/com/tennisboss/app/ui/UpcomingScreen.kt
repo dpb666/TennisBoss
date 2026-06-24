@@ -136,8 +136,11 @@ private fun MatchCard(m: UpcomingMatch) {
                         fontWeight = FontWeight.Bold)
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SurfaceBadge(m.tour)
-                        Spacer(Modifier.size(8.dp))
+                        val surface = m.prediction?.surface?.takeIf { it.isNotBlank() }
+                        if (surface != null) {
+                            SurfaceBadge(surface)
+                            Spacer(Modifier.size(8.dp))
+                        }
                         Text("${m.date} ${m.time}",
                             style = MaterialTheme.typography.labelSmall)
                     }
@@ -251,6 +254,26 @@ private fun MatchCard(m: UpcomingMatch) {
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF8A6D00),
                 )
+            }
+
+            // Météo
+            m.weather?.let { w ->
+                if (w.conditions.isNotBlank() || w.temp_c != null) {
+                    val icon = when {
+                        w.conditions.contains("pluie") || w.conditions.contains("bruine") -> "🌧"
+                        w.conditions.contains("orage") -> "⛈"
+                        w.conditions.contains("nuag") -> "☁️"
+                        w.conditions.contains("vent") -> "💨"
+                        else -> "☀️"
+                    }
+                    val windStr = w.wind_mph?.let { " · Vent ${it.toInt()} mph" } ?: ""
+                    val tempStr = w.temp_c?.let { "${it.toInt()}°C" } ?: ""
+                    Text(
+                        "$icon $tempStr ${w.conditions}$windStr",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
             }
 
             val odds = m.odds

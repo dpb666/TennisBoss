@@ -17,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -172,6 +173,33 @@ private fun ValueCard(c: ValueComparison) {
                     fontWeight = FontWeight.Bold,
                     color = GoodColor,
                 )
+            }
+
+            // Badge cache DB + date si source est historique
+            if (c.source == "cache_db") {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+                    ) {
+                        Text(
+                            "📦 Cache",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                    }
+                    if (c.date.isNotBlank()) {
+                        Text(
+                            c.date.take(16).replace("T", " "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
             }
 
             if (c.odds.books.isNotEmpty()) {

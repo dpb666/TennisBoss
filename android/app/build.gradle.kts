@@ -1,7 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Token API — priorité : local.properties > variable d'env > gradle property.
+// local.properties est gitignore et lu automatiquement par Android Studio.
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val apiToken: String = localProps.getProperty("TENNISBOSS_API_TOKEN")
+    ?: System.getenv("TENNISBOSS_API_TOKEN")
+    ?: (project.findProperty("TENNISBOSS_API_TOKEN") as? String)
+    ?: ""
 
 android {
     namespace = "com.tennisboss.app"
@@ -14,17 +27,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Token API — priorité : local.properties > variable d'env > gradle property.
-        // local.properties est gitignore et lu automatiquement par Android Studio.
-        val localProps = java.util.Properties().also { props ->
-            val f = rootProject.file("local.properties")
-            if (f.exists()) f.inputStream().use { props.load(it) }
-        }
-        val token = localProps.getProperty("TENNISBOSS_API_TOKEN")
-            ?: System.getenv("TENNISBOSS_API_TOKEN")
-            ?: project.findProperty("TENNISBOSS_API_TOKEN")?.toString()
-            ?: ""
-        buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"$token\"")
+        buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"$apiToken\"")
     }
 
     buildTypes {
@@ -45,6 +48,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {

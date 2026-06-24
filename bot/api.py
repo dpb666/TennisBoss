@@ -25,8 +25,8 @@ from typing import Any, Dict, Optional
 from flask import Flask, jsonify, request
 
 from . import (auto_learner, calibrate, chat as chat_mod, config, datasource,
-               db, elo, features, live_api, memory, namematch, odds_api,
-               predictor, sackmann_feeder, settlement)
+               db, elo, espn_api, features, live_api, memory, namematch,
+               odds_api, predictor, sackmann_feeder, settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -263,6 +263,7 @@ def api_status():
         "bias": _MEM["bias"],
         "datasets_loaded": _MEM["datasets_loaded"],
         "db": db.counts(),
+        "rate_limit": odds_api.rate_limit_status(),
         "odds_rate_limit": odds_api.rate_limit_status(),
     })
 
@@ -284,10 +285,25 @@ def api_players():
 
 
 def _fmt_date(d: str) -> str:
-    """'20241124' -> '24/11/2024' (tolérant si format inattendu)."""
-    s = str(d)
+    """Normalise diverses formes de date vers 'JJ/MM/AAAA HH:MM' ou 'JJ/MM/AAAA'.
+
+    Formats gérés :
+      '20241124'              -> '24/11/2024'
+      '2024-11-24'            -> '24/11/2024'
+      '2024-11-24T13:35:00Z'  -> '24/11/2024 13:35'
+    """
+    s = str(d).strip()
     if len(s) == 8 and s.isdigit():
         return f"{s[6:8]}/{s[4:6]}/{s[0:4]}"
+    if "T" in s or (len(s) >= 10 and s[4] == "-"):
+        try:
+            import datetime as _dt
+            dt = _dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+            base = dt.strftime("%d/%m/%Y")
+            time_part = dt.strftime("%H:%M")
+            return f"{base} {time_part}" if time_part != "00:00" else base
+        except ValueError:
+            pass
     return s
 
 
@@ -426,11 +442,43 @@ def api_upcoming():
     limit = min(int(request.args.get("limit", 25)), 100)
     want_odds = request.args.get("odds", "false").lower() == "true"
 
+    # Source 1 : API-Tennis (payante)
     fixtures = live_api.fetch_upcoming({"live_api_provider": "api-tennis"}, days_ahead=days)
+
+    # Source 2 : ESPN (gratuite, ~800 matchs ATP+WTA)
+    espn_fixtures = espn_api.fetch_upcoming(days_ahead=days)
+
+    # Source 3 : odds-api.io (fallback cotes + fixtures)
+    odds_events = []
     odds_index = None
-    if want_odds and odds_api.is_enabled():
-        odds_index = odds_api.build_event_index(
-            odds_api.fetch_tennis_events(upcoming_only=True))
+    if odds_api.is_enabled():
+        odds_events = odds_api.fetch_tennis_events(upcoming_only=True)
+        if want_odds:
+            odds_index = odds_api.build_event_index(odds_events)
+
+    # Fusion des sources : ESPN en priorité si API-Tennis vide
+    if not fixtures:
+        if espn_fixtures:
+            log(f"ESPN fallback: {len(espn_fixtures)} matchs ATP+WTA.", "INFO")
+            fixtures = espn_fixtures
+        elif odds_events:
+            log("Fallback odds-api.io pour les fixtures.", "INFO")
+            fixtures = live_api.parse_odds_events_as_fixtures(odds_events)
+    else:
+        # API-Tennis dispo : on enrichit avec ESPN (matchs non dupliqués)
+        existing = {(f["player1"].lower(), f["player2"].lower()) for f in fixtures}
+        added = 0
+        for ef in espn_fixtures:
+            key = (ef["player1"].lower(), ef["player2"].lower())
+            if key not in existing:
+                fixtures.append(ef)
+                existing.add(key)
+                added += 1
+        if added:
+            log(f"ESPN: {added} matchs supplémentaires ajoutés.", "INFO")
+
+    # Cache météo par tournoi pour éviter les appels répétés
+    _weather_cache: Dict[str, Any] = {}
 
     out = []
     for f in fixtures:
@@ -442,14 +490,14 @@ def api_upcoming():
             "tournament": f["tournament"], "round": f["round"],
             "date": f["date"], "time": f["time"], "live": f["live"],
             "tour": f["tour"], "predictable": bool(n1 and n2),
+            "source": f.get("source", "api-tennis"),
         }
         if n1 and n2:
+            surface = _surface_for(f["tournament"], f["date"])
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
-            r = predictor.predict(_MEM, n1, f1, n2, f2,
-                                  surface=_surface_for(f["tournament"], f["date"]))
+            r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
             bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
-            # Cote juste du 1er set sur le favori = 1 / proba. Cible si >= 1.60.
             fs_prob = max(r["prob1"], r["prob2"]) / 100.0
             fair_odds = round(1.0 / fs_prob, 2) if fs_prob > 0 else None
             item["prediction"] = {
@@ -459,11 +507,9 @@ def api_upcoming():
                 "surface": r["surface"],
                 "confidence": r["confidence"],
                 "confidence_label": r["confidence_label"],
-                # Cible 1er set (cote juste >= 1.60 = zone jouable).
                 "first_set_prob": round(fs_prob * 100, 1),
                 "fair_odds": fair_odds,
                 "target_160": bool(fair_odds is not None and fair_odds >= 1.60),
-                # Bet Builder (champs plats consommés par l'app).
                 "ml_prob1": bb["match"]["prob1"], "ml_prob2": bb["match"]["prob2"],
                 "set2_prob1": bb["set2"]["prob1"], "set2_prob2": bb["set2"]["prob2"],
                 "total_sets_over": bb["third_set_prob"],
@@ -471,6 +517,15 @@ def api_upcoming():
             }
             if odds_index is not None:
                 item["odds"] = _odds_for(odds_index, f["player1"], f["player2"])
+
+            # Météo : uniquement pour les tournois outdoor connus
+            tourn_key = f["tournament"].lower()
+            if tourn_key not in _weather_cache:
+                _weather_cache[tourn_key] = weather.fetch_weather(
+                    f["tournament"], surface or "")
+            w = _weather_cache[tourn_key]
+            if w:
+                item["weather"] = w
         out.append(item)
         if len(out) >= limit:
             break
@@ -489,23 +544,43 @@ def api_value():
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
 
-    rl = odds_api.rate_limit_status()
-    if rl["remaining"] is not None and rl["remaining"] == 0 and rl["reset_in_s"]:
+    # Pool épuisé = _current_key() retourne None
+    if odds_api._current_key() is None:
+        rl = odds_api.rate_limit_status()
+        best_reset = min((p.get("reset_in_s") or 9999 for p in rl.get("pool", [])), default=9999)
         return jsonify({
             "count": 0,
             "comparisons": [],
             "rate_limited": True,
-            "retry_in_s": rl["reset_in_s"],
-            "message": f"Limite API atteinte — réessayer dans {rl['reset_in_s']}s",
+            "retry_in_s": best_reset,
+            "message": f"Limite API atteinte — réessayer dans {best_reset}s",
         })
 
     events = odds_api.fetch_tennis_events(upcoming_only=True)
+    # Priorité aux grands tournois : ATP/WTA principaux avant ITF/UTR.
+    def _tourn_rank(e: Dict) -> int:
+        slug = (e.get("league") or {}).get("slug", "")
+        if any(k in slug for k in ("wimbledon", "roland-garros", "us-open", "australian")):
+            return 0
+        if any(k in slug for k in ("eastbourne", "halle", "queens", "queens-club")):
+            return 1
+        if slug.startswith("atp") or slug.startswith("wta"):
+            return 2
+        return 3
+    events = sorted(events, key=_tourn_rank)
+
+    # Limite le nombre d'appels /odds pour préserver le quota (1 appel = 1 req)
+    MAX_ODDS_CALLS = 30
+    odds_calls = 0
     out = []
     for e in events:
         n1, n2 = _resolve(e.get("home", "")), _resolve(e.get("away", ""))
         if not n1 or not n2:
             continue
+        if odds_calls >= MAX_ODDS_CALLS:
+            break
         mw = odds_api.fetch_match_winner(e["id"])
+        odds_calls += 1
         if not mw:
             continue
         f1 = features.feature_vector(features.get_profile(_MEM, n1))
@@ -572,6 +647,27 @@ def api_value():
     out.sort(key=lambda c: c["best_ev"], reverse=True)
     if len(out) > limit:
         out = out[:limit]
+
+    # Si aucun résultat live, on sert les picks DB récents (rate-limit ou pas de cotes)
+    if not out:
+        db_picks = db.list_value_picks()
+        for row in db_picks[:limit]:
+            out.append({
+                "player1": row["player1"],
+                "player2": row["player2"],
+                "league": "",
+                "confidence": None,
+                "confidence_label": "",
+                "best_side": row["side"],
+                "best_ev": row["ev"],
+                "odds": {"home": row["odds"], "away": None, "books": []},
+                "ev1": row["ev"] if row["side"] == row["player1"] else None,
+                "ev2": row["ev"] if row["side"] == row["player2"] else None,
+                "value": True,
+                "date": row["date"],
+                "source": "cache_db",
+            })
+
     return jsonify({
         "count": len(out),
         "comparisons": out,

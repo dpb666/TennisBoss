@@ -17,7 +17,7 @@ from .log import log
 DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
 DEFAULT_MODEL = "qwen2.5:7b"   # qwen3 nécessite mise à jour du service Ollama Windows
 HISTORY_WINDOW = 8
-MAX_TOKENS = 200
+MAX_TOKENS = 120
 TEMPERATURE = 0.7
 
 # Endpoint chat natif Ollama — plus rapide que /api/generate pour les modèles thinking
@@ -250,14 +250,18 @@ def chat(
         messages.append(h)
     messages.append({"role": "user", "content": message})
 
-    is_ollama = "11434" in lm_url or "ollama" in lm_url.lower()
+    is_groq = "groq.com" in lm_url.lower()
+    is_ollama = ("11434" in lm_url or "ollama" in lm_url.lower()) and not is_groq
     if is_ollama:
         return _chat_via_generate(model, messages)
     return _chat_via_openai(lm_url, model, messages)
 
 
 def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
-    """Endpoint OpenAI-compatible (/v1/chat/completions) — LM Studio / OpenAI."""
+    """Endpoint OpenAI-compatible (/v1/chat/completions) — LM Studio / Groq / OpenAI."""
+    import os
+    api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         resp = requests.post(
             lm_url,
@@ -268,7 +272,8 @@ def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
                 "max_tokens": MAX_TOKENS,
                 "stream": False,
             },
-            timeout=180,
+            headers=headers,
+            timeout=30,
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
@@ -303,7 +308,7 @@ def _chat_via_generate(model: str, messages: list) -> str:
                     "num_predict": MAX_TOKENS,
                 },
             },
-            timeout=120,
+            timeout=300,
         )
         resp.raise_for_status()
         data = resp.json()

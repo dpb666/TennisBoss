@@ -16,7 +16,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,10 +37,6 @@ private val AccentColor = Color(0xFF4F8CFF)
 fun PerformanceScreen(vm: PerformanceViewModel = viewModel()) {
     LaunchedEffect(Unit) {
         vm.load()
-        while (true) {
-            delay(30_000)
-            vm.load()
-        }
     }
 
     Column(
@@ -180,6 +175,13 @@ private fun RecentRow(r: SettledRecent) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(Modifier.weight(1f)) {
+                if (r.date.isNotBlank()) {
+                    Text(
+                        r.date.take(16).replace("T", " ").replace("Z", ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Text("${r.player1}  vs  ${r.player2}",
                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(

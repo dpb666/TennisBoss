@@ -183,6 +183,14 @@ data class MatchResult(
     val status: String // "Finished", "Retired", "Live"
 )
 
+data class WeatherInfo(
+    val temp_c: Double? = null,
+    val wind_mph: Double? = null,
+    val rain_mm: Double? = null,
+    val humidity_pct: Double? = null,
+    val conditions: String = "",
+)
+
 data class UpcomingMatch(
     val player1_raw: String,
     val player2_raw: String,
@@ -195,7 +203,9 @@ data class UpcomingMatch(
     val predictable: Boolean,
     val prediction: Prediction? = null,
     val odds: Odds? = null,
-    val result: MatchResult? = null
+    val result: MatchResult? = null,
+    val weather: WeatherInfo? = null,
+    val source: String = "",
 )
 
 data class UpcomingResponse(
@@ -230,6 +240,8 @@ data class ValueComparison(
     val best_side: String? = null,
     val best_ev: Double = 0.0,
     val value: Boolean = false,
+    val date: String = "",
+    val source: String = "",
 )
 
 data class ValueResponse(

@@ -50,7 +50,7 @@ class ChatViewModel : ViewModel() {
             } catch (e: Exception) {
                 error = e.message ?: "Erreur réseau"
                 messages.add(ChatMessage("assistant",
-                    "⚠️ LM Studio inaccessible — assure-toi qu'il tourne sur le PC avec un modèle chargé."))
+                    "⚠️ IA hors ligne — Ollama n'est pas accessible sur le serveur (port 11434). Lance-le avec `ollama serve`."))
             } finally {
                 loading = false
             }
