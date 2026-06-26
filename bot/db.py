@@ -116,6 +116,26 @@ CREATE TABLE IF NOT EXISTS value_picks (
     ts       TEXT,
     PRIMARY KEY (player1, player2)
 );
+CREATE TABLE IF NOT EXISTS clv_log (
+    event_key      TEXT PRIMARY KEY,   -- clé du match (ou paire si pas d'event)
+    date           TEXT,
+    player1        TEXT, player2 TEXT,
+    pick_side      TEXT,               -- joueur misé
+    pick_odds      REAL,               -- cote captée à la décision
+    pick_prob      REAL,               -- proba blendée du modèle (pour Kelly)
+    confidence     REAL,
+    pick_ts        TEXT,
+    closing_odds   REAL,               -- cote juste avant le match (closing line)
+    closing_src    TEXT,               -- 'snapshot' (T-15) ou 'last_seen' (fallback)
+    closing_ts     TEXT,
+    result         INTEGER,            -- 1=gagné 0=perdu (au settlement)
+    clv_pct        REAL,               -- (pick_odds/closing_odds - 1)*100
+    beat_closing   INTEGER,            -- 1 si pick_odds > closing_odds
+    pnl_flat       REAL,               -- mise 1u
+    pnl_kelly      REAL,               -- fraction de bankroll (Kelly 0.25)
+    settled_ts     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_clv_date ON clv_log(date);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
 CREATE INDEX IF NOT EXISTS idx_settled_date ON settled_matches(date);
@@ -478,6 +498,83 @@ def list_value_picks() -> List[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(
             "SELECT date,player1,player2,side,odds,ev FROM value_picks").fetchall()
+
+
+# --- CLV : closing line value (preuve d'edge) ------------------------------
+def log_clv_pick(event_key: str, date: str, p1: str, p2: str, side: str,
+                 pick_odds: float, pick_prob: float, confidence: float) -> None:
+    """Sème un pick dans le journal CLV (closing_odds rempli plus tard).
+
+    INSERT OR IGNORE : on garde la PREMIÈRE cote vue (la décision d'entrée),
+    on ne l'écrase pas si le pick réapparaît avec une cote qui a bougé.
+    """
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO clv_log "
+            "(event_key,date,player1,player2,pick_side,pick_odds,pick_prob,"
+            " confidence,pick_ts) VALUES (?,?,?,?,?,?,?,?,?)",
+            (event_key, date, p1, p2, side, pick_odds, pick_prob, confidence,
+             _dt.datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def list_clv_open() -> List[sqlite3.Row]:
+    """Picks sans closing line encore captée (à snapshotter avant le match)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM clv_log WHERE closing_odds IS NULL").fetchall()
+
+
+def update_clv_closing(event_key: str, closing_odds: float, src: str) -> None:
+    """Rafraîchit la closing line tant que le match n'est pas réglé.
+
+    On écrase à chaque quote pré-match : le DERNIER quote vu avant le coup
+    d'envoi est, par construction (upcoming_only), la closing line.
+    """
+    import datetime as _dt
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT pick_odds FROM clv_log WHERE event_key=? AND result IS NULL",
+            (event_key,)).fetchone()
+        if not row or not row["pick_odds"] or closing_odds <= 1.0:
+            return
+        pick_odds = float(row["pick_odds"])
+        clv_pct = round((pick_odds / closing_odds - 1.0) * 100, 2)
+        beat = 1 if pick_odds > closing_odds else 0
+        conn.execute(
+            "UPDATE clv_log SET closing_odds=?, closing_src=?, closing_ts=?, "
+            "clv_pct=?, beat_closing=? WHERE event_key=?",
+            (closing_odds, src,
+             _dt.datetime.now().isoformat(timespec="seconds"),
+             clv_pct, beat, event_key),
+        )
+
+
+def list_clv_unsettled() -> List[sqlite3.Row]:
+    """Picks dont le résultat n'est pas encore enregistré (pour le settlement)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM clv_log WHERE result IS NULL").fetchall()
+
+
+def update_clv_result(event_key: str, result: int, pnl_flat: float,
+                      pnl_kelly: float) -> None:
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "UPDATE clv_log SET result=?, pnl_flat=?, pnl_kelly=?, settled_ts=? "
+            "WHERE event_key=?",
+            (result, pnl_flat, pnl_kelly,
+             _dt.datetime.now().isoformat(timespec="seconds"), event_key),
+        )
+
+
+def list_clv(limit: int = 100000) -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM clv_log ORDER BY date DESC, pick_ts DESC LIMIT ?",
+            (limit,)).fetchall()
 
 
 # --- Historique des prédictions --------------------------------------------

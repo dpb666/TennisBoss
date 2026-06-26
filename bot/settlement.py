@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from . import db, elo, features, live_api, odds_api, predictor
+from . import clv, db, elo, features, live_api, odds_api, predictor
 
 
 def run_settlement(mem: Dict[str, Any],
@@ -79,6 +79,13 @@ def run_settlement(mem: Dict[str, Any],
             "pred_favorite": pred_fav, "pred_prob1": pred_prob1, "correct": correct,
         }):
             added += 1
+            # CLV : règle le pick (P&L flat + Kelly, CLV%) s'il existe.
+            try:
+                clv.settle(r["player1"], r["player2"], winner_name)
+                if n1 and n2 and (n1 != r["player1"] or n2 != r["player2"]):
+                    clv.settle(n1, n2, winner_name)  # noms résolus
+            except Exception:  # noqa: BLE001
+                pass
             # Apprentissage continu : ELO mis à jour, pondéré par la dominance.
             if n1 and n2 and "elo" in mem:
                 mult = elo.dominance_mult(r["sets"], r["winner"])

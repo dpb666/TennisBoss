@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
 
-from . import (auto_learner, calibrate, chat as chat_mod, config, datasource,
+from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, live_api, memory, namematch,
                odds_api, predictor, sackmann_feeder, settlement, weather)
 from . import __version__
@@ -637,6 +637,16 @@ def api_value():
                                   pick_odds, round(best_ev * 100, 1))
             except Exception:  # noqa: BLE001
                 pass
+            # CLV : sème le pick (1re cote = décision) puis rafraîchit la closing
+            # line au quote courant (le dernier vu avant le départ fait foi).
+            try:
+                ekey = str(e.get("id") or "")
+                pick_prob = pb1 if best_side == n1 else pb2
+                clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
+                              pick_odds, pick_prob, r["confidence"])
+                clv.refresh_closing(ekey, best_side, n1, ho, ao)
+            except Exception:  # noqa: BLE001
+                pass
 
         out.append({
             "player1": n1, "player2": n2,
@@ -765,6 +775,25 @@ def api_calibration():
                     "market_blend_w": round(_MKT_W, 2),
                     "elo_blend": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 2),
                     "recent": recent})
+
+
+@app.get("/api/clv")
+def api_clv():
+    """Closing Line Value — la preuve d'edge (indicateur avancé de profitabilité).
+
+    Renvoie : CLV% moyen, % de picks qui battent la clôture (± IC95), ROI flat,
+    P&L Kelly, le tout global + par palier de confiance, et un verdict honnête.
+    """
+    stats = clv.stats()
+    recent = [{
+        "date": _fmt_date(r["date"]),
+        "player1": r["player1"], "player2": r["player2"],
+        "side": r["pick_side"], "pick_odds": r["pick_odds"],
+        "closing_odds": r["closing_odds"], "closing_src": r["closing_src"],
+        "clv_pct": r["clv_pct"], "beat_closing": r["beat_closing"],
+        "result": r["result"], "pnl_flat": r["pnl_flat"],
+    } for r in db.list_clv(limit=30)]
+    return jsonify({**stats, "recent": recent})
 
 
 @app.post("/api/learn/run")
