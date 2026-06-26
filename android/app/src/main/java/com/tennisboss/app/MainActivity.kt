@@ -22,13 +22,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ApiClient
-import com.tennisboss.app.data.SettingsStore
 import com.tennisboss.app.data.TokenManager
 import com.tennisboss.app.ui.ChatScreen
 import com.tennisboss.app.ui.ChatViewModel
@@ -39,7 +37,6 @@ import com.tennisboss.app.ui.PredictViewModel
 import com.tennisboss.app.ui.UpcomingScreen
 import com.tennisboss.app.ui.ValueScreen
 import com.tennisboss.app.ui.theme.TennisBossTheme
-import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,13 +56,11 @@ fun AppRoot() {
     val predictVM: PredictViewModel = viewModel()
     val chatVM: ChatViewModel = viewModel()
 
-    // Réglages persistants : on restaure l'URL serveur au démarrage.
+    // URL publique par défaut pour fonctionner hors réseau local.
     // Le token est chargé depuis TokenManager (variables de build ou stockage chiffré).
     val context = LocalContext.current
-    val store = remember { SettingsStore(context) }
-    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
-        ApiClient.baseUrl = store.baseUrlFlow.first()
+        ApiClient.baseUrl = ApiClient.DEFAULT_BASE_URL
         TokenManager.initialize(context)
     }
 
@@ -126,7 +121,7 @@ fun AppRoot() {
                 label = "tabs",
             ) { current ->
                 when (current) {
-                    0 -> PredictScreen(predictVM, store, scope)
+                    0 -> PredictScreen(predictVM)
                     1 -> UpcomingScreen()
                     2 -> PlayersScreen(
                         selectedP1 = predictVM.player1,

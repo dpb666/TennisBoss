@@ -1,7 +1,5 @@
 package com.tennisboss.app.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -22,32 +19,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.PredictResponse
-import com.tennisboss.app.data.SettingsStore
 import com.tennisboss.app.ui.components.BetBuilderView
 import com.tennisboss.app.ui.components.ExplainView
 import com.tennisboss.app.ui.components.H2HView
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 @Composable
 fun PredictScreen(
     vm: PredictViewModel = viewModel(),
-    store: SettingsStore? = null,
-    scope: CoroutineScope? = null,
 ) {
     Column(
         modifier = Modifier
@@ -65,10 +49,6 @@ fun PredictScreen(
             "Prédiction du 1er set par Intelligence Artificielle",
             style = MaterialTheme.typography.titleMedium,
         )
-
-        if (store != null && scope != null) {
-            ServerSettings(store, scope)
-        }
 
         OutlinedTextField(
             value = vm.player1,
@@ -180,55 +160,3 @@ private fun ProbabilityRow(name: String, prob: Double, matches: Int) {
     }
 }
 
-/** Réglages serveur persistants (URL seulement), repliables. */
-@Composable
-private fun ServerSettings(store: SettingsStore, scope: CoroutineScope) {
-    var expanded by remember { mutableStateOf(false) }
-
-    val savedUrl by store.baseUrlFlow.collectAsState(initial = ApiClient.baseUrl)
-    var urlEdit by remember { mutableStateOf<String?>(null) }
-    val url = urlEdit ?: savedUrl
-    LaunchedEffect(savedUrl) { ApiClient.baseUrl = savedUrl }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            if (expanded) "⚙️ Réglages serveur  ▲" else "⚙️ Réglages serveur  ▼",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded },
-        )
-        if (!expanded) {
-            Text(
-                url,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            OutlinedTextField(
-                value = url,
-                onValueChange = {
-                    urlEdit = it
-                    ApiClient.baseUrl = it
-                    scope.launch { store.setBaseUrl(it) }
-                },
-                label = { Text("URL du serveur") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                "Sauvegardé automatiquement. Émulateur : http://10.0.2.2:8000/ · téléphone : http://IP_DU_PC:8000/",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-        }
-    }
-}

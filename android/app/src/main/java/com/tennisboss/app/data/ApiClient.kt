@@ -8,17 +8,17 @@ import java.util.concurrent.TimeUnit
 /**
  * Fabrique le client Retrofit vers l'API TennisBoss.
  *
- * baseUrl :
- *   - Émulateur Android Studio : http://10.0.2.2:8000/  (= localhost du PC)
- *   - Téléphone réel (même Wi-Fi) : http://IP_DU_PC:8000/
+ * L'app mobile utilise l'API publique Cloudflare pour fonctionner hors du
+ * réseau local. Le serveur local reste possible en tests via [apiOverride].
  *
  * apiToken : à renseigner SEULEMENT si le serveur a défini TENNISBOSS_API_TOKEN
  * (l'en-tête X-API-Token est alors ajouté à chaque requête).
  */
 object ApiClient {
+    const val DEFAULT_BASE_URL = "https://tennisboss-api.walid-zahir89.workers.dev/"
 
     @Volatile
-    var baseUrl: String = "http://192.168.0.94:8000/"
+    var baseUrl: String = DEFAULT_BASE_URL
         set(value) {
             if (field != value) {
                 field = value

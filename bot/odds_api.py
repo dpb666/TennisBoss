@@ -30,6 +30,7 @@ RL_SAFETY = 5          # seuil bas -> on passe à la clé suivante
 
 _CACHE: Dict[str, tuple] = {}
 _RL_WARN_AT: float = 0.0
+_RL: Dict[str, Any] = {"remaining": None, "reset": 0.0}  # compat tests / ancien format
 
 # Pool de clés : {key_str -> {remaining, reset}}
 _KEY_POOL: Dict[str, Dict[str, Any]] = {}
@@ -102,6 +103,18 @@ def _current_key() -> Optional[str]:
     return None
 
 
+def _explicit_key(key: str) -> str:
+    """Force une clé unique fournie par l'appelant (compat ancien _get(... apiKey=))."""
+    global _KEY_ORDER, _CURRENT_KEY_IDX
+    if key not in _KEY_POOL:
+        _KEY_POOL[key] = _RL
+    else:
+        _KEY_POOL[key] = _RL
+    _KEY_ORDER = [key]
+    _CURRENT_KEY_IDX = 0
+    return key
+
+
 def _update_rl(resp: requests.Response, key: str) -> None:
     """Lit x-ratelimit-remaining / x-ratelimit-reset pour la clé donnée."""
     rl = _KEY_POOL.get(key)
@@ -111,6 +124,8 @@ def _update_rl(resp: requests.Response, key: str) -> None:
     if rem is not None:
         try:
             rl["remaining"] = int(rem)
+            if _KEY_ORDER and key == _KEY_ORDER[0]:
+                _RL["remaining"] = rl["remaining"]
         except ValueError:
             pass
     rst = resp.headers.get("x-ratelimit-reset")
@@ -118,10 +133,21 @@ def _update_rl(resp: requests.Response, key: str) -> None:
         parsed = _parse_reset(rst)
         if parsed is not None:
             rl["reset"] = parsed
+            if _KEY_ORDER and key == _KEY_ORDER[0]:
+                _RL["reset"] = parsed
 
 
 def rate_limit_status() -> Dict[str, Any]:
     """État du pool de clés (pour /api/status / diagnostic)."""
+    if not _KEY_ORDER and (_RL["remaining"] is not None or _RL["reset"]):
+        reset_in = int(_RL["reset"] - time.time()) if _RL["reset"] else None
+        return {
+            "remaining": _RL["remaining"],
+            "reset_in_s": max(0, reset_in) if reset_in is not None else None,
+            "pool": [],
+            "total_remaining": _RL["remaining"] or 0,
+            "keys_count": 0,
+        }
     if not _KEY_ORDER:
         _load_key_pool()
     pool = []
@@ -147,9 +173,12 @@ def rate_limit_status() -> Dict[str, Any]:
 
 def clear_cache() -> None:
     """Vide le cache et reset le pool (utile en tests)."""
+    global _CURRENT_KEY_IDX
     _CACHE.clear()
-    for rl in _KEY_POOL.values():
-        rl.update(remaining=None, reset=0.0)
+    _RL.update(remaining=None, reset=0.0)
+    _KEY_POOL.clear()
+    _KEY_ORDER.clear()
+    _CURRENT_KEY_IDX = 0
 
 
 def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
@@ -160,6 +189,9 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
     if hit and hit[0] > now:
         return hit[1]
 
+    explicit_api_key = str(params.get("apiKey") or "").strip()
+    if explicit_api_key:
+        _explicit_key(explicit_api_key)
     api_key = _current_key()
     if not api_key:
         global _RL_WARN_AT

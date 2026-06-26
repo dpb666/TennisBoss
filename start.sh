@@ -1,24 +1,57 @@
 #!/bin/bash
-# Démarre TennisBoss — serveur API + tunnel Cloudflare permanent
+# TennisBoss — démarrage API + ngrok + mise à jour Worker Cloudflare
+# Architecture : Android → workers.dev (stable) → ngrok (auto-updated) → API:8000
 cd "$(dirname "$0")"
+source .env 2>/dev/null || true
+
+CF_TOKEN="cfut_c6N7p8x9FIJyS7uwdSB1TGBQnUEBAgjJGC3odxP52c459692"
+WORKER_URL="https://tennisboss-api.walid-zahir89.workers.dev"
 
 echo "=== TennisBoss Startup ==="
 
-pkill -f "run.py serve" 2>/dev/null
-pkill -f "cloudflared tunnel run" 2>/dev/null
+pkill -f "run.py serve" 2>/dev/null || true
+pkill -f "ngrok" 2>/dev/null || true
 sleep 1
 
-echo "→ Tunnel Cloudflare (api.tennisboss.ca.eu.org)..."
-cloudflared tunnel run tennisboss > /tmp/cloudflared.log 2>&1 &
-
-echo "→ Serveur API (port 8000)..."
+# 1. Démarrer l'API Flask
+echo "→ API Flask (port 8000)..."
 python3 run.py serve --host 0.0.0.0 --port 8000 > /tmp/tennisboss.log 2>&1 &
+for i in $(seq 1 15); do
+  curl -sf http://localhost:8000/health > /dev/null 2>&1 && break || sleep 1
+done
+echo "✅ API prête"
 
-sleep 4
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/status | grep -q "200\|401" \
-  && echo "→ Serveur OK" || echo "⚠️  Serveur pas prêt"
+# 2. Démarrer ngrok
+echo "→ Tunnel ngrok..."
+ngrok http 8000 --log=stdout --log-format=json > /tmp/ngrok.log 2>&1 &
+sleep 6
+
+NGROK_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | \
+  python3 -c "import sys,json; t=json.load(sys.stdin)['tunnels']; print([x['public_url'] for x in t if x['proto']=='https'][0])" 2>/dev/null)
+
+if [ -z "$NGROK_URL" ]; then
+  echo "❌ ngrok URL non trouvée — voir /tmp/ngrok.log"
+  tail -5 /tmp/ngrok.log
+  exit 1
+fi
+echo "✅ Tunnel : $NGROK_URL"
+
+# 3. Mettre à jour wrangler.toml et redéployer le Worker
+sed -i "s|TUNNEL_URL = \".*\"|TUNNEL_URL = \"$NGROK_URL\"|" cloudflare/wrangler.toml
+cd cloudflare
+CLOUDFLARE_API_TOKEN="$CF_TOKEN" npx wrangler@latest deploy --quiet 2>/dev/null && \
+  echo "✅ Worker mis à jour → $WORKER_URL" || \
+  echo "⚠️  Worker update échouée (tunnel toujours actif)"
+cd ..
+
+# Sauvegarder l'URL dans .env
+sed -i "s|^TUNNEL_URL=.*|TUNNEL_URL=$NGROK_URL|" .env
 
 echo ""
-echo "  API local  : http://localhost:8000"
-echo "  API public : https://api.tennisboss.ca.eu.org"
-echo "  Logs : tail -f /tmp/tennisboss.log"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  API locale  : http://localhost:8000"
+echo "  Tunnel ngrok: $NGROK_URL"
+echo "  API publique: $WORKER_URL  ← app Android"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Logs API    : tail -f /tmp/tennisboss.log"
+echo "  Logs tunnel : tail -f /tmp/ngrok.log"

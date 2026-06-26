@@ -70,9 +70,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
 
-    // Persistance des réglages (URL serveur) entre les lancements
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-
     // Stockage chiffré pour les secrets sensibles (token API backup)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 

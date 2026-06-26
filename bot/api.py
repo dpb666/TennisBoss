@@ -284,13 +284,27 @@ def api_players():
     return jsonify({"count": len(results), "players": results[:limit]})
 
 
+_TORONTO_TZ = None
+
+def _toronto_tz():
+    global _TORONTO_TZ
+    if _TORONTO_TZ is None:
+        try:
+            from zoneinfo import ZoneInfo
+            _TORONTO_TZ = ZoneInfo("America/Toronto")
+        except Exception:
+            import datetime as _dt
+            _TORONTO_TZ = _dt.timezone((_dt.timedelta(hours=-4)))  # EDT fallback
+    return _TORONTO_TZ
+
+
 def _fmt_date(d: str) -> str:
-    """Normalise diverses formes de date vers 'JJ/MM/AAAA HH:MM' ou 'JJ/MM/AAAA'.
+    """Normalise diverses formes de date vers 'JJ/MM/AAAA HH:MM' (heure Toronto).
 
     Formats gérés :
       '20241124'              -> '24/11/2024'
       '2024-11-24'            -> '24/11/2024'
-      '2024-11-24T13:35:00Z'  -> '24/11/2024 13:35'
+      '2024-11-24T13:35:00Z'  -> '24/11/2024 09:35'  (UTC → America/Toronto)
     """
     s = str(d).strip()
     if len(s) == 8 and s.isdigit():
@@ -299,6 +313,7 @@ def _fmt_date(d: str) -> str:
         try:
             import datetime as _dt
             dt = _dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+            dt = dt.astimezone(_toronto_tz())
             base = dt.strftime("%d/%m/%Y")
             time_part = dt.strftime("%H:%M")
             return f"{base} {time_part}" if time_part != "00:00" else base
@@ -664,7 +679,7 @@ def api_value():
                 "ev1": row["ev"] if row["side"] == row["player1"] else None,
                 "ev2": row["ev"] if row["side"] == row["player2"] else None,
                 "value": True,
-                "date": row["date"],
+                "date": _fmt_date(row["date"]),
                 "source": "cache_db",
             })
 
@@ -784,22 +799,22 @@ def api_ingest_sackmann():
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    """Chat IA avec LM Studio (LLM local). Body JSON: {message, history=[]}."""
+    """Chat IA (Groq primaire / Gemini-Gemma fallback / Ollama local). Body JSON: {message, history=[]}."""
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     history = data.get("history") or []
     if not message:
         return jsonify({"error": "message requis"}), 400
-    lm_url = os.environ.get("LM_STUDIO_URL", config.LM_STUDIO_URL)
-    lm_model = os.environ.get("LM_STUDIO_MODEL", config.LM_STUDIO_MODEL)
+    primary_url = os.environ.get("GROQ_API_URL", config.GROQ_API_URL)
+    primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
     try:
         extra = chat_mod.build_match_context(message, _MEM)
-        reply = chat_mod.chat(message, history, _MEM, lm_url, model=lm_model,
+        reply = chat_mod.chat(message, history, _MEM, primary_url, model=primary_model,
                               extra_context=extra)
         return jsonify({"reply": reply, "context_used": bool(extra)})
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")
-        return jsonify({"error": f"LLM inaccessible (modèle: {lm_model}) : {exc}"}), 503
+        return jsonify({"error": f"LLM inaccessible (modèle: {primary_model}) : {exc}"}), 503
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -827,11 +842,11 @@ def api_upload():
         return jsonify({"extracted_text": text, "type": ftype})
 
     # Question posée sur le fichier → injecter le texte dans le chat
-    lm_url   = os.environ.get("LM_STUDIO_URL",   config.LM_STUDIO_URL)
-    lm_model = os.environ.get("LM_STUDIO_MODEL", config.LM_STUDIO_MODEL)
+    primary_url = os.environ.get("GROQ_API_URL", config.GROQ_API_URL)
+    primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
     augmented = f"{message}\n\n[Contenu du fichier {f.filename}]\n{text}"
     try:
-        reply = chat_mod.chat(augmented, [], _MEM, lm_url, model=lm_model)
+        reply = chat_mod.chat(augmented, [], _MEM, primary_url, model=primary_model)
         return jsonify({"reply": reply, "extracted_text": text, "type": ftype})
     except Exception as exc:
         log(f"Chat upload LLM en échec : {exc}", "WARN")

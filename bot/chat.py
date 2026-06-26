@@ -1,12 +1,12 @@
-"""Chat IA local via LM Studio (API OpenAI-compatible).
+"""Chat IA — Groq primaire, Gemini/Gemma fallback, Ollama local en dernier.
 
-LM Studio doit tourner sur Windows avec un modèle chargé (ex: Llama 3.2 3B,
-Mistral 7B Q4) et le serveur local activé (port 1234 par défaut).
-
-Depuis WSL2 en mode réseau miroir, `localhost:1234` pointe sur Windows.
+Groq : llama-3.1-8b-instant, ~0.5s/réponse, 14 400 req/jour (gratuit).
+Gemini API : Gemma 4 cloud si Groq est inaccessible.
+Fallback final : Ollama local (gemma3:4b).
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -14,14 +14,16 @@ import requests
 
 from .log import log
 
-DEFAULT_LM_URL = "http://localhost:11434/v1/chat/completions"
-DEFAULT_MODEL = "qwen2.5:7b"   # qwen3 nécessite mise à jour du service Ollama Windows
+DEFAULT_LM_URL = "https://api.groq.com/openai/v1/chat/completions"
+DEFAULT_MODEL = "llama-3.1-8b-instant"
 HISTORY_WINDOW = 8
 MAX_TOKENS = 120
 TEMPERATURE = 0.7
 
-# Endpoint chat natif Ollama — plus rapide que /api/generate pour les modèles thinking
 _OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
+_OLLAMA_FALLBACK_MODEL = "gemma3:4b"
+_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+_GEMINI_FALLBACK_MODEL = "gemma-4-31b-it"
 
 
 # ---------------------------------------------------------------------------
@@ -250,16 +252,33 @@ def chat(
         messages.append(h)
     messages.append({"role": "user", "content": message})
 
-    is_groq = "groq.com" in lm_url.lower()
-    is_ollama = ("11434" in lm_url or "ollama" in lm_url.lower()) and not is_groq
+    lm_url_l = lm_url.lower()
+    is_groq = "groq.com" in lm_url_l
+    is_gemini = "generativelanguage.googleapis.com" in lm_url_l or model.startswith(("gemini-", "gemma-"))
+    is_ollama = ("11434" in lm_url_l or "ollama" in lm_url_l) and not is_groq
     if is_ollama:
         return _chat_via_generate(model, messages)
-    return _chat_via_openai(lm_url, model, messages)
+    if is_gemini:
+        return _chat_via_gemini(os.environ.get("GEMINI_MODEL", model), messages)
+    try:
+        return _chat_via_openai(lm_url, model, messages)
+    except Exception as exc:
+        log(f"LLM primaire KO ({exc}) — fallback Gemini/Gemma", "WARN")
+        try:
+            gemini_model = os.environ.get("GEMINI_MODEL", _GEMINI_FALLBACK_MODEL)
+            return _chat_via_gemini(gemini_model, messages)
+        except Exception as gemini_exc:
+            ollama_model = os.environ.get("OLLAMA_FALLBACK_MODEL", _OLLAMA_FALLBACK_MODEL)
+            log(
+                f"Gemini/Gemma KO ({gemini_exc}) — fallback Ollama local "
+                f"({ollama_model})",
+                "WARN",
+            )
+            return _chat_via_generate(ollama_model, messages)
 
 
 def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
-    """Endpoint OpenAI-compatible (/v1/chat/completions) — LM Studio / Groq / OpenAI."""
-    import os
+    """Endpoint OpenAI-compatible (/v1/chat/completions) — LLM / Groq / OpenAI."""
     api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
@@ -278,11 +297,74 @@ def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
     except requests.RequestException as exc:
-        log(f"LM Studio inaccessible ({lm_url}): {exc}", "WARN")
+        log(f"LLM inaccessible ({lm_url}): {exc}", "WARN")
         raise
     except (KeyError, IndexError) as exc:
-        log(f"Réponse LM Studio inattendue : {exc}", "WARN")
+        log(f"Réponse LLM inattendue : {exc}", "WARN")
         raise RuntimeError(f"Réponse invalide du LLM : {exc}") from exc
+
+
+def _chat_via_gemini(model: str, messages: list) -> str:
+    """Endpoint Gemini API REST — modèles Gemini et Gemma hébergés par Google."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY absente")
+
+    system_parts: List[str] = []
+    contents: List[Dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        text = str(msg.get("content", ""))
+        if not text:
+            continue
+        if role == "system":
+            system_parts.append(text)
+            continue
+        contents.append({
+            "role": "model" if role == "assistant" else "user",
+            "parts": [{"text": text}],
+        })
+
+    if system_parts:
+        system_text = "\n".join(system_parts)
+        if contents and contents[0]["role"] == "user":
+            contents[0]["parts"].insert(0, {"text": system_text + "\n\n"})
+        else:
+            contents.insert(0, {"role": "user", "parts": [{"text": system_text}]})
+
+    generation_config: Dict[str, Any] = {
+        "temperature": TEMPERATURE,
+        "maxOutputTokens": MAX_TOKENS,
+    }
+    thinking_level = os.environ.get("GEMINI_THINKING_LEVEL", "").strip()
+    if thinking_level:
+        generation_config["thinkingConfig"] = {"thinkingLevel": thinking_level}
+
+    try:
+        resp = requests.post(
+            _GEMINI_API_URL.format(model=model),
+            params={"key": api_key},
+            json={
+                "contents": contents,
+                "generationConfig": generation_config,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        parts = data["candidates"][0]["content"]["parts"]
+        return "".join(part.get("text", "") for part in parts).strip()
+    except requests.RequestException as exc:
+        log(f"Gemini API inaccessible ({model}): {exc}", "WARN")
+        raise
+    except (KeyError, IndexError, ValueError) as exc:
+        log(f"Réponse Gemini inattendue : {exc}", "WARN")
+        raise RuntimeError(f"Réponse invalide de Gemini : {exc}") from exc
+
+
+def _ollama_chat_url() -> str:
+    base = os.environ.get("OLLAMA_FALLBACK_URL", _OLLAMA_CHAT_URL).rstrip("/")
+    return base if base.endswith("/api/chat") else f"{base}/api/chat"
 
 
 _THINKING_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -296,7 +378,7 @@ def _chat_via_generate(model: str, messages: list) -> str:
     """
     try:
         resp = requests.post(
-            _OLLAMA_CHAT_URL,
+            _ollama_chat_url(),
             json={
                 "model":      model,
                 "messages":   messages,

@@ -12,7 +12,13 @@ services:
       - TENNISBOSS_LOG_LEVEL=INFO
       - ODDS_API_KEY=${ODDS_API_KEY:-}
       - AT_API_KEY=${AT_API_KEY:-}
-      - LM_STUDIO_URL=http://localhost:1234/v1
+      - GROQ_API_URL=${GROQ_API_URL:-https://api.groq.com/openai/v1/chat/completions}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.1-8b-instant}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemma-4-31b-it}
+      - OLLAMA_FALLBACK_URL=${OLLAMA_FALLBACK_URL:-http://host.docker.internal:11434}
+      - OLLAMA_FALLBACK_MODEL=${OLLAMA_FALLBACK_MODEL:-gemma3:4b}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -21,20 +27,16 @@ services:
       retries: 3
       start_period: 5s
 
-  # Optional: LM Studio for local LLM (chat endpoint)
-  # lm-studio:
-  #   image: lmstudio/lmstudio:latest
-  #   ports:
-  #     - "1234:1234"
-  #   volumes:
-  #     - ./models:/root/.cache/lm-studio/models
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # Le Worker Cloudflare (workers.dev) appelle ce tunnel via cfargotunnel.com
+    command: tunnel --no-autoupdate run --url http://localhost:8000
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      tennisboss:
+        condition: service_healthy
+    restart: unless-stopped
+    network_mode: host
 
-  # Optional: Monitoring + cron jobs (future)
-  # tennis-scheduler:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.scheduler
-  #   environment:
-  #     - API_URL=http://tennisboss:8000
-  #   depends_on:
-  #     - tennisboss
+  # Local LLM attendu: Ollama sur l'hôte (http://host.docker.internal:11434)

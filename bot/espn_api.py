@@ -68,7 +68,9 @@ def _parse_competition(comp: Dict, tournament: str, tour: str) -> Optional[Dict]
     raw_date = comp.get("date", "") or comp.get("startDate", "")
     try:
         import datetime as _dt
+        from zoneinfo import ZoneInfo
         dt = _dt.datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        dt = dt.astimezone(ZoneInfo("America/Toronto"))
         date_str = dt.strftime("%Y-%m-%d")
         time_str = dt.strftime("%H:%M")
     except Exception:

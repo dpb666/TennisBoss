@@ -1,0 +1,12 @@
+name = "tennisboss-api"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+account_id = "cdbd81bae4e8a81f7c9d9022fb5470c5"
+
+# URL permanente : https://tennisboss-api.<ton-subdomain>.workers.dev
+workers_dev = true
+
+[vars]
+# Remplacer par l'UUID réel après : cloudflared tunnel create tennisboss
+TUNNEL_URL = "https://plausible-matchbox-thrive.ngrok-free.dev"
+API_TOKEN = "MUTaqzFSynnRPbESk47JzSzSRjAOB27JObobQ8Ds2sI"

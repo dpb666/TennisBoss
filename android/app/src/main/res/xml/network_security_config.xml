@@ -1,11 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  DEV uniquement : autorise le HTTP en clair vers le backend local
-  (émulateur 10.0.2.2, ou l'IP de votre PC sur le réseau Wi-Fi).
-  En production, supprimez ceci et utilisez HTTPS.
--->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
