@@ -1,11 +1,11 @@
 #!/bin/bash
-# TennisBoss — démarrage API + ngrok + mise à jour Worker Cloudflare
-# Architecture : Android → workers.dev (stable) → ngrok (auto-updated) → API:8000
+# TennisBoss — démarrage API + tunnel ngrok
+# URL publique stable : https://tennisboss-api.walid-zahir89.workers.dev
 cd "$(dirname "$0")"
 source .env 2>/dev/null || true
 
-CF_TOKEN="cfut_c6N7p8x9FIJyS7uwdSB1TGBQnUEBAgjJGC3odxP52c459692"
 WORKER_URL="https://tennisboss-api.walid-zahir89.workers.dev"
+STATIC_NGROK="https://plausible-matchbox-thrive.ngrok-free.dev"
 
 echo "=== TennisBoss Startup ==="
 
@@ -21,31 +21,29 @@ for i in $(seq 1 15); do
 done
 echo "✅ API prête"
 
-# 2. Démarrer ngrok
-echo "→ Tunnel ngrok..."
+# 2. Démarrer ngrok (domaine statique gratuit — URL ne change pas)
+echo "→ Tunnel ngrok ($STATIC_NGROK)..."
 ngrok http 8000 --log=stdout --log-format=json > /tmp/ngrok.log 2>&1 &
-sleep 6
+sleep 4
 
 NGROK_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | \
   python3 -c "import sys,json; t=json.load(sys.stdin)['tunnels']; print([x['public_url'] for x in t if x['proto']=='https'][0])" 2>/dev/null)
 
 if [ -z "$NGROK_URL" ]; then
-  echo "❌ ngrok URL non trouvée — voir /tmp/ngrok.log"
+  echo "❌ ngrok KO — voir /tmp/ngrok.log"
   tail -5 /tmp/ngrok.log
   exit 1
 fi
 echo "✅ Tunnel : $NGROK_URL"
 
-# 3. Mettre à jour wrangler.toml et redéployer le Worker
-sed -i "s|TUNNEL_URL = \".*\"|TUNNEL_URL = \"$NGROK_URL\"|" cloudflare/wrangler.toml
-cd cloudflare
-CLOUDFLARE_API_TOKEN="$CF_TOKEN" npx wrangler@latest deploy --quiet 2>/dev/null && \
-  echo "✅ Worker mis à jour → $WORKER_URL" || \
-  echo "⚠️  Worker update échouée (tunnel toujours actif)"
-cd ..
-
-# Sauvegarder l'URL dans .env
-sed -i "s|^TUNNEL_URL=.*|TUNNEL_URL=$NGROK_URL|" .env
+# 3. Si l'URL a changé (ne devrait pas arriver), redéployer le Worker
+if [ "$NGROK_URL" != "$STATIC_NGROK" ]; then
+  echo "⚠️  URL ngrok inattendue — mise à jour du Worker..."
+  sed -i "s|TUNNEL_URL = \".*\"|TUNNEL_URL = \"$NGROK_URL\"|" cloudflare/wrangler.toml
+  CF_TOKEN="${CLOUDFLARE_API_TOKEN:-cfut_c6N7p8x9FIJyS7uwdSB1TGBQnUEBAgjJGC3odxP52c459692}"
+  (cd cloudflare && CLOUDFLARE_API_TOKEN="$CF_TOKEN" npx wrangler@latest deploy 2>&1 | tail -3) && \
+    echo "✅ Worker mis à jour" || echo "⚠️  Worker update manuelle requise"
+fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
