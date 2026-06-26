@@ -284,3 +284,49 @@ data class CalibrationResponse(
     val calibration_k: Double = 1.0,
     val recent: List<SettledRecent> = emptyList(),
 )
+
+// --- CLV (Closing Line Value) — preuve d'edge -----------------------------
+
+/** Agrégat CLV (global ou par palier de confiance). `n` non nul = palier vide. */
+data class ClvAgg(
+    val n: Int? = null,
+    val n_picks: Int = 0,
+    val n_settled: Int = 0,
+    val n_clv: Int = 0,
+    val avg_clv_pct: Double? = null,
+    val beat_closing_pct: Double? = null,
+    val beat_closing_ci95: Double? = null,
+    val roi_flat_pct: Double? = null,
+    val pnl_kelly_units: Double? = null,
+    val win_rate_pct: Double? = null,
+)
+
+data class ClvByConfidence(
+    val high: ClvAgg = ClvAgg(),
+    val medium: ClvAgg = ClvAgg(),
+    val low: ClvAgg = ClvAgg(),
+)
+
+/** Un pick CLV récent (cote pick vs cote de clôture). */
+data class ClvRecent(
+    val date: String = "",
+    val player1: String = "",
+    val player2: String = "",
+    val side: String = "",
+    val pick_odds: Double? = null,
+    val closing_odds: Double? = null,
+    val closing_src: String? = null,
+    val clv_pct: Double? = null,
+    val beat_closing: Int? = null,
+    val result: Int? = null,
+    val pnl_flat: Double? = null,
+)
+
+data class ClvResponse(
+    val global: ClvAgg = ClvAgg(),
+    val by_confidence: ClvByConfidence = ClvByConfidence(),
+    val verdict: String = "insuffisant",
+    val verdict_label: String = "",
+    val note: String = "",
+    val recent: List<ClvRecent> = emptyList(),
+)

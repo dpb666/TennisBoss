@@ -30,6 +30,7 @@ import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.TokenManager
 import com.tennisboss.app.ui.ChatScreen
 import com.tennisboss.app.ui.ChatViewModel
+import com.tennisboss.app.ui.EdgeScreen
 import com.tennisboss.app.ui.PerformanceScreen
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
@@ -100,6 +101,12 @@ fun AppRoot() {
                 NavigationBarItem(
                     selected = tab == 5,
                     onClick = { tab = 5 },
+                    icon = { Text("💰") },
+                    label = { Text("Edge") },
+                )
+                NavigationBarItem(
+                    selected = tab == 6,
+                    onClick = { tab = 6 },
                     icon = { Text("🤖") },
                     label = { Text("AI Chat") },
                 )
@@ -133,6 +140,7 @@ fun AppRoot() {
                     )
                     3 -> ValueScreen()
                     4 -> PerformanceScreen()
+                    5 -> EdgeScreen()
                     else -> ChatScreen(chatVM)
                 }
             }
