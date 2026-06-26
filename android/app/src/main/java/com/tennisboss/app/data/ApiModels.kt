@@ -239,6 +239,7 @@ data class ValueComparison(
     val ev2: Double = 0.0,
     val best_side: String? = null,
     val best_ev: Double = 0.0,
+    val best_book: String? = null,
     val value: Boolean = false,
     val date: String = "",
     val source: String = "",

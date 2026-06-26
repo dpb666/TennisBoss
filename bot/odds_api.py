@@ -21,7 +21,12 @@ from .live_api import load_env
 from .log import log
 
 BASE = "https://api.odds-api.io/v3"
-DEFAULT_BOOKMAKERS = "MelBet,Betfair Exchange"
+# Liste élargissable via .env (ODDS_BOOKMAKERS) : plus de books = plus de
+# chances de trouver un meilleur prix que la clôture (line shopping = edge).
+DEFAULT_BOOKMAKERS = os.environ.get(
+    "ODDS_BOOKMAKERS", "MelBet,Betfair Exchange").strip()
+# Book "sharp" (faible vig) servant de référence pour la proba juste no-vig.
+SHARP_BOOK = os.environ.get("ODDS_SHARP_BOOK", "Betfair Exchange").strip()
 
 TTL_EVENTS = 900       # 15 min — économise le quota 100 req/h
 TTL_ODDS = 300         # 5 min
@@ -319,7 +324,8 @@ def fetch_match_winner(event_id: Any,
         return None
 
     books = data.get("bookmakers") or {}
-    homes, aways, used = [], [], []
+    # Par book : meilleure cote home/away qu'il propose (s'il y a plusieurs lignes).
+    per_book: Dict[str, tuple] = {}
     for bname, markets in books.items():
         if not isinstance(markets, list):
             continue
@@ -332,21 +338,33 @@ def fetch_match_winner(event_id: Any,
                 except (KeyError, ValueError, TypeError):
                     continue
                 if ho > 1 and ao > 1:
-                    homes.append(ho)
-                    aways.append(ao)
-                    used.append(bname)
-    if not homes:
+                    ph, pa = per_book.get(bname, (0.0, 0.0))
+                    per_book[bname] = (max(ph, ho), max(pa, ao))
+    if not per_book:
         return None
 
-    # Moyenne des cotes puis retrait de la marge (no-vig).
-    ho = sum(homes) / len(homes)
-    ao = sum(aways) / len(aways)
-    inv_h, inv_a = 1.0 / ho, 1.0 / ao
+    # 1) Cote d'EXÉCUTION = meilleur prix dispo (line shopping). On parie au
+    #    book qui paie le plus pour le côté choisi → bat la moyenne/clôture.
+    best_h_book, best_h = max(((b, o[0]) for b, o in per_book.items()),
+                              key=lambda x: x[1])
+    best_a_book, best_a = max(((b, o[1]) for b, o in per_book.items()),
+                              key=lambda x: x[1])
+
+    # 2) Proba JUSTE (no-vig) = book sharp si présent, sinon consensus (moyenne).
+    if SHARP_BOOK in per_book:
+        ref_h, ref_a = per_book[SHARP_BOOK]
+    else:
+        ref_h = sum(o[0] for o in per_book.values()) / len(per_book)
+        ref_a = sum(o[1] for o in per_book.values()) / len(per_book)
+    inv_h, inv_a = 1.0 / ref_h, 1.0 / ref_a
     total = inv_h + inv_a
     return {
         "home_prob": round(inv_h / total, 4),
         "away_prob": round(inv_a / total, 4),
-        "home_odds": round(ho, 2),
-        "away_odds": round(ao, 2),
-        "books": sorted(set(used)),
+        "home_odds": round(best_h, 2),   # meilleur prix (exécution)
+        "away_odds": round(best_a, 2),
+        "home_book": best_h_book,
+        "away_book": best_a_book,
+        "fair_source": SHARP_BOOK if SHARP_BOOK in per_book else "consensus",
+        "books": sorted(per_book.keys()),
     }

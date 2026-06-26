@@ -660,11 +660,15 @@ def api_value():
             "blend_match_prob2": round(pb2 * 100, 1),
             "market_match_prob1": round(mw["home_prob"] * 100, 1),
             "market_match_prob2": round(mw["away_prob"] * 100, 1),
-            "odds": {"home": ho, "away": ao, "books": mw["books"]},
+            "odds": {"home": ho, "away": ao, "books": mw["books"],
+                     "home_book": mw.get("home_book"), "away_book": mw.get("away_book")},
             "ev1": round(ev1 * 100, 1),
             "ev2": round(ev2 * 100, 1),
             "best_side": best_side if best_ev > 0 else None,
             "best_ev": round(best_ev * 100, 1),
+            # Où parier le meilleur prix pour le côté conseillé (line shopping).
+            "best_book": (mw.get("home_book") if best_side == n1
+                          else mw.get("away_book")) if best_ev > 0 else None,
             "value": best_ev > 0,
         })
 

@@ -167,8 +167,11 @@ private fun ValueCard(c: ValueComparison) {
 
             if (c.value && c.best_side != null) {
                 val odd = if (c.best_side == c.player1) c.odds.home else c.odds.away
+                val book = c.best_book?.takeIf { it.isNotBlank() }
                 Text(
-                    "✅ Pari conseillé : ${c.best_side} @ $odd  (EV ${fmtSigned(c.best_ev)})",
+                    "✅ Pari conseillé : ${c.best_side} @ $odd" +
+                        (book?.let { " sur $it" } ?: "") +
+                        "  (EV ${fmtSigned(c.best_ev)})",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     color = GoodColor,
