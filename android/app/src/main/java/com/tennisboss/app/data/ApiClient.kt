@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  * (l'en-tête X-API-Token est alors ajouté à chaque requête).
  */
 object ApiClient {
-    const val DEFAULT_BASE_URL = "https://tennisboss-api.walid-zahir89.workers.dev/"
+    const val DEFAULT_BASE_URL = "https://plausible-matchbox-thrive.ngrok-free.dev/"
 
     @Volatile
     var baseUrl: String = DEFAULT_BASE_URL
