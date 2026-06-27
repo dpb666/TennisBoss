@@ -282,6 +282,26 @@ def fetch_tennis_events(upcoming_only: bool = True) -> List[Dict[str, Any]]:
     return events
 
 
+def fetch_live_events() -> List[Dict[str, Any]]:
+    """Matchs tennis EN COURS avec score + jeu courant + serve.
+
+    TTL 30s pour rester à jour durant le match.
+    Structure retournée par odds-api.io :
+      scores.home/away          = sets gagnés
+      scores.periods.p1/p2...  = jeux par set (ex: {"home":6,"away":3})
+      scores.periods.currentgame = score du jeu en cours (0/15/30/40/A)
+      clock.serve               = "home" | "away"
+      clock.statusDetail        = "1st set" | "2nd set" | ...
+      clock.minute              = durée en minutes
+    """
+    if not is_enabled():
+        return []
+    events = _get("/events", {"sport": "tennis", "status": "live"}, ttl=30)
+    if not isinstance(events, list):
+        return []
+    return [e for e in events if e.get("status") in ("live", "inplay")]
+
+
 def fetch_settled_events() -> List[Dict[str, Any]]:
     """Résultats terminés des dernières 24h."""
     if not is_enabled():

@@ -31,6 +31,8 @@ import com.tennisboss.app.data.TokenManager
 import com.tennisboss.app.ui.ChatScreen
 import com.tennisboss.app.ui.ChatViewModel
 import com.tennisboss.app.ui.EdgeScreen
+import com.tennisboss.app.ui.LiveScreen
+import com.tennisboss.app.ui.LiveViewModel
 import com.tennisboss.app.ui.PerformanceScreen
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
@@ -56,6 +58,7 @@ fun AppRoot() {
     // ViewModel de prédiction partagé : la recherche joueurs peut le pré-remplir.
     val predictVM: PredictViewModel = viewModel()
     val chatVM: ChatViewModel = viewModel()
+    val liveVM: LiveViewModel = viewModel()
 
     // URL publique par défaut pour fonctionner hors réseau local.
     // Le token est chargé depuis TokenManager (variables de build ou stockage chiffré).
@@ -101,12 +104,18 @@ fun AppRoot() {
                 NavigationBarItem(
                     selected = tab == 5,
                     onClick = { tab = 5 },
-                    icon = { Text("💰") },
-                    label = { Text("Edge") },
+                    icon = { Text("🔴") },
+                    label = { Text("Live") },
                 )
                 NavigationBarItem(
                     selected = tab == 6,
                     onClick = { tab = 6 },
+                    icon = { Text("💰") },
+                    label = { Text("Edge") },
+                )
+                NavigationBarItem(
+                    selected = tab == 7,
+                    onClick = { tab = 7 },
                     icon = { Text("🤖") },
                     label = { Text("AI Chat") },
                 )
@@ -140,7 +149,8 @@ fun AppRoot() {
                     )
                     3 -> ValueScreen()
                     4 -> PerformanceScreen()
-                    5 -> EdgeScreen()
+                    5 -> LiveScreen(liveVM)
+                    6 -> EdgeScreen()
                     else -> ChatScreen(chatVM)
                 }
             }

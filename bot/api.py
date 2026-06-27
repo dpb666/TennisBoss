@@ -563,6 +563,99 @@ def api_upcoming():
     return jsonify({"count": len(out), "matches": out})
 
 
+@app.get("/api/live")
+def api_live():
+    """Matchs tennis EN COURS : score, jeu courant, serve, odds live, prédiction pré-match.
+
+    Rafraîchissement côté Android recommandé : 30s.
+    """
+    if not odds_api.is_enabled():
+        return jsonify({"error": "ODDS_API_KEY absente"}), 503
+
+    live_events = odds_api.fetch_live_events()
+
+    out = []
+    for e in live_events:
+        home_raw = e.get("home", "")
+        away_raw = e.get("away", "")
+        n1 = _resolve(home_raw)
+        n2 = _resolve(away_raw)
+
+        # ── Score ────────────────────────────────────────────────────────────
+        scores = e.get("scores") or {}
+        periods = scores.get("periods") or {}
+        sets_home = int(scores.get("home") or 0)
+        sets_away = int(scores.get("away") or 0)
+
+        # Sets détaillés : [{"h":6,"a":3}, {"h":2,"a":4}, ...]
+        set_scores = []
+        for i in range(1, 8):
+            p = periods.get(f"p{i}")
+            if p and (p.get("home") is not None or p.get("away") is not None):
+                set_scores.append({"h": int(p.get("home") or 0),
+                                   "a": int(p.get("away") or 0)})
+
+        cg = periods.get("currentgame") or {}
+        game_h = str(cg.get("home", "")) if cg else ""
+        game_a = str(cg.get("away", "")) if cg else ""
+
+        # ── Horloge ──────────────────────────────────────────────────────────
+        clock = e.get("clock") or {}
+        serve = clock.get("serve", "")          # "home" | "away"
+        status_detail = clock.get("statusDetail", "")
+        minute = int(clock.get("minute") or 0)
+
+        # ── Prédiction pré-match ──────────────────────────────────────────────
+        prediction = None
+        if n1 and n2:
+            try:
+                f1 = features.feature_vector(features.get_profile(_MEM, n1))
+                f2 = features.feature_vector(features.get_profile(_MEM, n2))
+                r = predictor.predict(_MEM, n1, f1, n2, f2)
+                pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+                prediction = {
+                    "player1": n1, "player2": n2,
+                    "prob1": round(pm1 * 100, 1),
+                    "prob2": round((1 - pm1) * 100, 1),
+                    "favorite": r["favorite"],
+                    "confidence": r["confidence"],
+                    "confidence_label": r["confidence_label"],
+                }
+            except Exception:  # noqa: BLE001
+                pass
+
+        # ── Cotes live ────────────────────────────────────────────────────────
+        live_mw = None
+        try:
+            live_mw = odds_api.fetch_match_winner(e["id"])
+        except Exception:  # noqa: BLE001
+            pass
+
+        league = (e.get("league") or {}).get("name", "")
+        out.append({
+            "event_id": e["id"],
+            "player1": home_raw, "player2": away_raw,
+            "player1_resolved": n1, "player2_resolved": n2,
+            "league": league,
+            "sets_home": sets_home, "sets_away": sets_away,
+            "set_scores": set_scores,
+            "game_home": game_h, "game_away": game_a,
+            "serve": serve,
+            "status_detail": status_detail,
+            "minute": minute,
+            "prediction": prediction,
+            "live_odds": {
+                "home": live_mw["home_odds"] if live_mw else None,
+                "away": live_mw["away_odds"] if live_mw else None,
+                "books": live_mw["books"] if live_mw else [],
+            } if live_mw else None,
+        })
+
+    # Matchs avec cotes live en premier, puis par durée décroissante
+    out.sort(key=lambda m: (m["live_odds"] is None, -m["minute"]))
+    return jsonify({"count": len(out), "matches": out})
+
+
 @app.get("/api/value")
 def api_value():
     """Compare le modèle au marché et calcule l'EV (espérance de gain) réelle.

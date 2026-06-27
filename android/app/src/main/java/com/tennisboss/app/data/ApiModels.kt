@@ -254,6 +254,50 @@ data class ValueResponse(
     val note: String = "",
 )
 
+// ─── Live matches ────────────────────────────────────────────────────────────
+
+data class LiveSetScore(val h: Int = 0, val a: Int = 0)
+
+data class LiveOdds(
+    val home: Double? = null,
+    val away: Double? = null,
+    val books: List<String> = emptyList(),
+)
+
+data class LivePrediction(
+    val player1: String = "",
+    val player2: String = "",
+    val prob1: Double = 0.0,
+    val prob2: Double = 0.0,
+    val favorite: String? = null,
+    val confidence: Double = 0.0,
+    val confidence_label: String = "",
+)
+
+data class LiveMatch(
+    val event_id: Long = 0,
+    val player1: String = "",
+    val player2: String = "",
+    val player1_resolved: String? = null,
+    val player2_resolved: String? = null,
+    val league: String = "",
+    val sets_home: Int = 0,
+    val sets_away: Int = 0,
+    val set_scores: List<LiveSetScore> = emptyList(),
+    val game_home: String = "",
+    val game_away: String = "",
+    val serve: String = "",       // "home" | "away"
+    val status_detail: String = "",
+    val minute: Int = 0,
+    val prediction: LivePrediction? = null,
+    val live_odds: LiveOdds? = null,
+)
+
+data class LiveResponse(
+    val count: Int = 0,
+    val matches: List<LiveMatch> = emptyList(),
+)
+
 /** Métriques de performance du modèle sur les matchs réglés. */
 data class CalibMetrics(
     val n: Int = 0,

@@ -54,6 +54,9 @@ interface TennisBossApi {
     @GET("api/calibration")
     suspend fun calibration(): CalibrationResponse
 
+    @GET("api/live")
+    suspend fun live(): LiveResponse
+
     @GET("api/clv")
     suspend fun clv(): ClvResponse
 
