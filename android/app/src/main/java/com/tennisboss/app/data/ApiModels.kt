@@ -192,10 +192,11 @@ data class WeatherInfo(
 )
 
 data class WeatherImpact(
-    val beneficiary: String = "neutre",  // "p1" | "p2" | "neutre"
+    val beneficiary: String = "neutre",
     val label: String = "",
     val impact_level: String = "faible",
     val net_edge: Double = 0.0,
+    val factors: List<WeatherFactor> = emptyList(),
 )
 
 data class CrowdInfo(
@@ -224,6 +225,14 @@ data class PlayerConditionProfile(
     val style_label: String = "",
     val serve_score: Double = 0.5,
     val return_score: Double = 0.5,
+    val serve_edge: Double = 0.0,
+    val n_matches: Int = 0,
+)
+
+data class WeatherFactor(
+    val side: String = "",
+    val magnitude: Double = 0.0,
+    val reason: String = "",
 )
 
 data class WeatherAnalysis(
@@ -234,6 +243,8 @@ data class WeatherAnalysis(
     val surface_advantage: SurfaceAdvantage? = null,
     val honeypot: HoneypotSignal? = null,
     val total_condition_edge: Double = 0.0,
+    val summary: String = "",
+    val is_indoor: Boolean = false,
 )
 
 data class H2HSummary(

@@ -497,41 +497,110 @@ fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
     val p1Short = p1Name.substringAfterLast(" ")
     val p2Short = p2Name.substringAfterLast(" ")
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // Styles joueurs
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+
+        // ── Résumé synthétique ────────────────────────────────────────────────
+        if (wa.summary.isNotBlank()) {
+            Text(wa.summary,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface)
+        }
+
+        // ── Mini-bars style : Serve vs Return ─────────────────────────────────
         val pr1 = wa.player1
         val pr2 = wa.player2
-        if (pr1 != null || pr2 != null) {
-            val s1 = pr1?.style_label ?: "?"
-            val s2 = pr2?.style_label ?: "?"
+        if (pr1 != null && pr2 != null) {
+            val s1 = pr1.style_label
+            val s2 = pr2.style_label
             val icon1 = if (s1.contains("Serveur")) "🎯" else if (s1.contains("Baseliner")) "🔄" else "⚡"
             val icon2 = if (s2.contains("Serveur")) "🎯" else if (s2.contains("Baseliner")) "🔄" else "⚡"
-            Text("$icon1 $p1Short: $s1  ·  $icon2 $p2Short: $s2",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
 
-        // Impact météo
-        val wi = wa.weather_impact
-        if (wi != null && wi.label.isNotBlank() && wi.beneficiary != "neutre") {
-            val b = when (wi.beneficiary) { "p1" -> p1Short; "p2" -> p2Short; else -> "" }
-            val wiColor = when (wi.impact_level) {
-                "fort"   -> Color(0xFFFFD600)
-                "modéré" -> Color(0xFF80CBC4)
-                else     -> MaterialTheme.colorScheme.onSurfaceVariant
+            // En-tête styles
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("$icon1 $p1Short · $s1",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("$p2Short · $s2 $icon2",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("🌤 Météo favorise $b · ${wi.label}",
-                style = MaterialTheme.typography.labelSmall, color = wiColor)
+
+            // Barre service
+            val serveRatio = (pr1.serve_score / (pr1.serve_score + pr2.serve_score)).toFloat()
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Service ${String.format("%.0f", pr1.serve_score * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                    Text("${String.format("%.0f", pr2.serve_score * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                }
+                LinearProgressIndicator(
+                    progress = { serveRatio },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                    color = Color(0xFF42A5F5),
+                    trackColor = Color(0xFF42A5F5).copy(alpha = 0.2f),
+                )
+            }
+
+            // Barre return
+            val retRatio = (pr1.return_score / (pr1.return_score + pr2.return_score)).toFloat()
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Return ${String.format("%.0f", pr1.return_score * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                    Text("${String.format("%.0f", pr2.return_score * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                }
+                LinearProgressIndicator(
+                    progress = { retRatio },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                    color = Color(0xFF66BB6A),
+                    trackColor = Color(0xFF66BB6A).copy(alpha = 0.2f),
+                )
+            }
         }
 
-        // Avantage surface
+        // ── Facteurs météo détaillés ──────────────────────────────────────────
+        val wi = wa.weather_impact
+        if (wi != null && wi.factors.isNotEmpty()) {
+            HorizontalDivider(thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(vertical = 2.dp))
+            wi.factors.forEach { f ->
+                val side = when (f.side) { "p1" -> p1Short; "p2" -> p2Short; else -> "" }
+                val fColor = when (wi.impact_level) {
+                    "fort"   -> Color(0xFFFFD600)
+                    "modéré" -> Color(0xFF80CBC4)
+                    else     -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Text("• ${f.reason}${if (side.isNotBlank()) " → $side" else ""}",
+                    style = MaterialTheme.typography.labelSmall, color = fColor)
+            }
+        } else if (wi != null && wi.beneficiary == "neutre" && !wa.is_indoor) {
+            Text("• Conditions neutres — aucun facteur déterminant",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline)
+        }
+
+        // ── Avantage surface ──────────────────────────────────────────────────
         val sa = wa.surface_advantage
         if (sa != null && sa.label.isNotBlank()) {
+            HorizontalDivider(thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(vertical = 2.dp))
             Text("🏟 ${sa.label}",
                 style = MaterialTheme.typography.labelSmall, color = Color(0xFF80CBC4))
         }
 
-        // Foule
+        // ── Foule ─────────────────────────────────────────────────────────────
         val crowd = wa.crowd
         if (crowd != null && crowd.beneficiary != "neutre" && crowd.label.isNotBlank()) {
             Text("👥 ${crowd.label}",
@@ -539,19 +608,23 @@ fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        // Honeypot
+        // ── Honeypot ──────────────────────────────────────────────────────────
         val hp = wa.honeypot
         if (hp != null && hp.flag) {
             val b = when (hp.beneficiary) {
                 "p1" -> p1Short; "p2" -> p2Short; else -> hp.player.substringAfterLast(" ")
             }
+            HorizontalDivider(thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(vertical = 2.dp))
             Surface(color = Color(0xFFFFD600).copy(alpha = 0.12f),
                 shape = MaterialTheme.shapes.small) {
                 Text(
-                    "⚠️ HONEYPOT +${String.format("%.1f", hp.edge_pct)}% → $b (conditions non pricées)",
+                    "⚠️ HONEYPOT +${String.format("%.1f", hp.edge_pct)}% → $b" +
+                    "\n${hp.note}",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold, color = Color(0xFFFFD600),
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                 )
             }
         }
