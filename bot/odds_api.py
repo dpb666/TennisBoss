@@ -21,12 +21,19 @@ from .live_api import load_env
 from .log import log
 
 BASE = "https://api.odds-api.io/v3"
-# Liste élargissable via .env (ODDS_BOOKMAKERS) : plus de books = plus de
-# chances de trouver un meilleur prix que la clôture (line shopping = edge).
-DEFAULT_BOOKMAKERS = os.environ.get(
-    "ODDS_BOOKMAKERS", "MelBet,Betfair Exchange").strip()
-# Book "sharp" (faible vig) servant de référence pour la proba juste no-vig.
-SHARP_BOOK = os.environ.get("ODDS_SHARP_BOOK", "Betfair Exchange").strip()
+
+
+# IMPORTANT : lecture PARESSEUSE de l'env. Ce module est importé avant que
+# load_env() ne charge le .env (ordre d'import dans bot/api.py) — lire au
+# chargement retomberait sur le défaut. On lit donc à chaque appel.
+def _bookmakers() -> str:
+    """Liste de books à comparer (line shopping). Élargissable via ODDS_BOOKMAKERS."""
+    return os.environ.get("ODDS_BOOKMAKERS", "Bet365,Betfair Exchange").strip()
+
+
+def _sharp_book() -> str:
+    """Book sharp (faible vig) servant de proba juste no-vig."""
+    return os.environ.get("ODDS_SHARP_BOOK", "Betfair Exchange").strip()
 
 TTL_EVENTS = 900       # 15 min — économise le quota 100 req/h
 TTL_ODDS = 300         # 5 min
@@ -311,13 +318,16 @@ def find_event(index: Dict[frozenset, Dict[str, Any]],
 
 
 def fetch_match_winner(event_id: Any,
-                       bookmakers: str = DEFAULT_BOOKMAKERS) -> Optional[Dict[str, Any]]:
+                       bookmakers: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Cotes "ML" (vainqueur de match) -> probabilités implicites SANS vig.
 
     Renvoie {home_prob, away_prob, home_odds, away_odds, books} ou None.
     """
     if not is_enabled():
         return None
+    if bookmakers is None:
+        bookmakers = _bookmakers()
+    sharp = _sharp_book()
     data = _get("/odds", {"eventId": event_id, "bookmakers": bookmakers},
                 ttl=TTL_ODDS)
     if not isinstance(data, dict):
@@ -351,8 +361,8 @@ def fetch_match_winner(event_id: Any,
                               key=lambda x: x[1])
 
     # 2) Proba JUSTE (no-vig) = book sharp si présent, sinon consensus (moyenne).
-    if SHARP_BOOK in per_book:
-        ref_h, ref_a = per_book[SHARP_BOOK]
+    if sharp in per_book:
+        ref_h, ref_a = per_book[sharp]
     else:
         ref_h = sum(o[0] for o in per_book.values()) / len(per_book)
         ref_a = sum(o[1] for o in per_book.values()) / len(per_book)
@@ -365,6 +375,6 @@ def fetch_match_winner(event_id: Any,
         "away_odds": round(best_a, 2),
         "home_book": best_h_book,
         "away_book": best_a_book,
-        "fair_source": SHARP_BOOK if SHARP_BOOK in per_book else "consensus",
+        "fair_source": sharp if sharp in per_book else "consensus",
         "books": sorted(per_book.keys()),
     }

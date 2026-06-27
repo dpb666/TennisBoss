@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = "https://api.odds-api.io/v3"
-DEFAULT_BOOKMAKERS = "MelBet,Betfair Exchange"  # free plan allowlist
+DEFAULT_BOOKMAKERS = "Bet365,Betfair Exchange"  # free plan allowlist
 
 # ---------------------------------------------------------------------------
 # TennisBoss model — hybrid fallback
