@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.TokenManager
@@ -71,54 +72,24 @@ fun AppRoot() {
     Scaffold(
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(
-                    selected = tab == 0,
-                    onClick = { tab = 0 },
-                    icon = { Text("🎯") },
-                    label = { Text("Prédire") },
+                val tabs = listOf(
+                    Triple(0, "🎯", "Prédire"),
+                    Triple(1, "📅", "Matchs"),
+                    Triple(2, "👤", "Joueurs"),
+                    Triple(3, "💎", "Value"),
+                    Triple(4, "📊", "Perf"),
+                    Triple(5, "🔴", "Live"),
+                    Triple(6, "💰", "Edge"),
+                    Triple(7, "🤖", "Chat"),
                 )
-                NavigationBarItem(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    icon = { Text("📅") },
-                    label = { Text("Matchs") },
-                )
-                NavigationBarItem(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
-                    icon = { Text("👤") },
-                    label = { Text("Joueurs") },
-                )
-                NavigationBarItem(
-                    selected = tab == 3,
-                    onClick = { tab = 3 },
-                    icon = { Text("💎") },
-                    label = { Text("Value") },
-                )
-                NavigationBarItem(
-                    selected = tab == 4,
-                    onClick = { tab = 4 },
-                    icon = { Text("📊") },
-                    label = { Text("Perf") },
-                )
-                NavigationBarItem(
-                    selected = tab == 5,
-                    onClick = { tab = 5 },
-                    icon = { Text("🔴") },
-                    label = { Text("Live") },
-                )
-                NavigationBarItem(
-                    selected = tab == 6,
-                    onClick = { tab = 6 },
-                    icon = { Text("💰") },
-                    label = { Text("Edge") },
-                )
-                NavigationBarItem(
-                    selected = tab == 7,
-                    onClick = { tab = 7 },
-                    icon = { Text("🤖") },
-                    label = { Text("AI Chat") },
-                )
+                tabs.forEach { (idx, icon, label) ->
+                    NavigationBarItem(
+                        selected = tab == idx,
+                        onClick = { tab = idx },
+                        icon = { Text(icon, fontSize = 16.sp) },
+                        label = { Text(label, fontSize = 9.sp, maxLines = 1) },
+                    )
+                }
             }
         },
     ) { padding ->
