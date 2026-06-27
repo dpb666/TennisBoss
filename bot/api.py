@@ -681,6 +681,22 @@ def api_upcoming():
                     item["weather_analysis"] = wa
                 except Exception:
                     pass
+
+            # ── H2H résumé rapide ─────────────────────────────────────────────
+            try:
+                h2h_rows = db.head_to_head(n1, n2)
+                hw1 = sum(1 for r in h2h_rows if r["winner"] == n1)
+                hw2 = sum(1 for r in h2h_rows if r["winner"] == n2)
+                item["h2h"] = {
+                    "wins1": hw1, "wins2": hw2, "total": hw1 + hw2,
+                    "last_winner": h2h_rows[0]["winner"] if h2h_rows else None,
+                }
+            except Exception:
+                pass
+
+            # ── Ranking ───────────────────────────────────────────────────────
+            item["rank1"] = _MEM["players"].get(n1, {}).get("rank")
+            item["rank2"] = _MEM["players"].get(n2, {}).get("rank")
         out.append(item)
         if len(out) >= limit:
             break

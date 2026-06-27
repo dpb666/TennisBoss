@@ -236,6 +236,13 @@ data class WeatherAnalysis(
     val total_condition_edge: Double = 0.0,
 )
 
+data class H2HSummary(
+    val wins1: Int = 0,
+    val wins2: Int = 0,
+    val total: Int = 0,
+    val last_winner: String? = null,
+)
+
 data class BetContext(
     val model_fav: String? = null,
     val model_fav_prob: Double = 0.0,
@@ -264,6 +271,9 @@ data class UpcomingMatch(
     val source: String = "",
     val bet_context: BetContext? = null,
     val weather_analysis: WeatherAnalysis? = null,
+    val h2h: H2HSummary? = null,
+    val rank1: Int? = null,
+    val rank2: Int? = null,
 )
 
 data class UpcomingResponse(

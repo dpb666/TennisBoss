@@ -110,15 +110,13 @@ def surface_win_rate(mem: Dict[str, Any], player: str) -> Dict[str, Optional[flo
     """
     elo_global = mem.get("elo") or {}
     elo_surf = mem.get("elo_surface") or {}
-    global_r = elo_global.get(player, 1500.0)
-
     result: Dict[str, Optional[float]] = {}
     for surf in ("hard", "clay", "grass"):
         surf_r = (elo_surf.get(surf) or {}).get(player)
         if surf_r is not None:
-            # Delta ELO → probabilité approximative vs joueur moyen
-            delta = surf_r - global_r
-            # +100 ELO ≈ +14% de win rate vs adversaire "moyen"
+            # Delta vs base 1500 (= joueur moyen) : mesure la spécialisation surface
+            # ±100 ELO ≈ ±14% de win rate vs adversaire moyen
+            delta = surf_r - 1500.0
             approx = 0.5 + delta / 700.0
             result[surf] = round(max(0.3, min(0.8, approx)), 2)
         else:
@@ -167,12 +165,12 @@ def weather_impact(
                             "Surface herbe amplifie le vent"))
 
     # ── Pluie / Conditions lentes ─────────────────────────────────────────────
-    if rain_mm > 0.5 or (temp_c < 12 and surface in ("grass", "hard")):
+    if rain_mm >= 0.5 or (temp_c < 12 and surface in ("grass", "hard")):
         # Conditions lentes → avantage returneur/baseliner
         ret_edge = (style1["return_score"] - style2["return_score"])
         cold_intensity = min(max(rain_mm / 5.0, (15 - temp_c) / 15.0), 1.0)
         rain_adv = ret_edge * cold_intensity * 0.25
-        reason = f"Pluie {rain_mm:.1f}mm" if rain_mm > 0.5 else f"Froid {temp_c:.0f}°C"
+        reason = f"Pluie {rain_mm:.1f}mm" if rain_mm >= 0.5 else f"Froid {temp_c:.0f}°C"
         factors.append(("p1" if rain_adv > 0 else "p2", abs(rain_adv),
                         f"{reason} → balle lente, avantage returneur"))
 
