@@ -254,10 +254,11 @@ private fun PlayerScoreRow(
             }
         }
 
-        // Jeu en cours
+        // Jeu en cours (0 entre deux points = on affiche —)
         Spacer(Modifier.width(8.dp))
+        val displayGame = if (gameScore.isBlank() || gameScore == "0") "—" else gameScore
         Text(
-            gameScore.ifBlank { "—" },
+            displayGame,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = if (isServing) ServeClr else MaterialTheme.colorScheme.onSurface,

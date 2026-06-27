@@ -33,6 +33,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import com.tennisboss.app.ui.components.SkeletonList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -115,13 +123,16 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
 
 @Composable
 private fun MatchCard(m: UpcomingMatch) {
+    var expanded by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable { expanded = !expanded }
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // ── Ligne 1 : tournoi + date/surface ─────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -130,165 +141,143 @@ private fun MatchCard(m: UpcomingMatch) {
                     m.tournament.ifBlank { "—" },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
                 )
                 if (m.live) {
-                    Text("🔴 LIVE", color = Color(0xFFD32F2F),
-                        fontWeight = FontWeight.Bold)
+                    Text("🔴 LIVE", color = Color(0xFFD32F2F), fontWeight = FontWeight.Bold)
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val surface = m.prediction?.surface?.takeIf { it.isNotBlank() }
-                        if (surface != null) {
-                            SurfaceBadge(surface)
-                            Spacer(Modifier.size(8.dp))
-                        }
-                        Text("${m.date} ${m.time}",
-                            style = MaterialTheme.typography.labelSmall)
+                        if (surface != null) { SurfaceBadge(surface); Spacer(Modifier.size(8.dp)) }
+                        Text("${m.date} ${m.time}", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
 
-            Text(
-                "${m.player1_raw}  vs  ${m.player2_raw}",
-                fontWeight = FontWeight.SemiBold,
-            )
+            // ── Joueurs ───────────────────────────────────────────────────────
+            Text("${m.player1_raw}  vs  ${m.player2_raw}", fontWeight = FontWeight.SemiBold)
 
-            // Section Résultats (si disponible)
+            // ── Résultat (live/terminé) ───────────────────────────────────────
             m.result?.let { res ->
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "SCORE : ${res.score}",
-                            style = MaterialTheme.typography.labelLarge,
+                        horizontalArrangement = Arrangement.Center) {
+                        Text("SCORE : ${res.score}", style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (res.winner.isNotBlank()) {
-                            Text(
-                                " • WINNER: ${res.winner}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (res.winner.isNotBlank())
+                            Text(" • WINNER: ${res.winner}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF2E7D32)
-                            )
-                        }
+                                color = Color(0xFF2E7D32))
                     }
                 }
             }
 
+            // ── Prédiction résumée (toujours visible) ────────────────────────
             val pred = m.prediction
             if (pred != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
+                Row(modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "1er set : ${pred.player1} ${fmt(pred.prob1)} / " +
-                                "${pred.player2} ${fmt(pred.prob2)}",
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("1er set : ${pred.player1} ${fmt(pred.prob1)} / ${pred.player2} ${fmt(pred.prob2)}",
                         modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (pred.confidence_label.isNotBlank()) {
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    if (pred.confidence_label.isNotBlank())
                         ConfidenceBadge(pred.confidence_label, pred.confidence)
-                    }
                 }
-
                 pred.favorite?.let {
-                    Text(
-                        "🏆 Favori : $it",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Normal,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("🏆 Favori : $it", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (pred.target_160 && pred.fair_odds != null) {
+                    Text("🎯 1er set jouable : ${pred.favorite} @ cote juste ${pred.fair_odds} (≥1.60)",
+                        style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00E5A0))
+                }
+            } else {
+                Text("Joueur inconnu en base — pas de prédiction.",
+                    style = MaterialTheme.typography.bodySmall, color = Color(0xFF8A6D00))
+            }
 
-                pred.surface?.let { surf ->
-                    if (surf.isNotBlank()) {
-                        Text(
-                            "🏟 Surface : $surf",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
+            // ── Chevron expand/collapse ───────────────────────────────────────
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Text(
+                    if (expanded) "▲ Fermer détail" else "▼ Détail · météo · cotes",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // ── Section détail (dépliable) ────────────────────────────────────
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HorizontalDivider(thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.padding(vertical = 2.dp))
+
+                    if (pred != null) {
+                        pred.surface?.let { surf ->
+                            if (surf.isNotBlank()) Text("🏟 Surface : $surf",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline)
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        BossStatsComparison(pred)
+                        HorizontalDivider(thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(vertical = 4.dp))
+                        BetBuilderView(
+                            name1 = pred.player1, name2 = pred.player2,
+                            mlProb1 = pred.ml_prob1, mlProb2 = pred.ml_prob2,
+                            set2Prob1 = pred.set2_prob1, set2Prob2 = pred.set2_prob2,
+                            thirdSetProb = pred.total_sets_over,
+                            correctScore = pred.correct_score_probs,
+                            totalPointsOver = pred.total_points_over,
+                            totalAcesAvg = pred.total_aces_avg,
                         )
                     }
-                }
 
-                // Cible 1er set : favori jouable à cote juste >= 1.60.
-                if (pred.target_160 && pred.fair_odds != null) {
-                    Text(
-                        "🎯 1er set jouable : ${pred.favorite} @ cote juste ${pred.fair_odds} (≥1.60)",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF00E5A0),
-                    )
-                }
-
-                // Section "Boss Stats" : Comparaison visuelle
-                Spacer(Modifier.height(4.dp))
-                BossStatsComparison(pred)
-
-                // Bet Builder Section - Unified
-                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
-                BetBuilderView(
-                    name1 = pred.player1,
-                    name2 = pred.player2,
-                    mlProb1 = pred.ml_prob1,
-                    mlProb2 = pred.ml_prob2,
-                    set2Prob1 = pred.set2_prob1,
-                    set2Prob2 = pred.set2_prob2,
-                    thirdSetProb = pred.total_sets_over, // Utilise total_sets_over comme proxy pour 3 sets si non dispo
-                    correctScore = pred.correct_score_probs,
-                    totalPointsOver = pred.total_points_over,
-                    totalAcesAvg = pred.total_aces_avg
-                )
-
-            } else {
-                Text(
-                    "Joueur inconnu en base — pas de prédiction.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF8A6D00),
-                )
-            }
-
-            // Météo
-            m.weather?.let { w ->
-                if (w.conditions.isNotBlank() || w.temp_c != null) {
-                    val icon = when {
-                        w.conditions.contains("pluie") || w.conditions.contains("bruine") -> "🌧"
-                        w.conditions.contains("orage") -> "⛈"
-                        w.conditions.contains("nuag") -> "☁️"
-                        w.conditions.contains("vent") -> "💨"
-                        else -> "☀️"
+                    // Météo — seulement dans le détail
+                    m.weather?.let { w ->
+                        if (w.conditions.isNotBlank() || w.temp_c != null) {
+                            HorizontalDivider(thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.padding(vertical = 4.dp))
+                            val icon = when {
+                                w.conditions.contains("pluie") || w.conditions.contains("bruine") -> "🌧"
+                                w.conditions.contains("orage") -> "⛈"
+                                w.conditions.contains("nuag") -> "☁️"
+                                w.conditions.contains("vent") -> "💨"
+                                else -> "☀️"
+                            }
+                            val windStr = w.wind_mph?.let { " · Vent ${it.toInt()} mph" } ?: ""
+                            val rainStr = w.rain_mm?.takeIf { it > 0 }?.let { " · Pluie ${it}mm" } ?: ""
+                            val humStr = w.humidity_pct?.let { " · Hum. ${it.toInt()}%" } ?: ""
+                            val tempStr = w.temp_c?.let { "${it.toInt()}°C" } ?: ""
+                            Text("$icon $tempStr ${w.conditions}$windStr$rainStr$humStr",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline)
+                        }
                     }
-                    val windStr = w.wind_mph?.let { " · Vent ${it.toInt()} mph" } ?: ""
-                    val tempStr = w.temp_c?.let { "${it.toInt()}°C" } ?: ""
-                    Text(
-                        "$icon $tempStr ${w.conditions}$windStr",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-            }
 
-            val odds = m.odds
-            if (odds != null) {
-                Text(
-                    "Marché (match) : favori dom. ${fmt(odds.market_match_prob_home)} · " +
-                        "cotes ${odds.home_odds}/${odds.away_odds}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (odds.books.isNotEmpty()) {
-                    Text(
-                        "Bookmakers : ${odds.books.joinToString(", ")}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
+                    // Cotes marché
+                    m.odds?.let { odds ->
+                        HorizontalDivider(thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(vertical = 4.dp))
+                        Text("Marché (match) : favori dom. ${fmt(odds.market_match_prob_home)} · cotes ${odds.home_odds}/${odds.away_odds}",
+                            style = MaterialTheme.typography.bodySmall)
+                        if (odds.books.isNotEmpty())
+                            Text("Bookmakers : ${odds.books.joinToString(", ")}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline)
+                    }
                 }
             }
         }
