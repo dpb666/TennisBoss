@@ -317,6 +317,34 @@ def find_event(index: Dict[frozenset, Dict[str, Any]],
     return index.get(frozenset((l1, l2)))
 
 
+def build_time_index(events: List[Dict[str, Any]]) -> Dict[frozenset, str]:
+    """Index { {nom_famille_1, nom_famille_2} -> "HH:MM" } depuis les events odds-api.
+
+    Utilisé pour enrichir les fixtures ESPN quand l'heure est 00:00 (inconnue).
+    Les heures sont converties de UTC en heure locale de Toronto (EDT = UTC-4).
+    """
+    import datetime as _dt
+    from .namematch import split_name
+
+    idx: Dict[frozenset, str] = {}
+    for e in events:
+        raw = e.get("date", "")
+        if not raw or raw.endswith("T00:00:00Z"):
+            continue  # heure inconnue, on ne peut pas enrichir
+        try:
+            dt = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            tz_toronto = _dt.timezone(_dt.timedelta(hours=-4))  # EDT
+            dt = dt.astimezone(tz_toronto)
+            t = dt.strftime("%H:%M")
+        except Exception:
+            continue
+        _, l1 = split_name(e.get("home", ""))
+        _, l2 = split_name(e.get("away", ""))
+        if l1 and l2 and l1 != l2:
+            idx[frozenset((l1, l2))] = t
+    return idx
+
+
 def fetch_match_winner(event_id: Any,
                        bookmakers: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Cotes "ML" (vainqueur de match) -> probabilités implicites SANS vig.

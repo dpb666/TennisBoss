@@ -101,7 +101,12 @@ def _parse_competition(comp: Dict, tournament: str, tour: str) -> Optional[Dict]
 
 
 def _round_from_comp(comp: Dict) -> str:
-    """Extrait le round depuis les notes ESPN."""
+    """Extrait le round depuis ESPN : champ round.displayName en priorité, puis notes."""
+    rnd = comp.get("round") or {}
+    if isinstance(rnd, dict):
+        name = rnd.get("displayName") or rnd.get("name") or ""
+        if name:
+            return name
     for note in comp.get("notes", []):
         h = note.get("headline", "")
         if h:

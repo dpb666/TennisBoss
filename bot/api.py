@@ -463,11 +463,14 @@ def api_upcoming():
     # Source 2 : ESPN (gratuite, ~800 matchs ATP+WTA)
     espn_fixtures = espn_api.fetch_upcoming(days_ahead=days)
 
-    # Source 3 : odds-api.io (fallback cotes + fixtures)
+    # Source 3 : odds-api.io (fallback cotes + fixtures + heures manquantes)
     odds_events = []
     odds_index = None
+    odds_time_index: Dict[frozenset, str] = {}
     if odds_api.is_enabled():
         odds_events = odds_api.fetch_tennis_events(upcoming_only=True)
+        # Index temps : comble les 00:00 ESPN avec les vraies heures odds-api.io
+        odds_time_index = odds_api.build_time_index(odds_events)
         if want_odds:
             odds_index = odds_api.build_event_index(odds_events)
 
@@ -500,10 +503,23 @@ def api_upcoming():
         if f["is_doubles"]:
             continue
         n1, n2 = _resolve(f["player1"]), _resolve(f["player2"])
+
+        # Enrichissement heure : si ESPN ne connaît pas l'heure (00:00),
+        # on la complète avec le timestamp odds-api.io (converti en EDT).
+        match_time = f["time"]
+        if (not match_time or match_time == "00:00") and odds_time_index:
+            from .namematch import split_name
+            _, l1 = split_name(f["player1"])
+            _, l2 = split_name(f["player2"])
+            if l1 and l2:
+                enriched_time = odds_time_index.get(frozenset((l1, l2)))
+                if enriched_time:
+                    match_time = enriched_time
+
         item = {
             "player1_raw": f["player1"], "player2_raw": f["player2"],
             "tournament": f["tournament"], "round": f["round"],
-            "date": f["date"], "time": f["time"], "live": f["live"],
+            "date": f["date"], "time": match_time, "live": f["live"],
             "tour": f["tour"], "predictable": bool(n1 and n2),
             "source": f.get("source", "api-tennis"),
         }
