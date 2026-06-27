@@ -552,10 +552,12 @@ def api_value():
     """Compare le modèle au marché et calcule l'EV (espérance de gain) réelle.
 
     EV(parier J) = proba_match_modèle(J) × cote(J) − 1.  EV > 0 = value (+).
-    min_confidence (float, défaut 0.4) : ignore les picks sous ce seuil de confiance.
+    min_confidence (float, défaut 0.55) : ignore les picks sous ce seuil de confiance.
+    min_ev (float, défaut 5.0) : EV minimum (%) pour qu'un pick soit tagué 'value'.
     """
     limit = min(int(request.args.get("limit", 10)), 30)
-    min_conf = float(request.args.get("min_confidence", 0.4))
+    min_conf = float(request.args.get("min_confidence", 0.55))
+    min_ev = float(request.args.get("min_ev", 5.0))
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
 
@@ -629,12 +631,16 @@ def api_value():
             except Exception:  # noqa: BLE001
                 pass
 
+        # EV en % pour filtrage et affichage.
+        best_ev_pct = round(best_ev * 100, 1)
+        is_value = best_ev_pct >= min_ev  # EV minimum pour qualifier de "value"
+
         # Paper-trading : capture le value pick blendé (ROI mesuré au settlement).
         if best_ev > 0:
             pick_odds = ho if best_side == n1 else ao
             try:
                 db.log_value_pick(e.get("date", ""), n1, n2, best_side,
-                                  pick_odds, round(best_ev * 100, 1))
+                                  pick_odds, best_ev_pct)
             except Exception:  # noqa: BLE001
                 pass
             # CLV : sème le pick (1re cote = décision) puis rafraîchit la closing
@@ -664,12 +670,12 @@ def api_value():
                      "home_book": mw.get("home_book"), "away_book": mw.get("away_book")},
             "ev1": round(ev1 * 100, 1),
             "ev2": round(ev2 * 100, 1),
-            "best_side": best_side if best_ev > 0 else None,
-            "best_ev": round(best_ev * 100, 1),
+            "best_side": best_side if is_value else None,
+            "best_ev": best_ev_pct,
             # Où parier le meilleur prix pour le côté conseillé (line shopping).
             "best_book": (mw.get("home_book") if best_side == n1
-                          else mw.get("away_book")) if best_ev > 0 else None,
-            "value": best_ev > 0,
+                          else mw.get("away_book")) if is_value else None,
+            "value": is_value,
         })
 
     # Les meilleures values d'abord.
@@ -704,8 +710,10 @@ def api_value():
         "calibration_k": round(_CALIB_K, 3),
         "market_blend_w": round(_MKT_W, 2),
         "min_confidence": round(min_conf, 2),
+        "min_ev": round(min_ev, 1),
         "note": ("proba match calibrée (best-of-3 + temperature), blendée au "
-                 "marché (poids modèle w) ; EV = proba_blend×cote − 1"),
+                 "marché (poids modèle w) ; EV = proba_blend×cote − 1 ; "
+                 f"value = EV ≥ {min_ev}%"),
     })
 
 

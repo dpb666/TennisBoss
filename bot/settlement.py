@@ -22,6 +22,23 @@ def run_settlement(mem: Dict[str, Any],
 
     Sources : API-Tennis (primaire) + odds-api.io /events?status=settled (secondaire).
     """
+    # Refresh auto des closing lines pour tous les picks CLV non réglés.
+    # S'exécute avant le settlement pour capturer la dernière cote (vraie clôture).
+    for open_pick in db.list_clv_unsettled():
+        try:
+            eid = str(open_pick["event_key"])
+            mw = odds_api.fetch_match_winner(eid)
+            if mw:
+                clv.refresh_closing(
+                    eid,
+                    open_pick["pick_side"],
+                    open_pick["player1"],
+                    mw["home_odds"],
+                    mw["away_odds"],
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
     results = live_api.fetch_results({"live_api_provider": "api-tennis"}, days_back)
 
     # Compléter avec les résultats odds-api.io (disponibles 24h après la fin du match)
