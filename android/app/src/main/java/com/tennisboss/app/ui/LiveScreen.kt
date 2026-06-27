@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tennisboss.app.data.InplayBestPick
 import com.tennisboss.app.data.LiveMatch
 import com.tennisboss.app.data.LivePrediction
 import com.tennisboss.app.ui.components.SkeletonList
@@ -104,6 +105,9 @@ fun LiveScreen(vm: LiveViewModel = viewModel()) {
                     }
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        s.bestPick?.let { pick ->
+                            item(key = "best_pick") { BestPickBanner(pick) }
+                        }
                         items(s.data.matches, key = { it.event_id }) { match ->
                             LiveMatchCard(match)
                         }
@@ -399,5 +403,102 @@ private fun playerName(raw: String): String {
         "$first $last".trim()
     } else {
         raw.split(" ").lastOrNull() ?: raw
+    }
+}
+
+@Composable
+private fun BestPickBanner(pick: InplayBestPick) {
+    val pred = pick.prediction ?: return
+    val fav = pred.favorite ?: return
+    val favProb = if (fav == (pick.player1_resolved ?: pick.player1)) pred.prob1 else pred.prob2
+    val favName = playerName(fav)
+    val edgeText = pick.edge_pct?.let { "+${it.toInt()}% edge" }
+    val oddsText = pick.fav_odds?.let { "@${String.format("%.2f", it)}" } ?: ""
+    val setScore = if (pick.sets_home > 0 || pick.sets_away > 0)
+        "${pick.sets_home}-${pick.sets_away}" else ""
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2E1A)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Meilleur pick live",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = GreenEV,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (edgeText != null) {
+                        Text(
+                            edgeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = GreenEV,
+                        )
+                    }
+                    if (pick.minute > 0) {
+                        Text(
+                            "${pick.minute}'",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Text(
+                pick.league.ifBlank { "—" }.take(36),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        favName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GreenEV,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "favori ${String.format("%.1f", favProb)}%  $oddsText",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (setScore.isNotBlank()) {
+                    Text(
+                        setScore,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = ScoreGold,
+                    )
+                }
+            }
+
+            val confPct = (pred.confidence * 100).toInt()
+            Text(
+                "Confiance ${confPct}% · ${pred.confidence_label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

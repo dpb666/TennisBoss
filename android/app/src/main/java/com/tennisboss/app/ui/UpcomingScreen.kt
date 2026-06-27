@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.Prediction
+import com.tennisboss.app.data.WeatherAnalysis
 import com.tennisboss.app.ui.components.BetBuilderView
 import com.tennisboss.app.ui.components.ConfidenceBadge
 import java.util.Locale
@@ -266,6 +267,14 @@ private fun MatchCard(m: UpcomingMatch) {
                         }
                     }
 
+                    // Analyse conditions : style joueurs + météo + foule + honeypot
+                    m.weather_analysis?.let { wa ->
+                        HorizontalDivider(thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(vertical = 4.dp))
+                        WeatherAnalysisCard(wa, m.player1_raw, m.player2_raw)
+                    }
+
                     // Cotes marché
                     m.odds?.let { odds ->
                         HorizontalDivider(thickness = 0.5.dp,
@@ -278,6 +287,31 @@ private fun MatchCard(m: UpcomingMatch) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline)
                     }
+
+                    // Contexte pari : modèle vs marché
+                    m.bet_context?.let { ctx ->
+                        HorizontalDivider(thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(vertical = 4.dp))
+                        val tagColor = when (ctx.tag) {
+                            "good_bet"       -> Color(0xFF00C853)
+                            "value_underdog" -> Color(0xFFFFD600)
+                            "bad_bet"        -> Color(0xFFFF5252)
+                            else             -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Text(ctx.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = tagColor)
+                        val edgeSign = if (ctx.edge_pct >= 0) "+" else ""
+                        Text(
+                            "Edge ${edgeSign}${String.format("%.1f", ctx.edge_pct)}% · " +
+                            "Modèle: ${ctx.model_fav?.substringAfterLast(" ") ?: "?"} ${fmt(ctx.model_fav_prob)} · " +
+                            "Marché: ${ctx.market_fav?.substringAfterLast(" ") ?: "?"} ${fmt(ctx.market_fav_prob)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -285,6 +319,79 @@ private fun MatchCard(m: UpcomingMatch) {
 }
 
 private fun fmt(v: Double): String = String.format(Locale.US, "%.1f%%", v)
+
+@Composable
+fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
+    val p1Short = p1Name.substringAfterLast(" ")
+    val p2Short = p2Name.substringAfterLast(" ")
+
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        // Styles joueurs
+        val pr1 = wa.player1
+        val pr2 = wa.player2
+        if (pr1 != null || pr2 != null) {
+            val s1 = pr1?.style_label ?: "?"
+            val s2 = pr2?.style_label ?: "?"
+            val icon1 = if (s1.contains("Serveur")) "🎯" else if (s1.contains("Baseliner")) "🔄" else "⚡"
+            val icon2 = if (s2.contains("Serveur")) "🎯" else if (s2.contains("Baseliner")) "🔄" else "⚡"
+            Text("$icon1 $p1Short: $s1  ·  $icon2 $p2Short: $s2",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        // Impact météo
+        val wi = wa.weather_impact
+        if (wi != null && wi.label.isNotBlank() && wi.beneficiary != "neutre") {
+            val benefName = when (wi.beneficiary) {
+                "p1" -> p1Short; "p2" -> p2Short; else -> ""
+            }
+            val wiColor = when (wi.impact_level) {
+                "fort"   -> Color(0xFFFFD600)
+                "modéré" -> Color(0xFF80CBC4)
+                else     -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text("🌤 Météo → $benefName avantagé · ${wi.label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = wiColor)
+        }
+
+        // Avantage surface
+        val sa = wa.surface_advantage
+        if (sa != null && sa.label.isNotBlank()) {
+            Text("🏟 ${sa.label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF80CBC4))
+        }
+
+        // Foule
+        val crowd = wa.crowd
+        if (crowd != null && crowd.beneficiary != "neutre" && crowd.label.isNotBlank()) {
+            Text("👥 ${crowd.label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        // Honeypot
+        val hp = wa.honeypot
+        if (hp != null && hp.flag) {
+            val hpBenef = when (hp.beneficiary) {
+                "p1" -> p1Short; "p2" -> p2Short; else -> hp.player.substringAfterLast(" ")
+            }
+            Surface(
+                color = Color(0xFFFFD600).copy(alpha = 0.12f),
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    "⚠️ HONEYPOT +${String.format("%.1f", hp.edge_pct)}% → $hpBenef (conditions non pricées)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFFFD600),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun SurfaceBadge(tour: String) {

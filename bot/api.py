@@ -42,12 +42,15 @@ _MEM: Dict[str, Any] = {}
 _INDEX: Dict[str, Any] = {}
 # Facteur de calibration appris (temperature scaling). 1.0 = inchangé.
 _CALIB_K: float = 1.0
+# Platt scaling : p_calibré = sigmoid(a · logit(p) + b). Par défaut identité.
+_PLATT_A: float = 1.0
+_PLATT_B: float = 0.0
 # Poids modèle dans le blend modèle/marché (0 = marché pur, 1 = modèle pur).
 _MKT_W: float = calibrate.DEFAULT_MARKET_BLEND_W
 
 
 def _load_state() -> None:
-    global _MEM, _INDEX, _CALIB_K, _MKT_W
+    global _MEM, _INDEX, _CALIB_K, _PLATT_A, _PLATT_B, _MKT_W
     bootstrap()
     db.init()
     _MEM = memory.load()
@@ -61,12 +64,14 @@ def _load_state() -> None:
         except Exception as exc:  # noqa: BLE001
             log(f"Backfill surface ignoré ({exc}).", "WARN")
 
-    # ELO global + ELO par surface avec K dynamique + dominance.
+    # ELO global + ELO par surface + ELO de forme récente (180j).
     rows = db.all_matches_chrono()
-    _MEM["elo"], _ = elo.build_dynamic(rows)
+    _MEM["elo"], _ = elo.build_dynamic(rows, time_decay_days=365)
     _MEM["elo_surface"] = {}
     for surf in ("hard", "clay", "grass"):
-        _MEM["elo_surface"][surf], _ = elo.build_dynamic(rows, surface_key=surf)
+        _MEM["elo_surface"][surf], _ = elo.build_dynamic(rows, surface_key=surf,
+                                                          time_decay_days=365)
+    _MEM["elo_recent"], _ = elo.build_recent(rows, days=180)
     # Rejeu des matchs réglés sur l'ELO global (apprentissage continu, survit aux reboots).
     known = _MEM["players"]
     replayed = 0
@@ -95,10 +100,20 @@ def _load_state() -> None:
         _MEM["elo_blend"] = float(db.get_meta("elo_blend") or predictor.ELO_BLEND)
     except (TypeError, ValueError):
         _MEM["elo_blend"] = predictor.ELO_BLEND
+    try:
+        _PLATT_A = float(db.get_meta("platt_a") or 1.0)
+    except (TypeError, ValueError):
+        _PLATT_A = 1.0
+    try:
+        _PLATT_B = float(db.get_meta("platt_b") or 0.0)
+    except (TypeError, ValueError):
+        _PLATT_B = 0.0
 
 
 def _calib(p_match: float) -> float:
-    """Applique la calibration apprise à une proba de match (0..1)."""
+    """Platt scaling : sigmoid(a · logit(p) + b), puis temperature k si Platt non fitté."""
+    if _PLATT_A != 1.0 or _PLATT_B != 0.0:
+        return calibrate.calibrated_prob_platt(p_match, _PLATT_A, _PLATT_B)
     return calibrate.calibrated_prob(p_match, _CALIB_K)
 
 
@@ -134,6 +149,21 @@ def _resolve(name: str) -> Optional[str]:
     if name in _MEM["players"]:
         return name
     return namematch.resolve(name, _INDEX)
+
+
+def _clean_tournament(raw) -> str:
+    """Extrait le nom lisible d'un tournoi, même si stocké comme dict {'name':..,'slug':..}."""
+    if isinstance(raw, dict):
+        return raw.get("name") or raw.get("slug") or ""
+    s = str(raw or "")
+    if s.startswith("{") and "'name'" in s:
+        import ast
+        try:
+            d = ast.literal_eval(s)
+            return d.get("name") or d.get("slug") or s
+        except Exception:
+            pass
+    return s
 
 
 def _surface_for(tournament: str, date: str = "") -> Optional[str]:
@@ -400,12 +430,11 @@ def _set_to_match_prob(p_set: float) -> float:
 def _bet_builder(p1_set: float, n1: str, n2: str) -> Dict[str, Any]:
     """Dérive plusieurs marchés à partir de la proba du 1er set (best-of-3).
 
-    Honnête : on ne renvoie que ce qui découle du modèle de set (vainqueur match,
-    2e set, match en 3 sets, score exact). Points/aces ne sont PAS dérivables.
+    La proba match est calibrée (Platt ou temperature scaling).
     """
     p = max(0.0, min(1.0, p1_set))
     q = 1.0 - p
-    pm1 = _set_to_match_prob(p)
+    pm1 = _calib(_set_to_match_prob(p))   # calibration Platt appliquée ici
     return {
         "match": {"prob1": round(pm1 * 100, 1), "prob2": round((1 - pm1) * 100, 1)},
         "set2": {"prob1": round(p * 100, 1), "prob2": round(q * 100, 1)},
@@ -425,19 +454,41 @@ def api_predict():
     if not p1 or not p2:
         return jsonify({"error": "paramètres requis: p1, p2"}), 400
     n1, n2 = _resolve(p1), _resolve(p2)
-    if not n1 or not n2:
-        return jsonify({"error": "joueur inconnu",
-                        "unresolved": p1 if not n1 else p2}), 404
+
+    # Fallback : si un joueur est inconnu, on utilise son nom brut avec profil neutre
+    unknown = []
+    if not n1:
+        n1 = p1.strip()
+        unknown.append(n1)
+    if not n2:
+        n2 = p2.strip()
+        unknown.append(n2)
+
     f1 = features.feature_vector(features.get_profile(_MEM, n1))
     f2 = features.feature_vector(features.get_profile(_MEM, n2))
     r = predictor.predict(_MEM, n1, f1, n2, f2)
+
+    # Si les deux joueurs sont inconnus → 50/50 forcé, confiance nulle
+    if len(unknown) == 2:
+        r["prob1"] = 50.0
+        r["prob2"] = 50.0
+        r["favorite"] = None
+        r["confidence"] = 0.0
+        r["confidence_label"] = "non profilé"
+        r["verdict"] = "50/50 — joueurs non profilés"
+    elif unknown:
+        # Un seul inconnu : on pénalise la confiance
+        r["confidence"] = min(r.get("confidence", 0.3), 0.3)
+        r["confidence_label"] = "très faible (joueur non profilé)"
+
     try:
         db.log_prediction(n1, n2, r["prob1"] / 100.0, r["favorite"], source="api")
     except Exception:  # noqa: BLE001
         pass
-    return jsonify({
-        "player1": _player_payload(n1),
-        "player2": _player_payload(n2),
+
+    payload = {
+        "player1": _player_payload(n1) if n1 not in unknown else {"name": n1, "tour": "", "matches": 0, "confident": False},
+        "player2": _player_payload(n2) if n2 not in unknown else {"name": n2, "tour": "", "matches": 0, "confident": False},
         "first_set": {
             "prob1": r["prob1"], "prob2": r["prob2"],
             "favorite": r["favorite"], "verdict": r["verdict"],
@@ -445,10 +496,31 @@ def api_predict():
             "confidence": r["confidence"],
             "confidence_label": r["confidence_label"],
         },
-        "explain": _explain(n1, f1, n2, f2),
         "h2h": _h2h_payload(n1, n2, limit=5),
         "bet_builder": _bet_builder(r["prob1"] / 100.0, n1, n2),
-    })
+    }
+    if not unknown:
+        payload["explain"] = _explain(n1, f1, n2, f2)
+    if unknown:
+        payload["unknown_players"] = unknown
+
+    # Analyse météo + crowd pour la prédiction directe
+    tournament = request.args.get("tournament", "")
+    surface_req = request.args.get("surface", r.get("surface", "hard"))
+    try:
+        from . import weather_profile as wp
+        w_data = None
+        if tournament:
+            w_data = weather.fetch_weather(tournament, surface_req or "")
+        p1_prof = features.get_profile(_MEM, n1)
+        p2_prof = features.get_profile(_MEM, n2)
+        wa = wp.analyze(_MEM, n1, p1_prof, n2, p2_prof,
+                        w_data, tournament, surface_req or "hard")
+        payload["weather_analysis"] = wa
+    except Exception:  # noqa: BLE001
+        pass
+
+    return jsonify(payload)
 
 
 @app.get("/api/upcoming")
@@ -504,10 +576,11 @@ def api_upcoming():
             continue
         n1, n2 = _resolve(f["player1"]), _resolve(f["player2"])
 
-        # Enrichissement heure : si ESPN ne connaît pas l'heure (00:00),
-        # on la complète avec le timestamp odds-api.io (converti en EDT).
+        # Enrichissement heure : si ESPN ne connaît pas l'heure (00:00 ou 06:00 =
+        # placeholder API-Tennis pour « horaire non publié »), on complète via odds-api.io.
         match_time = f["time"]
-        if (not match_time or match_time == "00:00") and odds_time_index:
+        _placeholder = not match_time or match_time in ("00:00", "06:00")
+        if _placeholder and odds_time_index:
             from .namematch import split_name
             _, l1 = split_name(f["player1"])
             _, l2 = split_name(f["player2"])
@@ -515,6 +588,8 @@ def api_upcoming():
                 enriched_time = odds_time_index.get(frozenset((l1, l2)))
                 if enriched_time:
                     match_time = enriched_time
+        if _placeholder and (not match_time or match_time in ("00:00", "06:00")):
+            match_time = "TBD"
 
         item = {
             "player1_raw": f["player1"], "player2_raw": f["player2"],
@@ -549,6 +624,43 @@ def api_upcoming():
             if odds_index is not None:
                 item["odds"] = _odds_for(odds_index, f["player1"], f["player2"])
 
+            # ── Contexte pari : favori modèle vs marché ───────────────────────
+            odds_item = item.get("odds")
+            if odds_item and odds_item.get("home_odds") and odds_item.get("away_odds"):
+                oh, oa = float(odds_item["home_odds"]), float(odds_item["away_odds"])
+                mkt_fav = n1 if oh < oa else n2
+                mkt_fav_prob = round((1.0 / oh if mkt_fav == n1 else 1.0 / oa) * 100, 1)
+                model_fav = r.get("favorite")
+                model_fav_prob = r["prob1"] if model_fav == n1 else r["prob2"]
+                agree = (mkt_fav == model_fav)
+
+                if agree:
+                    edge_pct = round(model_fav_prob / 100.0 - (1.0 / (oh if mkt_fav == n1 else oa)), 4)
+                    if edge_pct >= 0.04:
+                        bet_tag = "good_bet"
+                        bet_label = "✅ Good bet — modèle + marché accordés, edge positif"
+                    elif edge_pct >= 0:
+                        bet_tag = "neutral"
+                        bet_label = "📊 Favori bookmaker — peu d'edge"
+                    else:
+                        bet_tag = "bad_bet"
+                        bet_label = "⚠️ Bad bet — marché surpaye le favori"
+                else:
+                    edge_pct = round(model_fav_prob / 100.0 - (1.0 / (oh if model_fav == n1 else oa)), 4)
+                    bet_tag = "value_underdog"
+                    bet_label = f"💎 Value underdog — modèle: {model_fav}, marché: {mkt_fav}"
+
+                item["bet_context"] = {
+                    "model_fav": model_fav,
+                    "model_fav_prob": model_fav_prob,
+                    "market_fav": mkt_fav,
+                    "market_fav_prob": mkt_fav_prob,
+                    "agree": agree,
+                    "edge_pct": round(edge_pct * 100, 1),
+                    "tag": bet_tag,
+                    "label": bet_label,
+                }
+
             # Météo : uniquement pour les tournois outdoor connus
             tourn_key = f["tournament"].lower()
             if tourn_key not in _weather_cache:
@@ -557,6 +669,18 @@ def api_upcoming():
             w = _weather_cache[tourn_key]
             if w:
                 item["weather"] = w
+
+            # ── Analyse météo + crowd + honeypot ─────────────────────────────
+            if n1 and n2:
+                try:
+                    from . import weather_profile as wp
+                    p1_prof = features.get_profile(_MEM, n1)
+                    p2_prof = features.get_profile(_MEM, n2)
+                    wa = wp.analyze(_MEM, n1, p1_prof, n2, p2_prof,
+                                    w, f["tournament"], surface or "hard")
+                    item["weather_analysis"] = wa
+                except Exception:
+                    pass
         out.append(item)
         if len(out) >= limit:
             break
@@ -654,6 +778,111 @@ def api_live():
     # Matchs avec cotes live en premier, puis par durée décroissante
     out.sort(key=lambda m: (m["live_odds"] is None, -m["minute"]))
     return jsonify({"count": len(out), "matches": out})
+
+
+@app.get("/api/inplay/best")
+def api_inplay_best():
+    """Meilleur pick parmi les matchs live selon notre modèle + base de données.
+
+    Score = confiance × max(edge_vs_marché, 0).
+    Sans cotes live : score = confiance × 0.5 (demi-poids).
+    Retourne les 3 meilleurs candidats triés par score décroissant.
+    """
+    if not odds_api.is_enabled():
+        return jsonify({"error": "ODDS_API_KEY absente"}), 503
+
+    live_events = odds_api.fetch_live_events()
+    candidates = []
+
+    for e in live_events:
+        home_raw = e.get("home", "")
+        away_raw = e.get("away", "")
+        n1 = _resolve(home_raw) or home_raw.strip()
+        n2 = _resolve(away_raw) or away_raw.strip()
+        if not n1 or not n2:
+            continue
+
+        try:
+            f1 = features.feature_vector(features.get_profile(_MEM, n1))
+            f2 = features.feature_vector(features.get_profile(_MEM, n2))
+            r = predictor.predict(_MEM, n1, f1, n2, f2)
+        except Exception:
+            continue
+
+        conf = r.get("confidence", 0.0)
+        if conf < 0.20:
+            continue
+
+        pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+        pm2 = 1.0 - pm1
+
+        # Cotes live (1 req par match, on limite à 20 matchs)
+        live_mw = None
+        if len(candidates) < 20:
+            try:
+                live_mw = odds_api.fetch_match_winner(e["id"])
+            except Exception:
+                pass
+
+        edge: Optional[float] = None
+        fav_odds: Optional[float] = None
+        if live_mw and live_mw.get("home_odds") and live_mw.get("away_odds"):
+            ho, ao = live_mw["home_odds"], live_mw["away_odds"]
+            if pm1 >= pm2:
+                edge = pm1 - live_mw["home_prob"]
+                fav_odds = ho
+            else:
+                edge = pm2 - live_mw["away_prob"]
+                fav_odds = ao
+            score = conf * max(edge, 0.0)
+        else:
+            score = conf * 0.5
+
+        scores = e.get("scores") or {}
+        periods = scores.get("periods") or {}
+        set_scores = []
+        for i in range(1, 8):
+            p = periods.get(f"p{i}")
+            if p and (p.get("home") is not None or p.get("away") is not None):
+                set_scores.append({"h": int(p.get("home") or 0), "a": int(p.get("away") or 0)})
+
+        league = (e.get("league") or {}).get("name", "")
+        clock = e.get("clock") or {}
+
+        candidates.append({
+            "event_id": e["id"],
+            "player1": home_raw, "player2": away_raw,
+            "player1_resolved": n1, "player2_resolved": n2,
+            "league": league,
+            "sets_home": int(scores.get("home") or 0),
+            "sets_away": int(scores.get("away") or 0),
+            "set_scores": set_scores,
+            "minute": int(clock.get("minute") or 0),
+            "status_detail": clock.get("statusDetail", ""),
+            "prediction": {
+                "player1": n1, "player2": n2,
+                "prob1": round(pm1 * 100, 1),
+                "prob2": round(pm2 * 100, 1),
+                "favorite": r.get("favorite"),
+                "confidence": round(conf, 3),
+                "confidence_label": r.get("confidence_label", ""),
+            },
+            "live_odds": {
+                "home": live_mw["home_odds"] if live_mw else None,
+                "away": live_mw["away_odds"] if live_mw else None,
+                "books": live_mw["books"] if live_mw else [],
+            } if live_mw else None,
+            "edge_pct": round(edge * 100, 1) if edge is not None else None,
+            "fav_odds": fav_odds,
+            "score": round(score, 4),
+        })
+
+    candidates.sort(key=lambda c: -c["score"])
+    return jsonify({
+        "count": len(candidates),
+        "best": candidates[:3],
+        "note": "Score = confiance × edge_vs_marché. Haut score = meilleur pick selon la DB.",
+    })
 
 
 @app.get("/api/value")
@@ -847,24 +1076,102 @@ def _blend_samples() -> list:
 
 
 def _refit_calibration() -> Dict[str, Any]:
-    """Réajuste k (température), β (poids ELO) et w (blend marché) sur les réglés."""
-    global _CALIB_K, _MKT_W
-    fit = calibrate.fit_temperature(db.list_settled(limit=100000))
+    """Réajuste Platt (a,b), température k, β ELO et w marché sur les matchs réglés."""
+    global _CALIB_K, _PLATT_A, _PLATT_B, _MKT_W
+
+    settled = db.list_settled(limit=100000)
+
+    # 1. Platt scaling (priorité sur temperature)
+    pfit = calibrate.fit_platt(settled)
+    if pfit.get("fitted"):
+        _PLATT_A = float(pfit["a"])
+        _PLATT_B = float(pfit["b"])
+        db.set_meta("platt_a", _PLATT_A)
+        db.set_meta("platt_b", _PLATT_B)
+        log(f"Platt: a={_PLATT_A:.4f} b={_PLATT_B:.4f} "
+            f"gain={pfit['gain_pct']:.2f}% ({pfit['interpretation']})")
+
+    # 2. Temperature (fallback si Platt non fitté, et pour calibration_k affiché)
+    fit = calibrate.fit_temperature(settled)
     if fit.get("fitted"):
         _CALIB_K = float(fit["k"])
         db.set_meta("match_calib_k", _CALIB_K)
 
+    # 3. ELO blend
     bfit = calibrate.tune_blend(_blend_samples())
     if bfit.get("fitted") and bfit.get("elo_blend") is not None:
         _MEM["elo_blend"] = float(bfit["elo_blend"])
         db.set_meta("elo_blend", _MEM["elo_blend"])
 
+    # 4. Market blend
     mfit = calibrate.fit_market_blend(settlement.market_blend_samples(_CALIB_K))
     if mfit.get("fitted") and mfit.get("market_blend_w") is not None:
         _MKT_W = float(mfit["market_blend_w"])
         db.set_meta("market_blend_w", _MKT_W)
 
-    return {"temperature": fit, "blend": bfit, "market_blend": mfit}
+    return {"platt": pfit, "temperature": fit, "blend": bfit, "market_blend": mfit}
+
+
+@app.get("/api/backfill")
+def api_backfill():
+    """Rétroactivement calcule les prédictions manquantes sur settled_matches.
+
+    Pour chaque match sans pred_favorite, on tente une prédiction (avec fallback
+    profil neutre). Seuil de confiance mini = ?min_conf (défaut 0.20).
+    """
+    min_conf = float(request.args.get("min_conf", 0.20))
+    limit = int(request.args.get("limit", 5000))
+    updated = 0
+    skipped_conf = 0
+    skipped_doubles = 0
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id, player1, player2, winner FROM settled_matches "
+            "WHERE pred_favorite IS NULL LIMIT ?", (limit,)
+        ).fetchall()
+
+    for r in rows:
+        p1, p2, winner = r["player1"], r["player2"], r["winner"]
+        if "/" in str(p1) or "/" in str(p2):
+            skipped_doubles += 1
+            continue
+        n1 = _resolve(p1) or p1
+        n2 = _resolve(p2) or p2
+        try:
+            f1 = features.feature_vector(features.get_profile(_MEM, n1))
+            f2 = features.feature_vector(features.get_profile(_MEM, n2))
+            pr = predictor.predict(_MEM, n1, f1, n2, f2)
+            conf = pr.get("confidence", 0.0)
+            if conf < min_conf:
+                skipped_conf += 1
+                continue
+            pred_fav = pr["favorite"]
+            pred_prob1 = round(predictor.set_to_match_prob(pr["prob1"] / 100.0) * 100, 1)
+            correct = None
+            if pred_fav:
+                correct = 1 if pred_fav == winner else 0
+            with db.connect() as conn:
+                conn.execute(
+                    "UPDATE settled_matches SET pred_favorite=?, pred_prob1=?, correct=? "
+                    "WHERE id=?",
+                    (pred_fav, pred_prob1, correct, r["id"])
+                )
+            updated += 1
+        except Exception:
+            pass
+
+    metrics = settlement.calibration_metrics()
+    if metrics["n"] > 0:
+        db.save_calibration(metrics)
+    return jsonify({
+        "rows_checked": len(rows),
+        "updated": updated,
+        "skipped_doubles": skipped_doubles,
+        "skipped_low_conf": skipped_conf,
+        "accuracy_after": metrics.get("accuracy"),
+        "n_after": metrics.get("n"),
+    })
 
 
 @app.get("/api/settlement/run")
@@ -893,9 +1200,54 @@ def api_calibration():
         "pred_favorite": r["pred_favorite"], "correct": r["correct"],
     } for r in db.list_settled(limit=25)]
     return jsonify({"metrics": metrics, "calibration_k": round(_CALIB_K, 3),
+                    "platt_a": round(_PLATT_A, 4), "platt_b": round(_PLATT_B, 4),
                     "market_blend_w": round(_MKT_W, 2),
                     "elo_blend": round(float(_MEM.get("elo_blend", predictor.ELO_BLEND)), 2),
                     "recent": recent})
+
+
+@app.get("/api/history")
+def api_history():
+    """Historique des matchs réglés par date + liste des dates disponibles.
+
+    ?date=YYYY-MM-DD  -> matchs de ce jour
+    ?dates=1          -> liste des dates avec matchs (calendrier)
+    """
+    if request.args.get("dates"):
+        dates = db.settled_available_dates(limit=90)
+        return jsonify({"dates": dates})
+
+    date_str = request.args.get("date", "")
+    if not date_str:
+        import datetime as _dt
+        date_str = _dt.date.today().isoformat()
+
+    rows = db.list_settled_by_date(date_str, limit=100)
+    matches = []
+    for r in rows:
+        is_doubles = "/" in str(r["player1"]) or "/" in str(r["player2"])
+        matches.append({
+            "date": _fmt_date(r["date"]),
+            "tour": r["tour"],
+            "tournament": _clean_tournament(r["tournament"]),
+            "player1": r["player1"],
+            "player2": r["player2"],
+            "winner": r["winner"],
+            "score": r["final_score"],
+            "pred_favorite": r["pred_favorite"],
+            "correct": r["correct"],
+            "is_doubles": is_doubles,
+        })
+
+    judged = [m for m in matches if m["correct"] is not None]
+    accuracy = round(sum(m["correct"] for m in judged) / len(judged), 3) if judged else None
+    return jsonify({
+        "date": date_str,
+        "count": len(matches),
+        "n_predicted": len(judged),
+        "accuracy_day": accuracy,
+        "matches": matches,
+    })
 
 
 @app.get("/api/clv")
@@ -931,19 +1283,58 @@ def api_learn_run():
 
 @app.post("/api/ingest/sackmann")
 def api_ingest_sackmann():
-    """Ingest Sackmann tennis data (GitHub) : ATP & WTA 2022-2026."""
-    start_year = int(request.args.get("start_year", 2022))
+    """Ingest Sackmann tennis data (GitHub) : ATP & WTA 2022-2026 + Challengers/ITF."""
+    start_year = int(request.args.get("start_year", 2024))
     end_year = int(request.args.get("end_year", 2026))
+    include_challengers = request.args.get("challengers", "true").lower() != "false"
     try:
-        counts = sackmann_feeder.ingest_year_range(start_year, end_year)
+        counts = sackmann_feeder.ingest_year_range(start_year, end_year,
+                                                    include_challengers=include_challengers)
+        # Recharger les joueurs en mémoire serveur
+        global _MEM, _INDEX
+        _MEM = memory.load()
+        counts_map = {n: p.get("n", 1) for n, p in _MEM["players"].items()}
+        _INDEX = namematch.build_index(list(_MEM["players"].keys()), counts_map)
         return jsonify({
             "status": "ok",
             "ingest": counts,
-            "message": f"Ingested {counts['inserted']} new matches, "
-                      f"{counts['duplicates']} duplicates, {counts['skipped']} skipped (unknown players)"
+            "players_now": len(_MEM["players"]),
+            "message": (f"+{counts['new_players']} nouveaux joueurs, "
+                        f"+{counts['inserted']} matchs archivés"),
         })
     except Exception as e:  # noqa: BLE001
         log(f"sackmann ingest error: {e}", "ERROR")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/ingest/tennisdata")
+def api_ingest_tennisdata():
+    """Ingest tennis-data.co.uk : ATP + WTA grands tournois + Masters (2022-2026).
+
+    CSV libres avec ranking, cotes B365/Pinnacle, score complet.
+    Enrichit la base joueurs avec le ranking moyen observé.
+    """
+    start_year = int(request.args.get("start_year", 2022))
+    end_year = int(request.args.get("end_year", 2026))
+    tours_param = request.args.get("tours", "atp,wta")
+    tours = [t.strip() for t in tours_param.split(",") if t.strip()]
+    years = list(range(start_year, end_year + 1))
+    try:
+        from . import tennisdata_feeder
+        counts = tennisdata_feeder.ingest(years=years, tours=tours)
+        global _MEM, _INDEX
+        _MEM = memory.load()
+        counts_map = {n: p.get("n", 1) for n, p in _MEM["players"].items()}
+        _INDEX = namematch.build_index(list(_MEM["players"].keys()), counts_map)
+        return jsonify({
+            "status": "ok",
+            "ingest": counts,
+            "players_now": len(_MEM["players"]),
+            "message": (f"+{counts.get('new_players', 0)} nouveaux joueurs, "
+                        f"+{counts.get('inserted', 0)} matchs archivés"),
+        })
+    except Exception as e:  # noqa: BLE001
+        log(f"tennisdata ingest error: {e}", "ERROR")
         return jsonify({"error": str(e)}), 500
 
 

@@ -57,13 +57,23 @@ def _learn_cycle(mem: Dict[str, Any], cfg: Dict[str, Any]) -> None:
     """Récupère les données manquantes puis lance un cycle de self-learning."""
     years = cfg["years"]
     tours = cfg.get("tours", ["atp"])
+    include_challengers = cfg.get("include_challengers", False)
+    challenger_years = cfg.get("challenger_years", years)
     to_load = [y for y in years if str(y) not in mem["datasets_loaded"]]
     if not to_load:
-        # Déjà tout chargé : on réapprend sur les éventuels nouveaux matchs.
         matches = datasource.fetch_matches(years, tours)
     else:
         log(f"Récupération internet des années : {to_load} | tours {tours}")
         matches = datasource.fetch_matches(to_load, tours)
+
+    if include_challengers:
+        chall = datasource.fetch_challengers(challenger_years, list(tours))
+        existing_ids = {m["id"] for m in matches}
+        new_chall = [m for m in chall if m["id"] not in existing_ids]
+        if new_chall:
+            log(f"Challengers/ITF : +{len(new_chall)} matchs chargés.")
+            matches = matches + new_chall
+            matches.sort(key=lambda m: (m["date"], m["id"]))
 
     learner.train(mem, matches, cfg)
 

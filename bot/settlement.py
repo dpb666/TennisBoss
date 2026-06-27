@@ -59,7 +59,7 @@ def run_settlement(mem: Dict[str, Any],
                     "winner": winner,
                     "final_score": f"{home_s} - {away_s}",
                     "sets": [], "status": "finished",
-                    "tournament": e.get("league", ""), "round": "",
+                    "tournament": (e.get("league") or {}).get("name", "") if isinstance(e.get("league"), dict) else str(e.get("league") or ""), "round": "",
                     "date": e.get("date", ""), "tour": "atp", "is_doubles": False,
                     "finished": True,
                 })
@@ -71,40 +71,45 @@ def run_settlement(mem: Dict[str, Any],
         if db.settled_exists(str(ek)):
             continue
 
-        n1, n2 = resolve(r["player1"]), resolve(r["player2"])
+        n1_raw, n2_raw = r["player1"], r["player2"]
+        n1 = resolve(n1_raw) or n1_raw
+        n2 = resolve(n2_raw) or n2_raw
         pred_fav: Optional[str] = None
         pred_prob1: Optional[float] = None
         correct: Optional[int] = None
 
-        if n1 and n2:
-            winner_name = n1 if r["winner"] == "p1" else n2
+        winner_name = n1 if r["winner"] == "p1" else n2
+        # On tente la prédiction même si un joueur est inconnu (profil neutre).
+        try:
             f1 = features.feature_vector(features.get_profile(mem, n1))
             f2 = features.feature_vector(features.get_profile(mem, n2))
             pr = predictor.predict(mem, n1, f1, n2, f2)
-            pred_fav = pr["favorite"]
-            pred_prob1 = round(predictor.set_to_match_prob(pr["prob1"] / 100.0) * 100, 1)
-            if pred_fav is not None:
-                correct = 1 if pred_fav == winner_name else 0
-        else:
-            winner_name = r["player1"] if r["winner"] == "p1" else r["player2"]
+            # N'enregistrer la prédiction que si la confiance est suffisante
+            if pr.get("confidence", 0.0) >= 0.20:
+                pred_fav = pr["favorite"]
+                pred_prob1 = round(predictor.set_to_match_prob(pr["prob1"] / 100.0) * 100, 1)
+                if pred_fav is not None:
+                    correct = 1 if pred_fav == winner_name else 0
+        except Exception:
+            pass
 
         if db.insert_settled({
             "event_key": str(ek), "date": r["date"], "tour": r["tour"],
             "tournament": r["tournament"],
-            "player1": n1 or r["player1"], "player2": n2 or r["player2"],
+            "player1": n1, "player2": n2,
             "winner": winner_name, "final_score": r["final_score"], "sets": r["sets"],
             "pred_favorite": pred_fav, "pred_prob1": pred_prob1, "correct": correct,
         }):
             added += 1
             # CLV : règle le pick (P&L flat + Kelly, CLV%) s'il existe.
             try:
-                clv.settle(r["player1"], r["player2"], winner_name)
-                if n1 and n2 and (n1 != r["player1"] or n2 != r["player2"]):
+                clv.settle(n1_raw, n2_raw, winner_name)
+                if n1 != n1_raw or n2 != n2_raw:
                     clv.settle(n1, n2, winner_name)  # noms résolus
             except Exception:  # noqa: BLE001
                 pass
             # Apprentissage continu : ELO mis à jour, pondéré par la dominance.
-            if n1 and n2 and "elo" in mem:
+            if "elo" in mem:
                 mult = elo.dominance_mult(r["sets"], r["winner"])
                 elo.update(mem["elo"], winner_name,
                            n2 if r["winner"] == "p1" else n1, mult=mult)

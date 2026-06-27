@@ -122,14 +122,20 @@ def build_from_matches(rows: Iterable[Any], base: float = BASE,
 
 
 def build_dynamic(rows: Iterable[Any], base: float = BASE,
-                  surface_key: str = None) -> tuple:
+                  surface_key: str = None,
+                  time_decay_days: int = 0) -> tuple:
     """Construit ELO avec K dynamique + dominance (mult_from_margin).
 
     Renvoie (ratings, n_played).
     `surface_key` : si fourni, ne traite que les matchs de cette surface.
+    `time_decay_days` : si > 0, pondère les matchs par exp(-decay*(age_jours/time_decay_days)).
+                        Recommandé : 365 (matchs de plus d'un an comptent ~37% moins).
     """
+    import datetime as _dt
     ratings: Dict[str, float] = {}
     n_played: Dict[str, int] = {}
+    today = _dt.date.today()
+
     for r in rows:
         surf = (r["surface"] or "").lower()
         if surface_key and surf != surface_key:
@@ -139,5 +145,30 @@ def build_dynamic(rows: Iterable[Any], base: float = BASE,
         except (KeyError, TypeError):
             m = None
         mult = mult_from_margin(m) if m is not None else 1.0
+
+        # Décroissance temporelle : les matchs récents pèsent plus
+        if time_decay_days > 0:
+            try:
+                match_date = _dt.date.fromisoformat(str(r["date"])[:10])
+                age_days = (today - match_date).days
+                if age_days > 0:
+                    import math
+                    decay = math.exp(-age_days / time_decay_days)
+                    mult *= max(decay, 0.3)  # plancher à 30% du poids nominal
+            except Exception:
+                pass
+
         update_dynamic(ratings, n_played, r["winner"], r["loser"], base, mult)
     return ratings, n_played
+
+
+def build_recent(rows: Iterable[Any], base: float = BASE,
+                 days: int = 180, surface_key: str = None) -> tuple:
+    """ELO de forme récente — uniquement les matchs des derniers `days` jours.
+
+    Retourne (ratings, n_played). Utile comme signal de forme courte.
+    """
+    import datetime as _dt
+    cutoff = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+    recent = [r for r in rows if str(r["date"] if "date" in r.keys() else "")[:10] >= cutoff]
+    return build_dynamic(recent, base, surface_key=surface_key)

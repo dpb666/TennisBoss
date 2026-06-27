@@ -57,6 +57,15 @@ interface TennisBossApi {
     @GET("api/live")
     suspend fun live(): LiveResponse
 
+    @GET("api/inplay/best")
+    suspend fun inplayBest(): InplayBestResponse
+
+    @GET("api/history")
+    suspend fun historyDates(@Query("dates") dates: Int = 1): HistoryDatesResponse
+
+    @GET("api/history")
+    suspend fun historyByDate(@Query("date") date: String): HistoryResponse
+
     @GET("api/clv")
     suspend fun clv(): ClvResponse
 

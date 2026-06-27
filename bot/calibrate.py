@@ -124,6 +124,87 @@ def _logloss(data: List[Tuple[float, float]], k: float) -> float:
     return tot / len(data)
 
 
+def calibrated_prob_platt(p: float, a: float, b: float) -> float:
+    """Platt scaling : sigmoid(a · logit(p) + b).
+
+    a=1, b=0 → identité. a<1 → sur-confiance compressée. b≠0 → biais systématique.
+    """
+    return _sigmoid(a * _logit(p) + b)
+
+
+def fit_platt(rows: List[Any], iters: int = 1000, lr: float = 0.05,
+              min_n: int = 30) -> Dict[str, Any]:
+    """Ajuste (a, b) par descente de gradient (log-loss) sur les matchs réglés.
+
+    p_calibré = sigmoid(a · logit(pred_prob1) + b)
+    pred_prob1 est en %, issue = 1 si winner == player1.
+    """
+    data: List[Tuple[float, float]] = []
+    for r in rows:
+        pp = r["pred_prob1"]
+        if pp is None:
+            continue
+        z = _logit(pp / 100.0)
+        y = 1.0 if r["winner"] == r["player1"] else 0.0
+        data.append((z, y))
+
+    if len(data) < min_n:
+        return {"a": 1.0, "b": 0.0, "n": len(data), "fitted": False,
+                "note": f"Pas assez de données (min {min_n})."}
+
+    # Adam optimizer pour convergence stable
+    a, b = 1.0, 0.0
+    m_a = m_b = v_a = v_b = 0.0
+    beta1, beta2, eps_adam = 0.9, 0.999, 1e-8
+
+    def logloss(a_: float, b_: float) -> float:
+        tot = sum(
+            -(y * math.log(_clamp(_sigmoid(a_ * z + b_), _EPS, 1 - _EPS))
+              + (1 - y) * math.log(_clamp(1 - _sigmoid(a_ * z + b_), _EPS, 1 - _EPS)))
+            for z, y in data
+        )
+        return tot / len(data)
+
+    for t in range(1, iters + 1):
+        g_a = g_b = 0.0
+        for z, y in data:
+            p_hat = _clamp(_sigmoid(a * z + b), _EPS, 1 - _EPS)
+            err = p_hat - y
+            g_a += err * z
+            g_b += err
+        g_a /= len(data)
+        g_b /= len(data)
+
+        # Adam
+        m_a = beta1 * m_a + (1 - beta1) * g_a
+        m_b = beta1 * m_b + (1 - beta1) * g_b
+        v_a = beta2 * v_a + (1 - beta2) * g_a ** 2
+        v_b = beta2 * v_b + (1 - beta2) * g_b ** 2
+        m_a_h = m_a / (1 - beta1 ** t)
+        m_b_h = m_b / (1 - beta1 ** t)
+        v_a_h = v_a / (1 - beta2 ** t)
+        v_b_h = v_b / (1 - beta2 ** t)
+        a = _clamp(a - lr * m_a_h / (v_a_h ** 0.5 + eps_adam), 0.05, 5.0)
+        b = _clamp(b - lr * m_b_h / (v_b_h ** 0.5 + eps_adam), -3.0, 3.0)
+
+    ll_before = logloss(1.0, 0.0)
+    ll_after  = logloss(a, b)
+    return {
+        "a": round(a, 4),
+        "b": round(b, 4),
+        "n": len(data),
+        "fitted": True,
+        "logloss_before": round(ll_before, 4),
+        "logloss_after":  round(ll_after,  4),
+        "gain_pct": round((ll_before - ll_after) / ll_before * 100, 2),
+        "interpretation": (
+            f"slope={a:.3f} (sur-confiant)" if a < 0.8 else
+            f"slope={a:.3f} (légère surconf.)" if a < 0.95 else
+            f"slope={a:.3f} (bien calibré)"
+        ),
+    }
+
+
 def fit_temperature(rows: List[Any], iters: int = 600, lr: float = 0.2,
                     min_n: int = 10) -> Dict[str, Any]:
     """Ajuste k sur les matchs réglés. `rows` : lignes settled_matches.

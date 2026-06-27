@@ -6,7 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
+import com.tennisboss.app.data.InplayBestPick
 import com.tennisboss.app.data.LiveResponse
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -14,7 +16,7 @@ import kotlinx.coroutines.launch
 sealed interface LiveUiState {
     data object Idle : LiveUiState
     data object Loading : LiveUiState
-    data class Success(val data: LiveResponse, val refreshIn: Int = 30) : LiveUiState
+    data class Success(val data: LiveResponse, val bestPick: InplayBestPick?, val refreshIn: Int = 30) : LiveUiState
     data class Error(val message: String) : LiveUiState
 }
 
@@ -30,7 +32,6 @@ class LiveViewModel : ViewModel() {
         autoRefreshJob = viewModelScope.launch {
             while (isActive) {
                 load()
-                // Countdown 30s entre chaque refresh
                 var countdown = 30
                 while (isActive && countdown > 0) {
                     delay(1000)
@@ -56,8 +57,15 @@ class LiveViewModel : ViewModel() {
     private suspend fun load() {
         if (state !is LiveUiState.Success) state = LiveUiState.Loading
         try {
-            val resp = ApiClient.create().live()
-            state = LiveUiState.Success(resp, refreshIn = 30)
+            val api = ApiClient.create()
+            val liveDeferred = viewModelScope.async { api.live() }
+            val bestDeferred = viewModelScope.async {
+                try { api.inplayBest() } catch (e: Exception) { null }
+            }
+            val liveResp = liveDeferred.await()
+            val bestResp = bestDeferred.await()
+            val bestPick = bestResp?.best?.firstOrNull()
+            state = LiveUiState.Success(liveResp, bestPick, refreshIn = 30)
         } catch (e: Exception) {
             if (state !is LiveUiState.Success) {
                 state = LiveUiState.Error(e.message ?: "Erreur réseau")

@@ -65,55 +65,45 @@ def normalize_sackmann_match(row: Dict, tour: str) -> Dict:
         return None
 
 
-def ingest_year_range(start_year: int = 2022, end_year: int = 2026) -> Dict[str, int]:
-    """Ingest Sackmann data for ATP & WTA, year range."""
+
+def ingest_year_range(start_year: int = 2022, end_year: int = 2026,
+                      include_challengers: bool = True) -> Dict[str, int]:
+    """Ingest ATP & WTA main draw + Challengers/ITF via datasource. Crée les profils."""
+    from . import datasource, learner, config as cfg_mod
     mem = memory.load()
-    counts = {"inserted": 0, "skipped": 0, "duplicates": 0}
+    cfg = cfg_mod.DEFAULT_CONFIG
+    counts = {"inserted": 0, "new_players": 0, "players_before": len(mem["players"])}
 
-    for year in range(start_year, end_year + 1):
-        for tour, base_url in [("atp", BASE_ATP), ("wta", BASE_WTA)]:
-            url = f"{base_url}/{tour}_matches_{year}.csv"
-            log(f"Fetching {tour.upper()} {year}...", "INFO")
-            rows = fetch_csv(url)
+    years = list(range(start_year, end_year + 1))
+    tours = ["atp", "wta"]
 
-            for row in rows:
-                match = normalize_sackmann_match(row, tour)
-                if not match:
-                    continue
+    log(f"Téléchargement ATP+WTA {start_year}-{end_year}...", "INFO")
+    matches = datasource.fetch_matches(years, tours, include_challengers=False)
 
-                winner, loser = match["winner"], match["loser"]
-                if winner not in mem["players"] or loser not in mem["players"]:
-                    counts["skipped"] += 1
-                    continue
+    if include_challengers:
+        log("Téléchargement Challengers/ITF...", "INFO")
+        chall = datasource.fetch_challengers(years, tours)
+        existing_ids = {m["id"] for m in matches}
+        new_chall = [m for m in chall if m["id"] not in existing_ids]
+        log(f"  +{len(new_chall)} matchs Challengers/ITF.", "INFO")
+        matches = matches + new_chall
+        matches.sort(key=lambda m: (m["date"], m["id"]))
 
-                # Check if event_key already exists
-                if db.get_match_by_event_key(match["event_key"]):
-                    counts["duplicates"] += 1
-                    continue
+    # Entraîner le modèle avec tous les matchs (crée les profils joueurs)
+    log(f"Entraînement sur {len(matches)} matchs...", "INFO")
+    learner.train(mem, matches, cfg)
 
-                # Insert match
-                try:
-                    db.insert_match(
-                        event_key=match["event_key"],
-                        player1=winner,
-                        player2=loser,
-                        winner=winner,
-                        date=match["date"],
-                        tournament=match["tournament"],
-                        surface=match["surface"],
-                        final_score=match["final_score"],
-                        round=match["round"],
-                    )
-                    counts["inserted"] += 1
-                except Exception as e:
-                    log(f"Insert error: {e}", "WARN")
+    # Archiver et synchroniser
+    db.init()
+    added = db.archive_matches(matches)
+    db.sync_from_memory(mem)
+    counts["inserted"] = added
+    counts["new_players"] = len(mem["players"]) - counts["players_before"]
 
-            log(f"  {tour.upper()} {year}: +{sum([1 for r in rows if normalize_sackmann_match(r, tour)])} matches", "INFO")
-
-    # Rebuild ELO with new data
-    log("Rebuilding ELO with new matches...", "INFO")
-    rows = db.all_matches_chrono()
-    elo_model, _ = elo.build_dynamic(rows)
+    # Reconstruire ELO
+    log("Rebuilding ELO...", "INFO")
+    db_rows = db.all_matches_chrono()
+    elo_model, _ = elo.build_dynamic(db_rows)
     mem["elo"] = elo_model
     memory.save(mem)
 

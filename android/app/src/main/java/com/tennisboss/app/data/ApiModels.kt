@@ -191,6 +191,62 @@ data class WeatherInfo(
     val conditions: String = "",
 )
 
+data class WeatherImpact(
+    val beneficiary: String = "neutre",  // "p1" | "p2" | "neutre"
+    val label: String = "",
+    val impact_level: String = "faible",
+    val net_edge: Double = 0.0,
+)
+
+data class CrowdInfo(
+    val beneficiary: String = "neutre",
+    val label: String = "",
+    val magnitude: Double = 0.0,
+)
+
+data class SurfaceAdvantage(
+    val beneficiary: String = "neutre",
+    val player: String = "",
+    val delta_pct: Double = 0.0,
+    val label: String = "",
+)
+
+data class HoneypotSignal(
+    val flag: Boolean = false,
+    val beneficiary: String = "neutre",
+    val player: String = "",
+    val edge_pct: Double = 0.0,
+    val note: String = "",
+)
+
+data class PlayerConditionProfile(
+    val name: String = "",
+    val style_label: String = "",
+    val serve_score: Double = 0.5,
+    val return_score: Double = 0.5,
+)
+
+data class WeatherAnalysis(
+    val player1: PlayerConditionProfile? = null,
+    val player2: PlayerConditionProfile? = null,
+    val weather_impact: WeatherImpact? = null,
+    val crowd: CrowdInfo? = null,
+    val surface_advantage: SurfaceAdvantage? = null,
+    val honeypot: HoneypotSignal? = null,
+    val total_condition_edge: Double = 0.0,
+)
+
+data class BetContext(
+    val model_fav: String? = null,
+    val model_fav_prob: Double = 0.0,
+    val market_fav: String? = null,
+    val market_fav_prob: Double = 0.0,
+    val agree: Boolean = false,
+    val edge_pct: Double = 0.0,
+    val tag: String = "",     // "good_bet" | "bad_bet" | "neutral" | "value_underdog"
+    val label: String = "",
+)
+
 data class UpcomingMatch(
     val player1_raw: String,
     val player2_raw: String,
@@ -206,6 +262,8 @@ data class UpcomingMatch(
     val result: MatchResult? = null,
     val weather: WeatherInfo? = null,
     val source: String = "",
+    val bet_context: BetContext? = null,
+    val weather_analysis: WeatherAnalysis? = null,
 )
 
 data class UpcomingResponse(
@@ -298,12 +356,68 @@ data class LiveResponse(
     val matches: List<LiveMatch> = emptyList(),
 )
 
+// ─── Inplay best pick ─────────────────────────────────────────────────────────
+
+data class InplayBestPick(
+    val event_id: Long = 0,
+    val player1: String = "",
+    val player2: String = "",
+    val player1_resolved: String? = null,
+    val player2_resolved: String? = null,
+    val league: String = "",
+    val sets_home: Int = 0,
+    val sets_away: Int = 0,
+    val set_scores: List<LiveSetScore> = emptyList(),
+    val minute: Int = 0,
+    val status_detail: String = "",
+    val prediction: LivePrediction? = null,
+    val live_odds: LiveOdds? = null,
+    val edge_pct: Double? = null,
+    val fav_odds: Double? = null,
+    val score: Double = 0.0,
+)
+
+data class InplayBestResponse(
+    val count: Int = 0,
+    val best: List<InplayBestPick> = emptyList(),
+    val note: String = "",
+)
+
+// ─── Historique par date ──────────────────────────────────────────────────────
+
+data class HistoryMatch(
+    val date: String = "",
+    val tour: String = "",
+    val tournament: String = "",
+    val player1: String = "",
+    val player2: String = "",
+    val winner: String = "",
+    val score: String = "",
+    val pred_favorite: String? = null,
+    val correct: Int? = null,          // 1=correct 0=faux null=pas prédit
+    val is_doubles: Boolean = false,
+)
+
+data class HistoryResponse(
+    val date: String = "",
+    val count: Int = 0,
+    val n_predicted: Int = 0,
+    val accuracy_day: Double? = null,
+    val matches: List<HistoryMatch> = emptyList(),
+)
+
+data class HistoryDatesResponse(
+    val dates: List<String> = emptyList(),
+)
+
 /** Métriques de performance du modèle sur les matchs réglés. */
 data class CalibMetrics(
     val n: Int = 0,
     val accuracy: Double? = null,
     val roi: Double? = null,
     val roi_n: Int = 0,
+    val roi_value: Double? = null,
+    val roi_value_n: Int = 0,
     val brier: Double? = null,
     val atp_acc: Double? = null,
     val wta_acc: Double? = null,

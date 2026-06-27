@@ -32,6 +32,10 @@ DEFAULT_CONFIG = {
     "min_matches_confident": 5,
     # Tours couverts pour le dictionnaire "tous les joueurs" : ATP (H) + WTA (F).
     "tours": ["atp", "wta"],
+    # Inclure ATP Futures / Challengers + WTA ITF W15-W100 pour profiler les petits joueurs.
+    "include_challengers": True,
+    # Années pour les données challengers/ITF (limité pour ne pas surcharger).
+    "challenger_years": [2024, 2025, 2026],
     # Backtest : fraction finale des matchs réservée au test (hors apprentissage).
     "backtest_test_fraction": 0.25,
     # --- API live officielle (vous fournirez une clé test puis l'abonnement) --

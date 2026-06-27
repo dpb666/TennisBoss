@@ -413,6 +413,26 @@ def list_settled(limit: int = 50) -> List[sqlite3.Row]:
         ).fetchall()
 
 
+def list_settled_by_date(date_prefix: str, limit: int = 100) -> List[sqlite3.Row]:
+    """Matchs réglés pour une date donnée (préfixe YYYY-MM-DD)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM settled_matches WHERE date LIKE ? ORDER BY date ASC LIMIT ?",
+            (f"{date_prefix}%", limit),
+        ).fetchall()
+
+
+def settled_available_dates(limit: int = 90) -> List[str]:
+    """Dates distinctes avec au moins un match réglé (pour le calendrier)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT substr(date,1,10) as d FROM settled_matches "
+            "WHERE d != '' ORDER BY d DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
+
 def settled_chrono() -> List[sqlite3.Row]:
     """Matchs réglés par ordre chronologique (pour rejouer l'ELO)."""
     with connect() as conn:

@@ -64,19 +64,34 @@ def elo_logit(mem: Dict[str, Any], name1: str, name2: str,
               surface: str = None) -> float:
     """Contribution ELO (déjà pondérée) au logit de la prédiction.
 
-    Si la surface est connue et qu'un ELO de surface existe, on mélange 50/50
-    l'ELO global et l'ELO de surface (robuste quand peu de matchs sur la surface).
-    Poids de mélange = `mem['elo_blend']` (auto-réglé) sinon ELO_BLEND."""
+    Mélange 3 signaux ELO :
+    - global (décroissance temporelle 365j)
+    - surface (si disponible)
+    - forme récente 180j (surpondère les joueurs chauds)
+    Poids de mélange = mem['elo_blend'] (auto-réglé) sinon ELO_BLEND.
+    """
     elo = mem.get("elo") or {}
     if not elo:
         return 0.0
     blend = float(mem.get("elo_blend", ELO_BLEND))
     base = _raw_logit(elo, name1, name2)
+
     surf_map = mem.get("elo_surface") or {}
     if surface and surface in surf_map:
-        combined = 0.5 * base + 0.5 * _raw_logit(surf_map[surface], name1, name2)
+        surf_logit = _raw_logit(surf_map[surface], name1, name2)
+        combined = 0.45 * base + 0.45 * surf_logit
     else:
         combined = base
+
+    # ELO récent (180j) — signal de forme courte
+    elo_rec = mem.get("elo_recent") or {}
+    if elo_rec and (name1 in elo_rec or name2 in elo_rec):
+        rec_logit = _raw_logit(elo_rec, name1, name2)
+        if surface and surface in surf_map:
+            combined = 0.40 * base + 0.40 * surf_logit + 0.20 * rec_logit
+        else:
+            combined = 0.80 * base + 0.20 * rec_logit
+
     return blend * combined
 
 
