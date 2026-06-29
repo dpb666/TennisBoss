@@ -653,6 +653,9 @@ def update_clv_closing(event_key: str, closing_odds: float, src: str) -> None:
         if not row or not row["pick_odds"] or closing_odds <= 1.0:
             return
         pick_odds = float(row["pick_odds"])
+        # Rejeter les cotes manifestement post-match (ratio >8x = marché cloturé ou corrompu)
+        if closing_odds / pick_odds > 8.0 or pick_odds / closing_odds > 8.0:
+            return
         clv_pct = round((pick_odds / closing_odds - 1.0) * 100, 2)
         beat = 1 if pick_odds > closing_odds else 0
         conn.execute(
