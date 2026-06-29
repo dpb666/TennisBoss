@@ -743,7 +743,18 @@ def log_inplay_pick(player1: str, player2: str, league: str,
                     odds_book: Optional[str] = None, score: Optional[str] = None,
                     minute: Optional[int] = None, event_id: Optional[str] = None,
                     sets_home: Optional[int] = None, sets_away: Optional[int] = None) -> int:
+    import datetime as _dt
+    dedup_window = (_dt.datetime.utcnow() - _dt.timedelta(hours=4)).isoformat()
     with connect() as conn:
+        # Déduplique : même match + même pick dans les 4 dernières heures → skip
+        existing = conn.execute(
+            """SELECT id FROM inplay_picks
+               WHERE player1=? AND player2=? AND pick=? AND result IS NULL
+               AND ts > ?""",
+            (player1, player2, pick, dedup_window),
+        ).fetchone()
+        if existing:
+            return existing["id"]
         cur = conn.execute(
             "INSERT INTO inplay_picks"
             "(event_id,player1,player2,league,market_type,market_label,pick,"
@@ -797,40 +808,98 @@ def list_inplay_picks_pending() -> List[sqlite3.Row]:
         ).fetchall()
 
 
+def _norm_player(name: str) -> str:
+    """Normalise un nom joueur : 'Djokovic, Novak' → 'novak djokovic' (lowercase, no comma)."""
+    name = (name or "").strip()
+    if "," in name:
+        parts = [p.strip() for p in name.split(",", 1)]
+        name = f"{parts[1]} {parts[0]}"
+    return name.lower()
+
+
+def _players_match(a: str, b: str) -> bool:
+    """True si deux noms de joueurs désignent probablement la même personne."""
+    na, nb = _norm_player(a), _norm_player(b)
+    if na == nb:
+        return True
+    # Correspondance partielle : tous les tokens de l'un dans l'autre
+    ta = set(na.split())
+    tb = set(nb.split())
+    return len(ta & tb) >= max(1, min(len(ta), len(tb)) - 1)
+
+
+def _find_in_settled(p1: str, p2: str) -> Optional[Any]:
+    """Cherche un résultat dans settled_matches avec noms normalisés."""
+    np1, np2 = _norm_player(p1), _norm_player(p2)
+    with connect() as conn:
+        # Essai exact d'abord
+        sm = conn.execute(
+            """SELECT winner, final_score, sets FROM settled_matches
+               WHERE (player1=? AND player2=?) OR (player1=? AND player2=?)
+               ORDER BY settled_ts DESC LIMIT 1""",
+            (p1, p2, p2, p1),
+        ).fetchone()
+        if sm:
+            return sm
+        # Fallback : cherche par LIKE sur le nom normalisé (gère Last,First)
+        tokens_p1 = np1.split()
+        tokens_p2 = np2.split()
+        if not tokens_p1 or not tokens_p2:
+            return None
+        like_p1 = f"%{tokens_p1[-1]}%"  # nom de famille
+        like_p2 = f"%{tokens_p2[-1]}%"
+        candidates = conn.execute(
+            """SELECT winner, final_score, sets, player1, player2
+               FROM settled_matches
+               WHERE (player1 LIKE ? AND player2 LIKE ?)
+                  OR (player1 LIKE ? AND player2 LIKE ?)
+               ORDER BY settled_ts DESC LIMIT 5""",
+            (like_p1, like_p2, like_p2, like_p1),
+        ).fetchall()
+        for c in candidates:
+            cp1, cp2 = _norm_player(c["player1"]), _norm_player(c["player2"])
+            if (_players_match(np1, cp1) and _players_match(np2, cp2)) or \
+               (_players_match(np1, cp2) and _players_match(np2, cp1)):
+                return c
+    return None
+
+
 def auto_settle_picks(live_event_ids: set) -> List[Dict]:
-    """Règle automatiquement les picks dont le match a disparu du live.
+    """Règle automatiquement les picks dont le match est terminé.
 
     Stratégie :
-    1. Pick avec event_id absent des matchs en cours → match terminé
-    2. Cherche le résultat dans settled_matches (source de vérité)
-    3. Si trouvé → déduit W/L selon le type de marché + score final
-    4. Calcule P&L et met à jour la DB
+    1. Picks avec event_id → skip si encore en live
+    2. Picks sans event_id ou vieux (>2h) → cherche dans settled_matches
+    3. Résolution nom flexible (Last,First ↔ First Last, tokens partiels)
+    4. P&L correct : None si cote inconnue (gagnant sans cote)
     """
+    import datetime as _dt
     settled_out = []
+    cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=2)).isoformat()
+
     with connect() as conn:
+        # Tous les picks en attente — avec ET sans event_id
         pending = conn.execute(
-            "SELECT * FROM inplay_picks WHERE result IS NULL AND event_id IS NOT NULL"
+            "SELECT * FROM inplay_picks WHERE result IS NULL"
         ).fetchall()
         pending = list(pending)
 
     for row in pending:
-        eid = str(row["event_id"])
-        if eid in live_event_ids:
-            continue  # match encore en cours
+        eid = str(row["event_id"] or "")
 
-        # Chercher dans settled_matches par nom de joueur (event_key peut varier)
+        # Skip si le match est encore en live (seulement si event_id connu)
+        if eid and eid in live_event_ids:
+            continue
+
+        # Skip picks récents sans event_id (attendre >2h pour tenter le settle)
+        if not eid and (row["ts"] or "") > cutoff:
+            continue
+
         p1 = row["player1"] or ""
         p2 = row["player2"] or ""
-        with connect() as conn:
-            sm = conn.execute(
-                """SELECT winner, final_score, sets FROM settled_matches
-                   WHERE (player1=? AND player2=?) OR (player1=? AND player2=?)
-                   ORDER BY settled_ts DESC LIMIT 1""",
-                (p1, p2, p2, p1),
-            ).fetchone()
+        sm = _find_in_settled(p1, p2)
 
         if sm is None:
-            # Pas encore dans settled_matches — on tente heuristique snapshot
             result = _infer_from_snapshot(row["market_type"], row["pick"], row)
             if result is None:
                 continue
@@ -839,10 +908,18 @@ def auto_settle_picks(live_event_ids: set) -> List[Dict]:
             if result is None:
                 continue
 
+        # Dériver la cote du pick si odds est None mais odds_home/odds_away connus
         odds_val = row["odds"]
+        if not odds_val:
+            pick_norm = _norm_player(row["pick"] or "")
+            p1_norm = _norm_player(p1)
+            if _players_match(pick_norm, p1_norm) and row["odds_home"]:
+                odds_val = row["odds_home"]
+            elif row["odds_away"]:
+                odds_val = row["odds_away"]
         stake_val = row["stake"] or 10.0
-        if result == "W" and odds_val:
-            pnl = round((odds_val - 1) * stake_val, 2)
+        if result == "W":
+            pnl = round((odds_val - 1) * stake_val, 2) if odds_val else None
         elif result == "L":
             pnl = round(-stake_val, 2)
         else:
@@ -867,17 +944,14 @@ def _infer_from_settled(market_type: str, pick: str, row: Any, sm: Any) -> Optio
     p1 = (row["player1"] or "").strip()
     p2 = (row["player2"] or "").strip()
 
-    if market_type in ("set_winner", "next_set"):
-        # Le pick est un nom de joueur → a-t-il gagné le match ?
-        # Pour un pick inplay set_winner, on utilise le gagnant du match comme proxy
-        # (car le set pris correspond généralement à la tendance du match)
-        pick_low = pick.lower()
-        win_low = winner.lower()
-        p1_low = p1.split(",")[0].strip().lower()
-        p2_low = p2.split(",")[0].strip().lower()
-        pick_is_p1 = p1_low in pick_low
-        winner_is_p1 = p1_low in win_low
-        return "W" if pick_is_p1 == winner_is_p1 else "L"
+    if market_type in ("set_winner", "next_set", "match_winner", None, ""):
+        # Comparaison normalisée : pick → gagnant
+        if _players_match(pick, winner):
+            return "W"
+        # Vérifie que le pick est bien l'un des deux joueurs (pas de garbage)
+        if not (_players_match(pick, p1) or _players_match(pick, p2)):
+            return None  # pick ne correspond à aucun joueur → données corrompues
+        return "L"
 
     if market_type in ("total_games", "total_points"):
         # Compter les jeux du score final

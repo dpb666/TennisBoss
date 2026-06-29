@@ -1920,11 +1920,11 @@ def _settlement_loop(interval: int) -> None:
 
 
 def _inplay_settle_loop(interval: int = 300) -> None:
-    """Boucle légère toutes les 5 min : settle les picks inplay sans appel API.
+    """Boucle toutes les 5 min : settle les picks inplay terminés.
 
-    Récupère les event_ids en live depuis odds_api (déjà en cache TTL),
-    puis appelle auto_settle_picks — zéro requête supplémentaire si le cache
-    est chaud, au pire 1 requête /live légère.
+    Deux chemins :
+    - picks avec event_id : disparus du live = terminés
+    - picks sans event_id ou >2h : cherchés dans settled_matches par nom normalisé
     """
     import time as _t
     from .log import log
@@ -1935,14 +1935,18 @@ def _inplay_settle_loop(interval: int = 300) -> None:
             pending = db.list_inplay_picks_pending()
             if not pending:
                 continue
-            live_events = odds_api.fetch_live_events()
-            live_ids = {str(e.get("event_id", "")) for e in live_events}
+            # Récupère les IDs en live (peut utiliser le cache TTL)
+            try:
+                live_events = odds_api.fetch_live_events()
+                live_ids = {str(e.get("event_id", "")) for e in live_events}
+            except Exception:
+                live_ids = set()
             settled = db.auto_settle_picks(live_ids)
             if settled:
-                log(f"[Inplay 5min] Auto-settled {len(settled)} pick(s): "
-                    f"{[s['pick'] for s in settled]}", "INFO")
+                log(f"[Inplay] Auto-settled {len(settled)} pick(s): "
+                    f"{[(s['pick'], s['result'], s['pnl']) for s in settled]}", "INFO")
         except Exception as exc:  # noqa: BLE001
-            log(f"[Inplay 5min] Erreur settlement: {exc}", "WARN")
+            log(f"[Inplay] Erreur settlement: {exc}", "WARN")
 
 
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
