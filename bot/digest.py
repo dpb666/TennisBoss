@@ -113,8 +113,11 @@ def build_digest(date: Optional[str] = None) -> str:
         else:
             lines.append(f"  {vp_n} picks • résultats en attente")
 
-        # Top 5 par EV
-        top5 = sorted(vp_rows, key=lambda r: -(r["ev"] or 0))[:5]
+        # Top 5 par EV (filtrer cotes > 15 comme l'app)
+        top5 = sorted((r for r in vp_rows if (r["odds"] or 0) <= 15.0),
+                      key=lambda r: -(r["ev"] or 0))[:5]
+        if not top5:
+            top5 = sorted(vp_rows, key=lambda r: -(r["ev"] or 0))[:5]
         for r in top5:
             side = (r["side"] or r["player1"] or "?")[:20]
             em = ("✅" if r["result"] == 1 else "❌" if r["result"] == 0 else "⏳")

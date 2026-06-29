@@ -1330,8 +1330,8 @@ def api_value():
         is_value = (best_ev_pct >= min_ev
                     and pick_odds_check <= max_odds)  # filtre longshots extrêmes
 
-        # Paper-trading : capture le value pick blendé (ROI mesuré au settlement).
-        if best_ev > 0:
+        # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
+        if is_value:
             pick_odds = ho if best_side == n1 else ao
             try:
                 db.log_value_pick(e.get("date", ""), n1, n2, best_side,
