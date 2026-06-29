@@ -320,7 +320,7 @@ private fun RecentRow(r: SettledRecent) {
             horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 if (r.date.isNotBlank())
-                    Text(r.date.take(16).replace("T", " ").replace("Z", ""),
+                    Text(utcToLocalLabel(r.date),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary)
                 Text("${r.player1}  vs  ${r.player2}",

@@ -2,7 +2,7 @@
 
 Runs continuously with these jobs:
 - Every 1h: Auto-learning cycle
-- Every 6h: Sackmann data ingest
+- Every 6h: tennis-data.co.uk ingest (remplace Sackmann GitHub — repos supprimés)
 - Every 5m: System monitor
 """
 
@@ -10,7 +10,7 @@ import schedule
 import time
 from datetime import datetime
 
-from . import auto_learner, monitor, sackmann_feeder
+from . import auto_learner, monitor, tennisdata_feeder
 from .log import log
 
 
@@ -32,10 +32,10 @@ class TennisBossScheduler:
             log(f"Learn job failed: {e}", "ERROR")
 
     def job_ingest(self):
-        """Ingest Sackmann data."""
-        log("=== SCHEDULER: Sackmann ingest ===", "INFO")
+        """Ingest tennis-data.co.uk data (ATP + WTA grands tournois + Masters)."""
+        log("=== SCHEDULER: tennisdata ingest ===", "INFO")
         try:
-            counts = sackmann_feeder.ingest_year_range(2024, 2026)
+            counts = tennisdata_feeder.ingest(years=[2024, 2025, 2026], tours=["atp", "wta"])
             log(f"Ingest job complete: {counts}", "INFO")
             self.jobs_run += 1
         except Exception as e:  # noqa: BLE001

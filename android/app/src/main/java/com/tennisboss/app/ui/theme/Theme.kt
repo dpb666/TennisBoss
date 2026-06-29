@@ -22,8 +22,8 @@ private val NeonDark = darkColorScheme(
     surface = Color(0xFF131A24),           // cartes
     onSurface = Color(0xFFE6EDF3),
     surfaceVariant = Color(0xFF1C2530),    // cartes élevées
-    onSurfaceVariant = Color(0xFF8A97A6),  // texte secondaire
-    outline = Color(0xFF2A3744),
+    onSurfaceVariant = Color(0xFFB0BEC8),  // texte secondaire — plus lisible
+    outline = Color(0xFF637585),           // labels, bordures — contraste suffisant
     error = Color(0xFFFF5C7A),             // rouge néon
     onError = Color(0xFF3A0010),
 )

@@ -27,14 +27,16 @@ sealed interface UpcomingUiState {
  * Fonction pure -> testable sans Android.
  */
 fun sortUpcoming(matches: List<UpcomingMatch>): List<UpcomingMatch> =
-    matches.sortedByDescending { m ->
-        m.prediction?.let { maxOf(it.prob1, it.prob2) } ?: -1.0
-    }
+    matches.sortedWith(compareBy(
+        { it.date },
+        { it.time.ifBlank { "99:99" } },  // matchs sans heure → fin de journée
+    ))
 
 class UpcomingViewModel : ViewModel() {
 
-    var days by mutableStateOf(2)
+    var days by mutableStateOf(3)
     var withOdds by mutableStateOf(true)
+    var highConfidenceOnly by mutableStateOf(true)
 
     // Dispatcher IO injectable (pour des tests déterministes).
     internal var io: CoroutineDispatcher = Dispatchers.IO
@@ -47,7 +49,7 @@ class UpcomingViewModel : ViewModel() {
         viewModelScope.launch {
             state = try {
                 val resp = withContext(io) {
-                    ApiClient.create().upcoming(days = days, limit = 40, odds = withOdds)
+                    ApiClient.create().upcoming(days = days, limit = 60, odds = withOdds)
                 }
                 UpcomingUiState.Success(sortUpcoming(resp.matches))
             } catch (e: HttpException) {

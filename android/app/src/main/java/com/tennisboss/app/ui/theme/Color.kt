@@ -20,5 +20,5 @@ val TechWarning = Color(0xFFFFB020)   // Ambre — Confiance faible
 
 // Text & Borders
 val TechOnSurface = Color(0xFFE6EDF3)    // Texte principal
-val TechOnSurfaceDim = Color(0xFF8A97A6) // Texte secondaire
-val TechOutline = Color(0xFF233040)      // Bordures fines 1dp
+val TechOnSurfaceDim = Color(0xFFB0BEC8) // Texte secondaire
+val TechOutline = Color(0xFF637585)      // Bordures fines 1dp

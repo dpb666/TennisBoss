@@ -56,16 +56,37 @@ def build_index(names: List[str], counts: Dict[str, int]) -> Dict[str, List[str]
 
 
 def resolve(api_name: str, index: Dict[str, List[str]]) -> Optional[str]:
-    """Tente de retrouver le nom complet correspondant à un nom d'API."""
+    """Tente de retrouver le nom complet correspondant à un nom d'API.
+
+    Format "Nom, Prénom" (odds-api.io) : on a le prénom complet → on
+    compare prénom ET nom de famille pour éviter les faux positifs
+    (ex. "Garcia, Jose" ≠ "Caroline Garcia").
+    """
     init, last = split_name(api_name)
     candidates = index.get(last)
     if not candidates:
         return None
     if len(candidates) == 1:
+        # Même si un seul candidat, vérifier cohérence de l'initiale
+        if init:
+            f_init, _ = split_name(candidates[0])
+            if f_init and f_init != init:
+                return None  # faux positif : même nom de famille, prénom incompatible
         return candidates[0]
-    # Plusieurs joueurs avec ce nom de famille : départage par initiale du prénom.
+
+    # Plusieurs candidats : priorité à l'initiale exacte
+    matches_init = []
     for full in candidates:
         f_init, _ = split_name(full)
         if init and f_init == init:
-            return full
-    return candidates[0]  # défaut : le plus fiable
+            matches_init.append(full)
+
+    if len(matches_init) == 1:
+        return matches_init[0]
+    if matches_init:
+        return matches_init[0]  # plusieurs homonymes avec même initiale → le plus fiable
+
+    # Aucune initiale commune — ne pas retourner un joueur au hasard
+    if init:
+        return None
+    return candidates[0]

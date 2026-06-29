@@ -15,10 +15,24 @@ import java.util.concurrent.TimeUnit
  * (l'en-tête X-API-Token est alors ajouté à chaque requête).
  */
 object ApiClient {
+    // localhost:8000 fonctionne sur émulateur via `adb reverse tcp:8000 tcp:8000`
+    const val EMULATOR_BASE_URL = "http://localhost:8000/"
     const val DEFAULT_BASE_URL = "https://plausible-matchbox-thrive.ngrok-free.dev/"
 
+    private fun defaultUrl(): String {
+        val fp = android.os.Build.FINGERPRINT
+        val product = android.os.Build.PRODUCT
+        val model = android.os.Build.MODEL
+        val isEmulator = fp.startsWith("generic") || fp.startsWith("unknown") ||
+            model.contains("Emulator") || model.contains("Android SDK") ||
+            android.os.Build.MANUFACTURER == "Genymotion" ||
+            product.startsWith("sdk") || product.contains("gphone") ||
+            product.contains("emulator", ignoreCase = true)
+        return if (isEmulator) EMULATOR_BASE_URL else DEFAULT_BASE_URL
+    }
+
     @Volatile
-    var baseUrl: String = DEFAULT_BASE_URL
+    var baseUrl: String = defaultUrl()
         set(value) {
             if (field != value) {
                 field = value

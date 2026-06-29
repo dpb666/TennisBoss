@@ -213,10 +213,19 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
         return hit[1] if hit else None
 
     call_params = {**params, "apiKey": api_key}
-    try:
-        r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
-    except requests.RequestException as exc:
-        log(f"odds-api {path} réseau KO ({exc}).", "WARN")
+    # Retry avec backoff exponentiel : 3s → 9s → 27s (max 3 essais)
+    _last_exc = None
+    for _attempt, _wait in enumerate([0, 3, 9]):
+        if _wait:
+            time.sleep(_wait)
+        try:
+            r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
+            _last_exc = None
+            break
+        except requests.RequestException as exc:
+            _last_exc = exc
+    if _last_exc is not None:
+        log(f"odds-api {path} réseau KO après 3 essais ({_last_exc}).", "WARN")
         return hit[1] if hit else None
 
     _update_rl(r, api_key)
@@ -425,4 +434,79 @@ def fetch_match_winner(event_id: Any,
         "away_book": best_a_book,
         "fair_source": sharp if sharp in per_book else "consensus",
         "books": sorted(per_book.keys()),
+    }
+
+
+def fetch_live_game_markets(event_id: Any,
+                            bookmakers: Optional[str] = None) -> Dict[str, Any]:
+    """Récupère Spread(Games) et Totals(Games) Betfair Exchange pour un event live.
+
+    Renvoie :
+      spread  : liste de {hdp, home_odds, away_odds, implied_home_prob}
+      totals  : liste de {hdp, over_odds, under_odds, implied_over_prob}
+      best_spread_hdp  : ligne la plus liquide (abs(over-under) minimal)
+      best_totals_hdp  : idem
+    """
+    if not is_enabled():
+        return {}
+    # Betfair Exchange : toujours autorisé sur tous les plans odds-api.io
+    bks = bookmakers or "Betfair Exchange"
+    data = _get("/odds", {"eventId": event_id, "bookmakers": bks}, ttl=60)
+    if not isinstance(data, dict):
+        return {}
+
+    books = data.get("bookmakers") or {}
+    spread_lines: list = []
+    totals_lines: list = []
+
+    for bname, markets in books.items():
+        if not isinstance(markets, list):
+            continue
+        for mk in markets:
+            mname = (mk.get("name") or "").strip()
+            for line in mk.get("odds", []):
+                try:
+                    hdp = float(line.get("hdp", 0))
+                except (TypeError, ValueError):
+                    continue
+                if mname == "Spread (Games)":
+                    try:
+                        ho = float(line["home"])
+                        ao = float(line["away"])
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                    if ho > 1 and ao > 1:
+                        impl = round(1 / ho / (1 / ho + 1 / ao), 4)
+                        spread_lines.append({"hdp": hdp, "home_odds": round(ho, 2),
+                                             "away_odds": round(ao, 2),
+                                             "implied_home_prob": impl})
+                elif mname == "Totals (Games)":
+                    try:
+                        ov = float(line["over"])
+                        un = float(line["under"])
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                    if ov > 1 and un > 1:
+                        impl = round(1 / ov / (1 / ov + 1 / un), 4)
+                        totals_lines.append({"hdp": hdp, "over_odds": round(ov, 2),
+                                             "under_odds": round(un, 2),
+                                             "implied_over_prob": impl})
+
+    # Ligne la plus balanced (cotes proches de 2.0 → marché le plus efficace)
+    def _most_balanced_spread(lines):
+        return min(lines, key=lambda l: abs(l["home_odds"] - l["away_odds"]),
+                   default=None)
+
+    def _most_balanced_totals(lines):
+        return min(lines, key=lambda l: abs(l["over_odds"] - l["under_odds"]),
+                   default=None)
+
+    best_spread = _most_balanced_spread(spread_lines)
+    best_totals = _most_balanced_totals(totals_lines)
+
+    return {
+        "spread": spread_lines,
+        "totals": totals_lines,
+        "best_spread": best_spread,
+        "best_totals": best_totals,
     }

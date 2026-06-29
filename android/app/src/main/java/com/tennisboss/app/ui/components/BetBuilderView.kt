@@ -5,7 +5,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,17 +26,13 @@ import java.util.Locale
 private val P1Color = Color(0xFF4F8CFF)
 private val P2Color = Color(0xFF00C2A8)
 private val AccentColor = Color(0xFF00E5A0)
+private val AmberColor = Color(0xFFFFB020)
 
-/**
- * Bet Builder : marchés dérivés de la proba du 1er set (vainqueur match, 2e set,
- * match en 3 sets, score exact).
- */
 @Composable
 fun BetBuilderView(
     name1: String,
     name2: String,
     bb: BetBuilder? = null,
-    // Support pour les données "à plat" du modèle Prediction si bb est null
     mlProb1: Double? = null,
     mlProb2: Double? = null,
     set2Prob1: Double? = null,
@@ -52,141 +50,219 @@ fun BetBuilderView(
     val tSetProb = bb?.third_set_prob ?: thirdSetProb
     val scores = bb?.correct_score ?: correctScore
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            "🛠 BET BUILDER (AI)",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.secondary
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
+        // ── Titre ─────────────────────────────────────────────────────────────
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("🛠", fontSize = 14.sp)
+            Text("BET BUILDER",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.secondary)
+            Text("· IA",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f))
+        }
+
+        // ── Barres marché ──────────────────────────────────────────────────────
         if (mProb1 != null && mProb2 != null) {
-            MarketBar("Vainqueur du match (ML)", name1, mProb1, name2, mProb2)
+            MarketBar("Vainqueur du match", name1, mProb1, name2, mProb2, P1Color, P2Color)
         }
-
         if (s2Prob1 != null && s2Prob2 != null) {
-            MarketBar("Vainqueur du 2e set", name1, s2Prob1, name2, s2Prob2)
+            MarketBar("Vainqueur 2e set", name1, s2Prob1, name2, s2Prob2, P1Color, P2Color)
         }
 
-        // Stats Additionnelles (Points, Sets, Aces) en ligne
-        if (totalPointsOver != null || totalSetsOver != null || totalAcesAvg != null || tSetProb != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+        // ── Mini-stats : 3 sets / Points / Aces ───────────────────────────────
+        val hasStats = tSetProb != null || totalPointsOver != null || totalAcesAvg != null
+        if (hasStats) {
+            HorizontalDivider(thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (tSetProb != null && tSetProb > 0) {
-                    MiniStatCard("Match en 3 sets", fmt(tSetProb), Modifier.weight(1f))
+                    StatPill(
+                        icon = "🎾",
+                        label = "Match 3 sets",
+                        value = pct(tSetProb),
+                        valueColor = when {
+                            tSetProb >= 50 -> AmberColor
+                            tSetProb >= 35 -> AccentColor
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
                 if (totalPointsOver != null) {
-                    MiniStatCard("Points Over", fmt(totalPointsOver), Modifier.weight(1f))
+                    StatPill(
+                        icon = "📊",
+                        label = "Points over",
+                        value = pct(totalPointsOver),
+                        valueColor = AccentColor,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
                 if (totalAcesAvg != null) {
-                    MiniStatCard("Aces (avg)", String.format(Locale.US, "%.1f", totalAcesAvg), Modifier.weight(1f))
+                    StatPill(
+                        icon = "⚡",
+                        label = "Aces (moy.)",
+                        value = String.format(Locale.US, "%.1f", totalAcesAvg),
+                        valueColor = P1Color,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
 
-        // Score exact, trié par probabilité décroissante.
+        // ── Scores exacts ──────────────────────────────────────────────────────
         if (!scores.isNullOrEmpty()) {
-            Text(
-                "Top Scores Exacts",
+            HorizontalDivider(thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Text("Scores exacts les + probables",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-            )
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             scores.entries
                 .sortedByDescending { it.value }
-                .take(3) // On limite aux 3 meilleurs pour la lisibilité
-                .forEach { (label, prob) -> ScoreRow(label, prob) }
+                .take(3)
+                .forEachIndexed { i, (label, prob) ->
+                    ScoreRow(label, prob, highlight = i == 0)
+                }
         }
     }
 }
 
+// ── StatPill : carte mini-stat lisible ────────────────────────────────────────
 @Composable
-private fun MiniStatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+private fun StatPill(
+    icon: String,
+    label: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 2.dp,
     ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
-        Text(value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = AccentColor)
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(icon, fontSize = 16.sp)
+            Text(value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = valueColor)
+            Text(label,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1)
+        }
     }
 }
 
+// ── MarketBar ─────────────────────────────────────────────────────────────────
 @Composable
-private fun MarketBar(title: String, n1: String, p1: Double, n2: String, p2: Double) {
+private fun MarketBar(
+    title: String,
+    n1: String, p1: Double,
+    n2: String, p2: Double,
+    color1: Color, color2: Color,
+) {
     val total = if (p1 + p2 > 0) p1 + p2 else 100.0
     val frac1 = (p1 / total).toFloat().coerceIn(0f, 1f)
     val anim by animateFloatAsState(frac1, tween(600), label = "m")
-    
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        // Titre + noms + probas
+        Row(modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(title,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface)
+        }
+        Row(modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("${n1.substringAfterLast(" ").take(10)}  ${pct(p1)}",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold, color = color1)
+            Text("${pct(p2)}  ${n2.substringAfterLast(" ").take(10)}",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold, color = color2)
+        }
+        // Barre bicolore
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(24.dp)
+            modifier = Modifier.fillMaxWidth().height(20.dp)
                 .clip(RoundedCornerShape(6.dp)),
         ) {
             Box(
                 modifier = Modifier
-                    .weight(anim.coerceIn(0.01f, 0.99f))
+                    .weight(anim.coerceIn(0.05f, 0.95f))
                     .fillMaxHeight()
-                    .background(P1Color),
-                contentAlignment = Alignment.CenterStart,
+                    .background(color1),
+                contentAlignment = Alignment.Center,
             ) {
-                if (anim > 0.15f) Text(
-                    fmt(p1), color = Color.White, fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
+                if (anim > 0.2f) Text(pct(p1),
+                    color = Color.White, fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall)
             }
             Box(
                 modifier = Modifier
-                    .weight((1f - anim).coerceIn(0.01f, 0.99f))
+                    .weight((1f - anim).coerceIn(0.05f, 0.95f))
                     .fillMaxHeight()
-                    .background(P2Color),
-                contentAlignment = Alignment.CenterEnd,
+                    .background(color2),
+                contentAlignment = Alignment.Center,
             ) {
-                if (anim < 0.85f) Text(
-                    fmt(p2), color = Color.White, fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(end = 6.dp),
-                )
+                if (anim < 0.8f) Text(pct(p2),
+                    color = Color.White, fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall)
             }
         }
     }
 }
 
+// ── ScoreRow ──────────────────────────────────────────────────────────────────
 @Composable
-private fun ScoreRow(label: String, prob: Double) {
+private fun ScoreRow(label: String, prob: Double, highlight: Boolean) {
     val frac = (prob / 100.0).toFloat().coerceIn(0f, 1f)
     val anim by animateFloatAsState(frac, tween(600), label = "s")
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
+    val barColor = if (highlight) AccentColor else AccentColor.copy(alpha = 0.5f)
+    val textColor = if (highlight) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
-            Text(fmt(prob), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold, color = AccentColor)
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
+                color = textColor)
+            Text(pct(prob),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = barColor)
         }
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
+            modifier = Modifier.fillMaxWidth().height(4.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
         ) {
-            Box(Modifier.fillMaxWidth(anim).fillMaxHeight().background(AccentColor))
+            Box(Modifier.fillMaxWidth(anim).fillMaxHeight().background(barColor))
         }
     }
 }
 
-private fun fmt(v: Double): String = String.format(Locale.US, "%.1f%%", v)
+private fun pct(v: Double) = String.format(Locale.US, "%.1f%%", v)
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF0A0E14)
 @Composable
 private fun BetBuilderPreview() {
     MaterialTheme {
@@ -200,10 +276,11 @@ private fun BetBuilderPreview() {
                     correct_score = mapOf(
                         "Sinner 2-0" to 43.2,
                         "Sinner 2-1" to 29.6,
+                        "Alcaraz 2-1" to 27.2,
                     ),
                 ),
                 totalAcesAvg = 8.5,
-                totalPointsOver = 62.1
+                totalPointsOver = 62.1,
             )
         }
     }

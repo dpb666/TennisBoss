@@ -3,8 +3,11 @@ package com.tennisboss.app.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,16 +21,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -42,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.H2HSummary
 import com.tennisboss.app.data.Prediction
@@ -50,6 +55,9 @@ import com.tennisboss.app.data.WeatherAnalysis
 import com.tennisboss.app.ui.components.BetBuilderView
 import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SkeletonList
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,22 +65,37 @@ import java.util.Locale
 fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
     LaunchedEffect(Unit) { if (vm.state is UpcomingUiState.Idle) vm.load() }
 
+    // Selected day filter (null = toutes les journées)
+    var selectedDate by remember { mutableStateOf<String?>(null) }
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Matchs à venir", style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold)
-
-        Row(modifier = Modifier.fillMaxWidth(),
+        // ── Header compact ─────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Cotes")
-                Switch(checked = vm.withOdds, onCheckedChange = { vm.withOdds = it })
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("📅 Matchs à venir", style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold)
+                Text("Tire vers le bas pour rafraîchir",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Button(onClick = { vm.load() },
-                enabled = vm.state !is UpcomingUiState.Loading) { Text("Rafraîchir") }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Chip filtre confiance
+                ConfFilterChip(active = vm.highConfidenceOnly) {
+                    vm.highConfidenceOnly = !vm.highConfidenceOnly
+                }
+                // Chip cotes
+                OddsToggleChip(active = vm.withOdds) {
+                    vm.withOdds = !vm.withOdds
+                    vm.load()
+                }
+            }
         }
 
         PullToRefreshBox(isRefreshing = vm.state is UpcomingUiState.Loading,
@@ -82,16 +105,171 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
                 is UpcomingUiState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error)
                 is UpcomingUiState.Success -> {
                     if (s.matches.isEmpty()) {
-                        Text("Aucun match à venir. Tire vers le bas pour réessayer.")
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Aucun match à venir", style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Tire vers le bas pour réessayer",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline)
+                            }
+                        }
                     } else {
+                        // Dates disponibles triées
+                        val availDates = s.matches.map { it.date }.distinct().sorted()
+                        // Sécurité : si la date sélectionnée n'existe plus, reset
+                        val activeDateFilter = selectedDate.takeIf { it in availDates }
+
+                        val byDate = if (activeDateFilter != null)
+                            s.matches.filter { it.date == activeDateFilter }
+                        else s.matches
+
+                        val filteredMatches = if (vm.highConfidenceOnly)
+                            byDate.filter { (it.prediction?.confidence ?: 0.0) >= 0.4 }
+                        else byDate
+
+                        val hiddenCount = byDate.size - filteredMatches.size
+
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(s.matches) { m -> MatchCard(m) }
+                            // ── Sélecteur de jours ──────────────────────────────
+                            item(key = "day_picker") {
+                                DayPicker(
+                                    dates = availDates,
+                                    selected = activeDateFilter,
+                                    onSelect = { d ->
+                                        selectedDate = if (selectedDate == d) null else d
+                                    },
+                                )
+                            }
+                            // ── Résumé ──────────────────────────────────────────
+                            item(key = "summary") {
+                                val hiddenLabel = if (hiddenCount > 0) " · $hiddenCount masqué${if (hiddenCount > 1) "s" else ""} (confiance faible)" else ""
+                                Text(
+                                    "${filteredMatches.size} match${if (filteredMatches.size > 1) "s" else ""}$hiddenLabel",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            items(filteredMatches) { m -> MatchCard(m) }
                         }
                     }
                 }
                 else -> {}
             }
         }
+    }
+}
+
+@Composable
+private fun OddsToggleChip(active: Boolean, onClick: () -> Unit) {
+    val bg = if (active) MaterialTheme.colorScheme.primaryContainer
+             else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+             else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (active) "💹" else "💹", fontSize = 13.sp)
+        Text(
+            if (active) "Cotes ON" else "Cotes OFF",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = fg,
+        )
+    }
+}
+
+@Composable
+private fun ConfFilterChip(active: Boolean, onClick: () -> Unit) {
+    val bg = if (active) MaterialTheme.colorScheme.tertiaryContainer
+             else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (active) MaterialTheme.colorScheme.onTertiaryContainer
+             else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("🎯", fontSize = 13.sp)
+        Text(
+            if (active) "Fiable" else "Tout",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = fg,
+        )
+    }
+}
+
+@Composable
+private fun DayPicker(
+    dates: List<String>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+) {
+    val today = LocalDate.now()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        dates.forEach { dateStr ->
+            val isSelected = dateStr == selected
+            val label = dayLabel(dateStr, today)
+            val bg = if (isSelected) MaterialTheme.colorScheme.primary
+                     else MaterialTheme.colorScheme.surfaceVariant
+            val fg = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                     else MaterialTheme.colorScheme.onSurfaceVariant
+            Column(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(bg)
+                    .clickable { onSelect(dateStr) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    label.first,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = fg.copy(alpha = 0.75f),
+                )
+                Text(
+                    label.second,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = fg,
+                )
+            }
+        }
+    }
+}
+
+private fun dayLabel(dateStr: String, today: LocalDate): Pair<String, String> {
+    return try {
+        val d = LocalDate.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        val dayName = when (d) {
+            today -> "Auj."
+            today.plusDays(1) -> "Dem."
+            else -> d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.FRENCH)
+                .replaceFirstChar { it.uppercase() }
+        }
+        val dayNum = "${d.dayOfMonth} ${d.month.getDisplayName(TextStyle.SHORT, Locale.FRENCH)
+            .replaceFirstChar { it.uppercase() }}"
+        dayName to dayNum
+    } catch (_: Exception) {
+        dateStr to dateStr
     }
 }
 
@@ -131,8 +309,10 @@ private fun MatchCard(m: UpcomingMatch) {
                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         val surface = pred?.surface?.takeIf { it.isNotBlank() }
                         if (surface != null) SurfaceBadge(surface)
-                        Text("${m.date} ${m.time}", style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline)
+                        Text(combineDateTimeUtcToLocal(m.date, m.time),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -489,6 +669,8 @@ private fun SectionLabel(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(bottom = 2.dp))
 }
+
+// Remplacé par combineDateTimeUtcToLocal() dans DateUtils.kt
 
 private fun fmt(v: Double): String = String.format(Locale.US, "%.1f%%", v)
 
