@@ -77,49 +77,55 @@ def is_enabled(cfg: Dict[str, Any]) -> bool:
 
 
 def fetch_upcoming(cfg: Dict[str, Any], days_ahead: int = 2) -> List[Dict]:
-    """Récupère les matchs à venir (et live) via API-Tennis.
+    """Récupère les matchs à venir via API-Tennis (primaire) ou odds-api.io (fallback).
 
     Renvoie une liste de dicts normalisés :
       {player1, player2, tournament, round, date, time, live, event_key, tour}
     """
     load_env()
     key = _key("AT_API_KEY", cfg)
-    if not key:
-        log("API live inactive (AT_API_KEY absente). Données ouvertes conservées.", "INFO")
-        return []
+    if key:
+        start = _dt.date.today().isoformat()
+        stop = (_dt.date.today() + _dt.timedelta(days=days_ahead)).isoformat()
+        payload = _cached_request(
+            {"method": "get_fixtures", "APIkey": key,
+             "date_start": start, "date_stop": stop},
+            ttl=TTL_FIXTURES,
+        )
+        if isinstance(payload, dict) and payload.get("success"):
+            results = payload.get("result") or []
+            if results and not (isinstance(results[0], dict) and results[0].get("cod") == 1006):
+                return [_parse_fixture(m) for m in results]
+        log("API-Tennis inactive ou expirée — fallback odds-api.io.", "WARN")
 
-    start = _dt.date.today().isoformat()
-    stop = (_dt.date.today() + _dt.timedelta(days=days_ahead)).isoformat()
-    payload = _cached_request(
-        {"method": "get_fixtures", "APIkey": key,
-         "date_start": start, "date_stop": stop},
-        ttl=TTL_FIXTURES,
-    )
-    if not isinstance(payload, dict) or not payload.get("success"):
-        return []
-    return [_parse_fixture(m) for m in (payload.get("result") or [])]
+    # Fallback : odds-api.io par date (live + upcoming)
+    return _fetch_upcoming_oddsapi(days_ahead)
 
 
 def fetch_results(cfg: Dict[str, Any], days_back: int = 2) -> List[Dict[str, Any]]:
-    """Récupère les matchs TERMINÉS récents (pour le settlement).
+    """Récupère les matchs TERMINÉS récents via API-Tennis (primaire) ou odds-api.io (fallback).
 
     Renvoie une liste de dicts normalisés avec vainqueur + score + sets.
     """
     load_env()
     key = _key("AT_API_KEY", cfg)
-    if not key:
-        return []
-    stop = _dt.date.today().isoformat()
-    start = (_dt.date.today() - _dt.timedelta(days=days_back)).isoformat()
-    payload = _cached_request(
-        {"method": "get_fixtures", "APIkey": key,
-         "date_start": start, "date_stop": stop},
-        ttl=TTL_RESULTS,
-    )
-    if not isinstance(payload, dict) or not payload.get("success"):
-        return []
-    out = [_parse_result(m) for m in (payload.get("result") or [])]
-    return [r for r in out if r["finished"] and not r["is_doubles"]]
+    if key:
+        stop = _dt.date.today().isoformat()
+        start = (_dt.date.today() - _dt.timedelta(days=days_back)).isoformat()
+        payload = _cached_request(
+            {"method": "get_fixtures", "APIkey": key,
+             "date_start": start, "date_stop": stop},
+            ttl=TTL_RESULTS,
+        )
+        if isinstance(payload, dict) and payload.get("success"):
+            results = payload.get("result") or []
+            if results and not (isinstance(results[0], dict) and results[0].get("cod") == 1006):
+                out = [_parse_result(m) for m in results]
+                return [r for r in out if r["finished"] and not r["is_doubles"]]
+        log("API-Tennis inactive ou expirée — fallback odds-api.io pour résultats.", "WARN")
+
+    # Fallback : odds-api.io settled events
+    return _fetch_results_oddsapi()
 
 
 def _parse_result(m: Dict[str, Any]) -> Dict[str, Any]:
@@ -201,6 +207,125 @@ def parse_odds_events_as_fixtures(events: List[Dict[str, Any]]) -> List[Dict[str
             "tour": tour,
         })
     return out
+
+
+def _fetch_upcoming_oddsapi(days_ahead: int = 2) -> List[Dict]:
+    """Fallback fixtures : odds-api.io par date (live + matchs du jour/demain)."""
+    try:
+        from . import odds_api as _oa
+        if not _oa.is_enabled():
+            return []
+        out: List[Dict] = []
+        # Live d'abord
+        live_events = _oa._get("/events", {"sport": "tennis", "status": "live"}, ttl=30) or []
+        for e in (live_events if isinstance(live_events, list) else []):
+            f = _parse_oddsapi_fixture(e, live=True)
+            if f:
+                out.append(f)
+        # Matchs par date (aujourd'hui + N jours)
+        for d in range(days_ahead + 1):
+            date = (_dt.date.today() + _dt.timedelta(days=d)).isoformat()
+            events = _oa._get("/events", {"sport": "tennis", "date": date}, ttl=TTL_FIXTURES) or []
+            for e in (events if isinstance(events, list) else []):
+                if e.get("status") in ("settled", "canceled"):
+                    continue
+                f = _parse_oddsapi_fixture(e, live=False)
+                if f:
+                    out.append(f)
+        seen: set = set()
+        deduped = []
+        for f in out:
+            k = (f["player1"], f["player2"], f["date"])
+            if k not in seen:
+                seen.add(k)
+                deduped.append(f)
+        log(f"fetch_upcoming fallback odds-api.io: {len(deduped)} fixtures")
+        return deduped
+    except Exception as exc:
+        log(f"_fetch_upcoming_oddsapi erreur: {exc}", "WARN")
+        return []
+
+
+def _fetch_results_oddsapi() -> List[Dict[str, Any]]:
+    """Fallback résultats : odds-api.io settled events (dernières 24h)."""
+    try:
+        from . import odds_api as _oa
+        if not _oa.is_enabled():
+            return []
+        events = _oa._get("/events", {"sport": "tennis", "status": "settled"}, ttl=300) or []
+        out = []
+        for e in (events if isinstance(events, list) else []):
+            sc = e.get("scores") or {}
+            home_sets = sc.get("home", 0)
+            away_sets = sc.get("away", 0)
+            if home_sets == away_sets:
+                continue
+            winner = "p1" if home_sets > away_sets else "p2"
+            # Sets détaillés
+            periods = sc.get("periods", {})
+            sets = []
+            for pk in sorted(periods.keys()):
+                p = periods[pk]
+                if isinstance(p, dict) and "home" in p and "away" in p:
+                    sets.append({"set": pk, "first": p["home"], "second": p["away"]})
+            league = (e.get("league") or {}).get("name", "")
+            combined = league.lower()
+            is_doubles = ("doubles" in combined or " / " in (e.get("home") or "")
+                          or " / " in (e.get("away") or ""))
+            tour = "wta" if "wta" in combined else ("atp" if "atp" in combined else "")
+            out.append({
+                "event_key": str(e.get("id") or ""),
+                "player1": (e.get("home") or "").strip(),
+                "player2": (e.get("away") or "").strip(),
+                "winner": winner,
+                "final_score": f"{home_sets} - {away_sets}",
+                "sets": sets,
+                "status": "finished",
+                "tournament": league,
+                "round": "",
+                "date": (e.get("date") or "")[:10],
+                "tour": tour,
+                "is_doubles": is_doubles,
+                "finished": True,
+            })
+        log(f"fetch_results fallback odds-api.io: {len(out)} résultats")
+        return out
+    except Exception as exc:
+        log(f"_fetch_results_oddsapi erreur: {exc}", "WARN")
+        return []
+
+
+def _parse_oddsapi_fixture(e: Dict[str, Any], live: bool = False) -> Optional[Dict]:
+    """Convertit un event odds-api.io en format fixture standard."""
+    home = (e.get("home") or "").strip()
+    away = (e.get("away") or "").strip()
+    if not home or not away:
+        return None
+    league = (e.get("league") or {}).get("name", "")
+    combined = ((league or "") + " " + (e.get("league") or {}).get("slug", "")).lower()
+    is_doubles = " / " in home or " / " in away or "double" in combined
+    tour = "wta" if "wta" in combined else ("atp" if "atp" in combined else "")
+    raw_date = e.get("date", "")
+    try:
+        dt = _dt.datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        date_str = dt.strftime("%Y-%m-%d")
+        time_str = dt.strftime("%H:%M")
+    except Exception:
+        date_str = raw_date[:10]
+        time_str = raw_date[11:16]
+    return {
+        "player1": home,
+        "player2": away,
+        "tournament": league,
+        "round": "",
+        "date": date_str,
+        "time": time_str,
+        "live": live or e.get("status") in ("live", "inplay"),
+        "event_key": e.get("id"),
+        "is_doubles": is_doubles,
+        "tour": tour,
+        "source": "odds-api.io",
+    }
 
 
 def _parse_fixture(m: Dict[str, Any]) -> Dict[str, Any]:

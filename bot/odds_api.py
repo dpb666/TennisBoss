@@ -28,7 +28,7 @@ BASE = "https://api.odds-api.io/v3"
 # chargement retomberait sur le défaut. On lit donc à chaque appel.
 def _bookmakers() -> str:
     """Liste de books à comparer (line shopping). Élargissable via ODDS_BOOKMAKERS."""
-    return os.environ.get("ODDS_BOOKMAKERS", "Bet365,Betfair Exchange").strip()
+    return os.environ.get("ODDS_BOOKMAKERS", "Betfair Exchange").strip()
 
 
 def _sharp_book() -> str:
