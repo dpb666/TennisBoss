@@ -464,6 +464,12 @@ def api_predict():
         n2 = p2.strip()
         unknown.append(n2)
 
+    # Guard cross-genre
+    _pt1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
+    _pt2 = (_MEM.get("players") or {}).get(n2, {}).get("tour", "")
+    if _pt1 and _pt2 and {_pt1, _pt2} == {"atp", "wta"}:
+        return jsonify({"error": "Impossible de comparer un joueur ATP et une joueuse WTA"}), 400
+
     f1 = features.feature_vector(features.get_profile(_MEM, n1))
     f2 = features.feature_vector(features.get_profile(_MEM, n2))
     r = predictor.predict(_MEM, n1, f1, n2, f2)
@@ -523,11 +529,22 @@ def api_predict():
     return jsonify(payload)
 
 
+_upcoming_cache: Dict[str, Any] = {}
+_upcoming_cache_ts: float = 0.0
+_UPCOMING_TTL = 270  # 4.5 min — ESPN change rarement plus vite
+
+
 @app.get("/api/upcoming")
 def api_upcoming():
+    import time as _t
     days = min(int(request.args.get("days", 2)), 7)
     limit = min(int(request.args.get("limit", 25)), 100)
     want_odds = request.args.get("odds", "false").lower() == "true"
+    cache_key = f"{days}_{limit}_{want_odds}"
+    now = _t.time()
+    global _upcoming_cache_ts
+    if cache_key in _upcoming_cache and (now - _upcoming_cache_ts) < _UPCOMING_TTL:
+        return jsonify(_upcoming_cache[cache_key])
 
     # Source 1 : API-Tennis (payante)
     fixtures = live_api.fetch_upcoming({"live_api_provider": "api-tennis"}, days_ahead=days)
@@ -567,6 +584,30 @@ def api_upcoming():
         if added:
             log(f"ESPN: {added} matchs supplémentaires ajoutés.", "INFO")
 
+    # ── Injection des matchs live ITF/UTR (non couverts par ESPN) ───────────────
+    # Les matchs odds-api.io "live" ne sont pas dans ESPN → ils disparaissent de
+    # l'onglet "À venir" avant même d'y figurer.  On les injecte ici avec live=True
+    # pour qu'ils soient visibles avec le badge 🔴 LIVE dans la liste à venir.
+    if odds_api.is_enabled():
+        try:
+            live_odds_events = odds_api.fetch_live_events()
+            live_fixtures = live_api.parse_odds_events_as_fixtures(live_odds_events)
+            existing_keys = {(f["player1"].lower(), f["player2"].lower()) for f in fixtures}
+            added_live = 0
+            for lf in live_fixtures:
+                if lf.get("is_doubles"):
+                    continue
+                key = (lf["player1"].lower(), lf["player2"].lower())
+                if key not in existing_keys:
+                    lf["live"] = True
+                    fixtures.append(lf)
+                    existing_keys.add(key)
+                    added_live += 1
+            if added_live:
+                log(f"Inplay inject: {added_live} matchs live ITF/UTR ajoutés à upcoming.", "INFO")
+        except Exception:
+            pass
+
     # Cache météo par tournoi pour éviter les appels répétés
     _weather_cache: Dict[str, Any] = {}
 
@@ -599,10 +640,25 @@ def api_upcoming():
             "source": f.get("source", "api-tennis"),
         }
         if n1 and n2:
+            # Guard: ne pas croiser ATP et WTA (ELO non comparables)
+            t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
+            t2 = (_MEM.get("players") or {}).get(n2, {}).get("tour", "")
+            if t1 and t2 and {t1, t2} == {"atp", "wta"}:
+                item["predictable"] = False
+                item["prediction_skip"] = "cross-gender"
+                continue
             surface = _surface_for(f["tournament"], f["date"])
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
             r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
+            # ITF/inconnu + joueurs peu vus → prédiction non fiable
+            _tour_raw = (f.get("tour") or "").lower()
+            _n1_matches = int((_MEM.get("players") or {}).get(n1, {}).get("n", 0))
+            _n2_matches = int((_MEM.get("players") or {}).get(n2, {}).get("n", 0))
+            _itf_unreliable = (_tour_raw in ("", "itf") and min(_n1_matches, _n2_matches) < 15)
+            if _itf_unreliable:
+                r["confidence"] = min(r.get("confidence", 0.0), 0.15)
+                r["confidence_label"] = "très faible (ITF / données insuffisantes)"
             bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
             fs_prob = max(r["prob1"], r["prob2"]) / 100.0
             fair_odds = round(1.0 / fs_prob, 2) if fs_prob > 0 else None
@@ -700,7 +756,10 @@ def api_upcoming():
         out.append(item)
         if len(out) >= limit:
             break
-    return jsonify({"count": len(out), "matches": out})
+    result = {"count": len(out), "matches": out}
+    _upcoming_cache[cache_key] = result
+    _upcoming_cache_ts = _t.time()
+    return jsonify(result)
 
 
 @app.get("/api/live")
@@ -793,6 +852,16 @@ def api_live():
 
     # Matchs avec cotes live en premier, puis par durée décroissante
     out.sort(key=lambda m: (m["live_odds"] is None, -m["minute"]))
+
+    # ── Auto-settlement des picks en attente ─────────────────────────────────
+    try:
+        live_ids = {str(m["event_id"]) for m in out}
+        settled = db.auto_settle_picks(live_ids)
+        if settled:
+            log(f"Auto-settled {len(settled)} pick(s): {[s['pick'] for s in settled]}", "INFO")
+    except Exception as _e:
+        log(f"auto_settle_picks error: {_e}", "WARN")
+
     return jsonify({"count": len(out), "matches": out})
 
 
@@ -901,6 +970,275 @@ def api_inplay_best():
     })
 
 
+@app.get("/api/inplay/markets")
+def api_inplay_markets():
+    """Marchés inplay dérivés par joueur : gagnant set, O/U jeux, O/U aces.
+
+    Pour chaque match live, calcule 3 marchés depuis les profils joueurs EMA :
+    - set_winner   : qui va gagner le set en cours (depuis le score + serve EMA)
+    - total_games  : Over/Under 9.5 jeux par set (serve haute → plus de jeux)
+    - aces         : Over/Under aces restants (serve haute → plus d'aces)
+    """
+    if not odds_api.is_enabled():
+        return jsonify({"error": "ODDS_API_KEY absente"}), 503
+
+    live_events = odds_api.fetch_live_events()
+    result = []
+
+    for e in live_events[:20]:
+        home_raw = e.get("home", "")
+        away_raw = e.get("away", "")
+        n1 = _resolve(home_raw) or home_raw.strip()
+        n2 = _resolve(away_raw) or away_raw.strip()
+        if not n1 or not n2:
+            continue
+
+        # Marchés réels Betfair Exchange (Spread + Totals) — TTL 60s
+        event_id = e.get("id")
+        bk_markets = odds_api.fetch_live_game_markets(event_id) if event_id else {}
+
+        p1 = features.get_profile(_MEM, n1)
+        p2 = features.get_profile(_MEM, n2)
+
+        serve1 = float(p1.get("serve", 0.5))
+        serve2 = float(p2.get("serve", 0.5))
+        avg_serve = (serve1 + serve2) / 2
+
+        # Score actuel
+        scores = e.get("scores") or {}
+        periods = scores.get("periods") or {}
+        sets_home = int(scores.get("home") or 0)
+        sets_away = int(scores.get("away") or 0)
+        current_set = sets_home + sets_away + 1
+        current_period = periods.get(f"p{current_set}") or {}
+        games_h = int(current_period.get("home") or 0)
+        games_a = int(current_period.get("away") or 0)
+
+        league = (e.get("league") or {}).get("name", "")
+        clock = e.get("clock") or {}
+        minute = int(clock.get("minute") or 0)
+
+        set_scores_display = []
+        for i in range(1, 8):
+            pp = periods.get(f"p{i}")
+            if pp and (pp.get("home") is not None or pp.get("away") is not None):
+                set_scores_display.append(f"{pp.get('home', 0)}-{pp.get('away', 0)}")
+
+        markets = []
+
+        # ── Market 1 : Gagnant set actuel ──────────────────────────────────────
+        lead = games_h - games_a
+        # serve élevée → le leader tient plus facilement → probabilité +robuste
+        set_prob_h = 0.5 + lead * (0.07 + avg_serve * 0.05)
+        set_prob_h = max(0.10, min(0.90, set_prob_h))
+        if set_prob_h >= 0.5:
+            sw_name, sw_prob = n1, set_prob_h
+        else:
+            sw_name, sw_prob = n2, 1.0 - set_prob_h
+        sw_conf = "Forte" if sw_prob > 0.70 else "Moyenne" if sw_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "set_winner",
+            "label": f"Gagnant set {current_set}",
+            "pick": sw_name,
+            "prob": round(sw_prob * 100, 1),
+            "confidence": sw_conf,
+            "rationale": f"Score {games_h}-{games_a} · service moy. {avg_serve:.2f}",
+        })
+
+        # ── Market 2 : Prochain set (winner) ──────────────────────────────────
+        # Avantage sets gagnés → momentum
+        set_lead = sets_home - sets_away
+        next_prob_h = 0.5 + set_lead * 0.06 + (serve1 - serve2) * 0.15
+        next_prob_h = max(0.15, min(0.85, next_prob_h))
+        if next_prob_h >= 0.5:
+            ns_name, ns_prob = n1, next_prob_h
+        else:
+            ns_name, ns_prob = n2, 1.0 - next_prob_h
+        ns_conf = "Forte" if ns_prob > 0.70 else "Moyenne" if ns_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "next_set",
+            "label": f"Gagnant set {current_set + 1}",
+            "pick": ns_name,
+            "prob": round(ns_prob * 100, 1),
+            "confidence": ns_conf,
+            "rationale": f"Sets {sets_home}-{sets_away} · serve diff {serve1 - serve2:+.2f}",
+        })
+
+        # ── Market 3 : Tiebreak set actuel O/U 9.5 ──────────────────────────
+        # Serve élevée → peu de breaks → tiebreak probable
+        threshold_games = 9.5
+        raw_prob_over = 0.50 + (avg_serve - 0.50) * 0.80
+        raw_prob_over = max(0.30, min(0.80, raw_prob_over))
+        if raw_prob_over >= 0.50:
+            tg_pick = f"OVER {threshold_games}"
+            tg_prob = raw_prob_over
+        else:
+            tg_pick = f"UNDER {threshold_games}"
+            tg_prob = 1.0 - raw_prob_over
+        tg_conf = "Forte" if tg_prob > 0.68 else "Moyenne" if tg_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "total_games",
+            "label": f"Jeux set {current_set} O/U {threshold_games}",
+            "pick": tg_pick,
+            "prob": round(tg_prob * 100, 1),
+            "confidence": tg_conf,
+            "rationale": f"Serve moyen {avg_serve:.2f} · tiebreak set {current_set} probable si serve haute",
+        })
+
+        sets_remaining = max(1, 3 - sets_home - sets_away)
+
+        # ── Market 4 : Aces O/U ───────────────────────────────────────────────
+        # Calibration ATP réelle : serve=0.62 ≈ 8-10 aces/match, serve=0.75 → ~15
+        aces_per_match = max(1.0, (avg_serve - 0.40) * 35.0)  # ~3.5@0.5, ~7.7@0.62, ~12@0.74
+        expected_aces = aces_per_match * (sets_remaining / 2.2)  # proratisé sets restants
+        threshold_aces = max(2.5, round(expected_aces * 2) / 2)
+        raw_prob_over_aces = 0.50 + (expected_aces - threshold_aces) * 0.10
+        raw_prob_over_aces = max(0.30, min(0.82, raw_prob_over_aces))
+        if raw_prob_over_aces >= 0.50:
+            ac_pick = f"OVER {threshold_aces}"
+            ac_prob = raw_prob_over_aces
+        else:
+            ac_pick = f"UNDER {threshold_aces}"
+            ac_prob = 1.0 - raw_prob_over_aces
+        ac_conf = "Forte" if ac_prob > 0.68 else "Moyenne" if ac_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "aces",
+            "label": f"Aces O/U {threshold_aces}",
+            "pick": ac_pick,
+            "prob": round(ac_prob * 100, 1),
+            "confidence": ac_conf,
+            "rationale": f"~{expected_aces:.1f} aces attendus ({sets_remaining} sets restants · serve {avg_serve:.2f})",
+        })
+
+        # ── Market 5 : Total jeux match (ligne Betfair réelle si dispo) ─────────
+        best_tot = bk_markets.get("best_totals")
+        if best_tot:
+            # Ligne réelle Betfair Exchange
+            threshold_tgm = best_tot["hdp"]
+            impl_over = best_tot["implied_over_prob"]
+            # Notre modèle : serve haute → plus de jeux
+            model_over = 0.50 + (avg_serve - 0.5) * 0.40
+            model_over = max(0.20, min(0.85, model_over))
+            # Edge = notre prob - prob implicite bookmaker
+            edge_tgm = model_over - impl_over
+            if model_over >= 0.50:
+                tgm_pick = f"OVER {threshold_tgm}"
+                tgm_prob = model_over
+            else:
+                tgm_pick = f"UNDER {threshold_tgm}"
+                tgm_prob = 1.0 - model_over
+            tgm_rationale = (f"Betfair · impl={impl_over*100:.0f}% · "
+                             f"modèle={model_over*100:.0f}% · edge={edge_tgm*100:+.1f}%")
+            tgm_odds = best_tot["over_odds"] if model_over >= 0.50 else best_tot["under_odds"]
+        else:
+            # Fallback heuristique si pas de cotes Betfair disponibles
+            games_per_set = 9.5 + (avg_serve - 0.5) * 3.0
+            expected_total_games = 2.2 * games_per_set
+            threshold_tgm = round(expected_total_games * 2) / 2
+            threshold_tgm = max(17.5, min(27.5, threshold_tgm))
+            raw_over = 0.50 + (avg_serve - 0.5) * 0.40
+            raw_over = max(0.30, min(0.80, raw_over))
+            if raw_over >= 0.50:
+                tgm_pick = f"OVER {threshold_tgm}"
+                tgm_prob = raw_over
+            else:
+                tgm_pick = f"UNDER {threshold_tgm}"
+                tgm_prob = 1.0 - raw_over
+            tgm_rationale = f"~{expected_total_games:.1f}j attendus (serve {avg_serve:.2f})"
+            tgm_odds = None
+        tgm_conf = "Forte" if tgm_prob > 0.68 else "Moyenne" if tgm_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "total_points",
+            "label": f"Total jeux O/U {threshold_tgm}",
+            "pick": tgm_pick,
+            "prob": round(tgm_prob * 100, 1),
+            "confidence": tgm_conf,
+            "rationale": tgm_rationale,
+            "odds": tgm_odds,
+            "has_real_odds": best_tot is not None,
+        })
+
+        # ── Market 6 : Total fautes doubles O/U ───────────────────────────────
+        # Calibration ATP : serve=0.62 ≈ 4-5 DF/match, serve=0.50 → ~6-7 DF/match
+        df_per_match = max(1.0, (0.85 - avg_serve) * 18.0)  # ~6.3@0.5, ~4.1@0.62, ~1.8@0.75
+        expected_df = df_per_match * (sets_remaining / 2.2)
+        threshold_df = max(1.5, round(expected_df * 2) / 2)  # arrondi à 0.5
+        raw_prob_over_df = 0.50 + (expected_df - threshold_df) * 0.10
+        raw_prob_over_df = max(0.30, min(0.80, raw_prob_over_df))
+        if raw_prob_over_df >= 0.50:
+            df_pick = f"OVER {threshold_df}"
+            df_prob = raw_prob_over_df
+        else:
+            df_pick = f"UNDER {threshold_df}"
+            df_prob = 1.0 - raw_prob_over_df
+        df_conf = "Forte" if df_prob > 0.68 else "Moyenne" if df_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "double_faults",
+            "label": f"Dbl fautes O/U {threshold_df}",
+            "pick": df_pick,
+            "prob": round(df_prob * 100, 1),
+            "confidence": df_conf,
+            "rationale": f"~{expected_df:.1f} DF attendues · serve {avg_serve:.2f}",
+        })
+
+        # ── Market 7 : Handicap jeux (ligne Betfair réelle si dispo) ─────────
+        best_sprd = bk_markets.get("best_spread")
+        set_lead = sets_home - sets_away
+        prob_h_hcp = 0.5 + (serve1 - serve2) * 0.35 + set_lead * 0.04
+        prob_h_hcp = max(0.15, min(0.85, prob_h_hcp))
+        if prob_h_hcp >= 0.5:
+            hcp_fav, hcp_model_prob = n1, prob_h_hcp
+        else:
+            hcp_fav, hcp_model_prob = n2, 1.0 - prob_h_hcp
+        if best_sprd:
+            hcp_line = best_sprd["hdp"]
+            impl_hcp = best_sprd["implied_home_prob"] if hcp_fav == n1 else 1 - best_sprd["implied_home_prob"]
+            edge_hcp = hcp_model_prob - impl_hcp
+            hcp_cover_prob = hcp_model_prob
+            hcp_rationale = (f"Betfair · impl={impl_hcp*100:.0f}% · "
+                             f"modèle={hcp_model_prob*100:.0f}% · edge={edge_hcp*100:+.1f}%")
+            hcp_odds = best_sprd["home_odds"] if hcp_fav == n1 else best_sprd["away_odds"]
+        else:
+            expected_margin = (hcp_model_prob - 0.5) * 16
+            hcp_line = max(0.5, round(expected_margin * 2) / 2)
+            hcp_cover_prob = 0.50 + (hcp_model_prob - 0.5) * 0.55
+            hcp_cover_prob = max(0.35, min(0.80, hcp_cover_prob))
+            hcp_rationale = (f"Serve diff {serve1 - serve2:+.2f} · sets {sets_home}-{sets_away} "
+                             f"· marge ~{expected_margin:.1f}j")
+            hcp_odds = None
+        hcp_conf = "Forte" if hcp_cover_prob > 0.68 else "Moyenne" if hcp_cover_prob > 0.57 else "Faible"
+        markets.append({
+            "type": "handicap",
+            "label": f"Hcp jeux -{hcp_line}",
+            "pick": f"{hcp_fav} -{hcp_line}",
+            "prob": round(hcp_cover_prob * 100, 1),
+            "confidence": hcp_conf,
+            "rationale": hcp_rationale,
+            "odds": hcp_odds,
+            "has_real_odds": best_sprd is not None,
+        })
+
+        markets.sort(key=lambda m: -m["prob"])
+
+        result.append({
+            "event_id": e["id"],
+            "player1": home_raw,
+            "player2": away_raw,
+            "player1_resolved": n1,
+            "player2_resolved": n2,
+            "league": league,
+            "sets_home": sets_home,
+            "sets_away": sets_away,
+            "score_display": ", ".join(set_scores_display),
+            "minute": minute,
+            "markets": markets,
+        })
+
+    # Tri : match avec le meilleur marché en tête
+    result.sort(key=lambda x: max((m["prob"] for m in x["markets"]), default=0), reverse=True)
+    return jsonify({"count": len(result), "matches": result})
+
+
 @app.get("/api/value")
 def api_value():
     """Compare le modèle au marché et calcule l'EV (espérance de gain) réelle.
@@ -912,6 +1250,7 @@ def api_value():
     limit = min(int(request.args.get("limit", 10)), 30)
     min_conf = float(request.args.get("min_confidence", 0.55))
     min_ev = float(request.args.get("min_ev", 5.0))
+    max_odds = float(request.args.get("max_odds", 15.0))  # filtre les longshots extrêmes
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
 
@@ -987,7 +1326,9 @@ def api_value():
 
         # EV en % pour filtrage et affichage.
         best_ev_pct = round(best_ev * 100, 1)
-        is_value = best_ev_pct >= min_ev  # EV minimum pour qualifier de "value"
+        pick_odds_check = ho if best_side == n1 else ao
+        is_value = (best_ev_pct >= min_ev
+                    and pick_odds_check <= max_odds)  # filtre longshots extrêmes
 
         # Paper-trading : capture le value pick blendé (ROI mesuré au settlement).
         if best_ev > 0:
@@ -1008,11 +1349,30 @@ def api_value():
             except Exception:  # noqa: BLE001
                 pass
 
-        out.append({
+        # Kelly criterion (fraction 1/4 pour limiter le risque) :
+        # f* = (p*b - q) / b  où b = cote-1, p = proba blendée du côté conseillé
+        _p_best = pb1 if best_side == n1 else pb2
+        _b_best = (ho if best_side == n1 else ao) - 1.0
+        _kelly_full = (_p_best * _b_best - (1.0 - _p_best)) / _b_best if _b_best > 0 else 0.0
+        _kelly_frac = max(0.0, round(_kelly_full * 0.25, 4))   # Kelly 1/4 = prudent
+        _kelly_u = round(_kelly_frac * 100, 1)                 # en % de bankroll
+
+        # Badge tournoi profitable (> 58% de précision historique ATP/WTA)
+        _leag_name = (e.get("league") or {}).get("name", "")
+        _GOOD_TOURN = {"berlin", "nottingham", "eastbourne", "parma", "plovdiv",
+                       "brasov", "piracicaba", "dublin", "troyes", "wimbledon"}
+        _tourn_label = _leag_name.lower()
+        _terrain_ok = any(k in _tourn_label for k in _GOOD_TOURN)
+
+        _pick_entry = {
             "player1": n1, "player2": n2,
-            "league": (e.get("league") or {}).get("name", ""),
+            "date": e.get("date", ""),
+            "time": e.get("time", ""),
+            "league": _leag_name,
             "confidence": r["confidence"],
             "confidence_label": r["confidence_label"],
+            "kelly_u": _kelly_u,
+            "terrain_favorable": _terrain_ok,
             "model_first_set_prob1": r["prob1"],
             "model_match_prob1": round(pm1 * 100, 1),
             "model_match_prob2": round(pm2 * 100, 1),
@@ -1030,7 +1390,20 @@ def api_value():
             "best_book": (mw.get("home_book") if best_side == n1
                           else mw.get("away_book")) if is_value else None,
             "value": is_value,
-        })
+        }
+        out.append(_pick_entry)
+
+        # Telegram alert pour les picks value haute confiance (non bloquant)
+        if is_value and r["confidence"] >= 0.55 and best_ev_pct >= 10.0:
+            try:
+                from . import realtime_alerts as _ra
+                _alerter = _ra.get()
+                if _alerter:
+                    import threading as _th
+                    _th.Thread(target=_alerter.on_value_pick,
+                               args=(_pick_entry,), daemon=True).start()
+            except Exception:
+                pass
 
     # Les meilleures values d'abord.
     out.sort(key=lambda c: c["best_ev"], reverse=True)
@@ -1068,6 +1441,31 @@ def api_value():
         "note": ("proba match calibrée (best-of-3 + temperature), blendée au "
                  "marché (poids modèle w) ; EV = proba_blend×cote − 1 ; "
                  f"value = EV ≥ {min_ev}%"),
+    })
+
+
+@app.get("/api/value/history")
+def api_value_history():
+    """Historique des value picks réglés avec résultat et P&L."""
+    limit = int(request.args.get("limit", 50))
+    rows = db.list_value_history(limit=limit)
+    stats = db.value_picks_stats()
+    picks = []
+    for r in rows:
+        picks.append({
+            "date": _fmt_date(r["date"]),
+            "player1": r["player1"],
+            "player2": r["player2"],
+            "side": r["side"],
+            "odds": r["odds"],
+            "ev": r["ev"],
+            "result": r["result"],  # 1=gagné, 0=perdu
+            "pnl": r["pnl"],
+            "winner": r["winner"],
+        })
+    return jsonify({
+        "picks": picks,
+        "stats": stats,
     })
 
 
@@ -1410,6 +1808,86 @@ def api_upload():
         return jsonify({"error": f"LLM inaccessible : {exc}"}), 503
 
 
+@app.route("/api/inplay/picks", methods=["GET"])
+def api_inplay_picks_list():
+    picks = db.list_inplay_picks(limit=100)
+    stats = db.inplay_roi_stats()
+    return jsonify({
+        "stats": stats,
+        "picks": [dict(r) for r in picks],
+    })
+
+
+@app.route("/api/inplay/picks", methods=["POST"])
+def api_inplay_picks_log():
+    body = request.get_json(silent=True) or {}
+    required = ("player1", "player2", "market_type", "pick", "prob")
+    if not all(k in body for k in required):
+        return jsonify({"error": f"Champs requis : {required}"}), 400
+
+    # Enrichir avec les cotes live actuelles si event_id fourni
+    odds_home = body.get("odds_home")
+    odds_away = body.get("odds_away")
+    odds_book = body.get("odds_book")
+    if not odds_home and body.get("event_id"):
+        try:
+            live_data = _MEM.get("live_matches") or {}
+            ev = live_data.get(str(body["event_id"])) or {}
+            lo = ev.get("live_odds") or {}
+            if lo.get("home"):
+                odds_home = lo["home"]
+                odds_away = lo["away"]
+                odds_book = ", ".join(lo.get("books", []))
+        except Exception:
+            pass
+
+    pick_id = db.log_inplay_pick(
+        player1=body["player1"],
+        player2=body["player2"],
+        league=body.get("league", ""),
+        market_type=body["market_type"],
+        market_label=body.get("market_label", ""),
+        pick=body["pick"],
+        odds=body.get("odds"),
+        prob=float(body["prob"]),
+        stake=float(body.get("stake", 10.0)),
+        odds_home=odds_home,
+        odds_away=odds_away,
+        odds_book=odds_book or body.get("odds_book"),
+        score=body.get("score"),
+        minute=body.get("minute"),
+        event_id=str(body["event_id"]) if body.get("event_id") else None,
+        sets_home=body.get("sets_home"),
+        sets_away=body.get("sets_away"),
+    )
+    return jsonify({"id": pick_id, "status": "logged"}), 201
+
+
+@app.route("/api/inplay/picks/<int:pick_id>", methods=["PUT"])
+def api_inplay_picks_settle(pick_id: int):
+    body = request.get_json(silent=True) or {}
+    result = (body.get("result") or "").upper()
+    if result not in ("W", "L", "V"):
+        return jsonify({"error": "result doit être W, L ou V"}), 400
+    ok = db.settle_inplay_pick(
+        pick_id=pick_id,
+        result=result,
+        stake=body.get("stake"),
+    )
+    if not ok:
+        return jsonify({"error": "pick introuvable"}), 404
+    return jsonify({"id": pick_id, "result": result, "status": "settled"})
+
+
+@app.route("/api/inplay/picks/<int:pick_id>", methods=["DELETE"])
+def api_inplay_picks_delete(pick_id: int):
+    with db.connect() as conn:
+        cur = conn.execute("DELETE FROM inplay_picks WHERE id=?", (pick_id,))
+        if cur.rowcount == 0:
+            return jsonify({"error": "pick introuvable"}), 404
+    return jsonify({"id": pick_id, "status": "deleted"})
+
+
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
     ev = odds_api.find_event(odds_index, raw1, raw2)
     if not ev:
@@ -1441,6 +1919,32 @@ def _settlement_loop(interval: int) -> None:
             log(f"Settlement auto en échec ({exc}).", "WARN")
 
 
+def _inplay_settle_loop(interval: int = 300) -> None:
+    """Boucle légère toutes les 5 min : settle les picks inplay sans appel API.
+
+    Récupère les event_ids en live depuis odds_api (déjà en cache TTL),
+    puis appelle auto_settle_picks — zéro requête supplémentaire si le cache
+    est chaud, au pire 1 requête /live légère.
+    """
+    import time as _t
+    from .log import log
+
+    while True:
+        _t.sleep(interval)
+        try:
+            pending = db.list_inplay_picks_pending()
+            if not pending:
+                continue
+            live_events = odds_api.fetch_live_events()
+            live_ids = {str(e.get("event_id", "")) for e in live_events}
+            settled = db.auto_settle_picks(live_ids)
+            if settled:
+                log(f"[Inplay 5min] Auto-settled {len(settled)} pick(s): "
+                    f"{[s['pick'] for s in settled]}", "INFO")
+        except Exception as exc:  # noqa: BLE001
+            log(f"[Inplay 5min] Erreur settlement: {exc}", "WARN")
+
+
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     _load_state()
     from .log import log
@@ -1465,6 +1969,13 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
         threading.Thread(target=_settlement_loop, args=(interval,),
                          daemon=True).start()
         log(f"Settlement automatique toutes les {interval}s (auto-calibration).")
+
+    inplay_interval = int(os.environ.get("INPLAY_SETTLE_INTERVAL_S", "300"))
+    if inplay_interval > 0:
+        import threading as _th
+        _th.Thread(target=_inplay_settle_loop, args=(inplay_interval,),
+                   daemon=True).start()
+        log(f"Settlement inplay toutes les {inplay_interval}s.")
 
     # Self-healing agent (DeepSeek R1 via Ollama)
     from . import healer as _healer

@@ -108,6 +108,13 @@ def run_settlement(mem: Dict[str, Any],
                     clv.settle(n1, n2, winner_name)  # noms résolus
             except Exception:  # noqa: BLE001
                 pass
+            # Value picks : marque le résultat pour le suivi de ROI individuel.
+            try:
+                db.settle_value_pick(n1, n2, winner_name)
+                if n1 != n1_raw or n2 != n2_raw:
+                    db.settle_value_pick(n1_raw, n2_raw, winner_name)
+            except Exception:  # noqa: BLE001
+                pass
             # Apprentissage continu : ELO mis à jour, pondéré par la dominance.
             if "elo" in mem:
                 mult = elo.dominance_mult(r["sets"], r["winner"])

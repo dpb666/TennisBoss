@@ -3,10 +3,13 @@ package com.tennisboss.app.data
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Part
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /** Endpoints exposés par bot/api.py. */
@@ -60,6 +63,24 @@ interface TennisBossApi {
     @GET("api/inplay/best")
     suspend fun inplayBest(): InplayBestResponse
 
+    @GET("api/inplay/markets")
+    suspend fun inplayMarkets(): InplayMarketsResponse
+
+    @GET("api/inplay/picks")
+    suspend fun inplayPicks(): InplayPicksResponse
+
+    @POST("api/inplay/picks")
+    suspend fun logInplayPick(@Body request: InplayPickRequest): InplayPickLogResponse
+
+    @PUT("api/inplay/picks/{id}")
+    suspend fun settleInplayPick(
+        @Path("id") id: Int,
+        @Body body: Map<String, String>,
+    ): InplayPickLogResponse
+
+    @DELETE("api/inplay/picks/{id}")
+    suspend fun deleteInplayPick(@Path("id") id: Int): InplayPickLogResponse
+
     @GET("api/history")
     suspend fun historyDates(@Query("dates") dates: Int = 1): HistoryDatesResponse
 
@@ -68,6 +89,11 @@ interface TennisBossApi {
 
     @GET("api/clv")
     suspend fun clv(): ClvResponse
+
+    @GET("api/value/history")
+    suspend fun valueHistory(
+        @Query("limit") limit: Int = 50,
+    ): ValueHistoryResponse
 
     @POST("api/chat")
     suspend fun chat(@Body request: ChatRequest): ChatResponse

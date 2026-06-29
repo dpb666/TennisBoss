@@ -320,6 +320,8 @@ data class ValueComparison(
     val best_ev: Double = 0.0,
     val best_book: String? = null,
     val value: Boolean = false,
+    val kelly_u: Double = 0.0,
+    val terrain_favorable: Boolean = false,
     val date: String = "",
     val source: String = "",
 )
@@ -331,6 +333,30 @@ data class ValueResponse(
     val retry_in_s: Int? = null,
     val message: String = "",
     val note: String = "",
+)
+
+data class ValuePickHistory(
+    val date: String = "",
+    val player1: String = "",
+    val player2: String = "",
+    val side: String = "",
+    val odds: Double = 0.0,
+    val ev: Double = 0.0,
+    val result: Int? = null,
+    val pnl: Double? = null,
+    val winner: String? = null,
+)
+
+data class ValuePickStats(
+    val n: Int = 0,
+    val wins: Int = 0,
+    val win_rate: Double? = null,
+    val roi: Double? = null,
+)
+
+data class ValueHistoryResponse(
+    val picks: List<ValuePickHistory> = emptyList(),
+    val stats: ValuePickStats = ValuePickStats(),
 )
 
 // ─── Live matches ────────────────────────────────────────────────────────────
@@ -402,6 +428,103 @@ data class InplayBestResponse(
     val count: Int = 0,
     val best: List<InplayBestPick> = emptyList(),
     val note: String = "",
+)
+
+// ─── Inplay markets ───────────────────────────────────────────────────────────
+
+data class InplayMarket(
+    val type: String = "",
+    val label: String = "",
+    val pick: String = "",
+    val prob: Double = 0.0,
+    val confidence: String = "",
+    val rationale: String = "",
+    val odds: Double? = null,
+    val has_real_odds: Boolean = false,
+)
+
+data class InplayMatchMarkets(
+    val event_id: Long = 0,
+    val player1: String = "",
+    val player2: String = "",
+    val player1_resolved: String? = null,
+    val player2_resolved: String? = null,
+    val league: String = "",
+    val sets_home: Int = 0,
+    val sets_away: Int = 0,
+    val score_display: String = "",
+    val minute: Int = 0,
+    val markets: List<InplayMarket> = emptyList(),
+)
+
+data class InplayMarketsResponse(
+    val count: Int = 0,
+    val matches: List<InplayMatchMarkets> = emptyList(),
+)
+
+// ─── Inplay picks & ROI ───────────────────────────────────────────────────────
+
+data class InplayPickRequest(
+    val player1: String,
+    val player2: String,
+    val league: String,
+    val market_type: String,
+    val market_label: String,
+    val pick: String,
+    val odds: Double?,
+    val odds_home: Double? = null,
+    val odds_away: Double? = null,
+    val odds_book: String? = null,
+    val prob: Double,
+    val score: String? = null,
+    val sets_home: Int? = null,
+    val sets_away: Int? = null,
+    val minute: Int? = null,
+    val event_id: Long? = null,
+    val stake: Double = 10.0,
+)
+
+data class InplayPickItem(
+    val id: Int = 0,
+    val ts: String = "",
+    val player1: String = "",
+    val player2: String = "",
+    val league: String = "",
+    val market_type: String = "",
+    val market_label: String = "",
+    val pick: String = "",
+    val odds: Double? = null,
+    val odds_home: Double? = null,
+    val odds_away: Double? = null,
+    val odds_book: String? = null,
+    val prob: Double = 0.0,
+    val score: String? = null,
+    val minute: Int? = null,
+    val stake: Double = 10.0,
+    val result: String? = null,
+    val pnl: Double? = null,
+)
+
+data class InplayROIStats(
+    val total: Int = 0,
+    val settled: Int = 0,
+    val wins: Int = 0,
+    val losses: Int = 0,
+    val pending: Int = 0,
+    val staked: Double = 0.0,
+    val pnl: Double = 0.0,
+    val roi_pct: Double = 0.0,
+    val avg_odds: Double = 0.0,
+)
+
+data class InplayPicksResponse(
+    val stats: InplayROIStats = InplayROIStats(),
+    val picks: List<InplayPickItem> = emptyList(),
+)
+
+data class InplayPickLogResponse(
+    val id: Int = 0,
+    val status: String = "",
 )
 
 // ─── Historique par date ──────────────────────────────────────────────────────

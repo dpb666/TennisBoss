@@ -16,12 +16,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,8 +40,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ValueComparison
+import com.tennisboss.app.data.ValuePickHistory
 import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SkeletonList
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.LocalDate
 
 private val GoodColor = Color(0xFF00E5A0)   // EV+
 private val BadColor = Color(0xFFFF5C7A)    // EV-
@@ -45,35 +60,84 @@ private val P2Color = Color(0xFF00C2A8)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ValueScreen(vm: ValueViewModel = viewModel()) {
-    LaunchedEffect(Unit) {
-        if (vm.state is ValueUiState.Idle) vm.load()
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(Unit) {
+        vm.startAutoRefresh()
+        onDispose { vm.stopAutoRefresh() }
     }
 
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1 && vm.historyState is ValueHistoryUiState.Idle) {
+            vm.loadHistory()
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header
+        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("💎 Value bets (IA)", style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold)
+                    val sub = when (val s = vm.state) {
+                        is ValueUiState.Success -> {
+                            val m = s.refreshIn / 60
+                            val sec = s.refreshIn % 60
+                            "Màj dans ${m}m${sec.toString().padStart(2, '0')}s"
+                        }
+                        else -> "Détection d'anomalies par IA"
+                    }
+                    Text(sub, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (selectedTab == 0) {
+                    Button(
+                        onClick = { vm.load() },
+                        enabled = vm.state !is ValueUiState.Loading,
+                    ) { Text("Rafraîchir") }
+                }
+            }
+        }
+
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
+                text = { Text("Aujourd'hui") })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
+                text = { Text("Historique") })
+        }
+
+        when (selectedTab) {
+            0 -> ValuePicksTab(vm)
+            1 -> ValueHistoryTab(vm)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ValuePicksTab(vm: ValueViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("💎 Value bets (IA)", style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold)
-                Text(
-                    "Détection d'anomalies par IA",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Button(
-                onClick = { vm.load() },
-                enabled = vm.state !is ValueUiState.Loading,
-            ) { Text("Rafraîchir") }
-        }
+        FilterChip(
+            selected = vm.highConfidenceOnly,
+            onClick = { vm.highConfidenceOnly = !vm.highConfidenceOnly },
+            label = {
+                Text(if (vm.highConfidenceOnly) "🎯 Fiable (≥40%)" else "Tout afficher")
+            },
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            ),
+        )
 
         PullToRefreshBox(
             isRefreshing = vm.state is ValueUiState.Loading,
@@ -87,12 +151,9 @@ fun ValueScreen(vm: ValueViewModel = viewModel()) {
                 is ValueUiState.Success -> {
                     if (s.rateLimited) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                "⏳ Limite API atteinte",
+                            Text("⏳ Limite API atteinte",
                                 style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFFB800),
-                            )
+                                fontWeight = FontWeight.Bold, color = Color(0xFFFFB800))
                             Text(
                                 s.rateLimitMessage.ifBlank {
                                     "Quota odds-api.io épuisé. " +
@@ -102,21 +163,148 @@ fun ValueScreen(vm: ValueViewModel = viewModel()) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                    } else if (s.comparisons.isEmpty()) {
-                        Text(
-                            "Aucune value pour le moment (cotes momentanément indisponibles " +
-                                "ou aucun match coté). Tire vers le bas pour réessayer.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(s.comparisons) { ValueCard(it) }
+                        val filtered = if (vm.highConfidenceOnly)
+                            s.comparisons.filter { it.confidence >= 0.4 }
+                        else s.comparisons
+                        val hidden = s.comparisons.size - filtered.size
+
+                        if (filtered.isEmpty()) {
+                            Text(
+                                if (s.comparisons.isEmpty())
+                                    "Aucune value pour le moment. Tire vers le bas pour réessayer."
+                                else
+                                    "Toutes les values ont une confiance < 40%. " +
+                                    "Désactive le filtre pour les voir.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                if (hidden > 0) {
+                                    item {
+                                        Text(
+                                            "$hidden masqué${if (hidden > 1) "s" else ""} (confiance < 40%)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                items(filtered) { ValueCard(it) }
+                            }
                         }
                     }
                 }
                 else -> {}
             }
+        }
+    }
+}
+
+@Composable
+private fun ValueHistoryTab(vm: ValueViewModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        when (val s = vm.historyState) {
+            is ValueHistoryUiState.Loading -> SkeletonList(count = 5)
+            is ValueHistoryUiState.Error ->
+                Text(s.message, color = MaterialTheme.colorScheme.error)
+            is ValueHistoryUiState.Success -> {
+                val stats = s.data.stats
+                if (stats.n > 0) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            StatPill("Picks", "${stats.n}")
+                            StatPill("Gagnés", "${stats.wins}")
+                            StatPill("Win %",
+                                stats.win_rate?.let { "${(it * 100).toInt()}%" } ?: "–")
+                            val roiColor = when {
+                                (stats.roi ?: 0.0) > 0 -> GoodColor
+                                (stats.roi ?: 0.0) < -0.05 -> BadColor
+                                else -> Color(0xFFFFB800)
+                            }
+                            StatPill("ROI",
+                                stats.roi?.let { String.format("%+.1f%%", it * 100) } ?: "–",
+                                roiColor)
+                        }
+                    }
+                }
+
+                if (s.data.picks.isEmpty()) {
+                    Text(
+                        "Aucun pick réglé pour le moment.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(s.data.picks) { HistoryPickRow(it) }
+                    }
+                }
+            }
+            else -> {
+                Button(onClick = { vm.loadHistory() }) { Text("Charger l'historique") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatPill(label: String, value: String, valueColor: Color = GoodColor) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold, color = valueColor)
+        Text(label, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun HistoryPickRow(p: ValuePickHistory) {
+    val won = p.result == 1
+    val lost = p.result == 0
+    val pending = p.result == null
+    val rowColor = when {
+        won -> GoodColor.copy(alpha = 0.08f)
+        lost -> BadColor.copy(alpha = 0.06f)
+        else -> Color.Transparent
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(rowColor)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("${p.player1} vs ${p.player2}",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text("Pari : ${p.side} @ ${p.odds}  •  EV ${String.format("%+.1f%%", p.ev)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(p.date, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline)
+        }
+        Spacer(Modifier.size(8.dp))
+        val (icon, pnlStr, color) = when {
+            won  -> Triple("✅", p.pnl?.let { String.format("%+.2fu", it) } ?: "+?", GoodColor)
+            lost -> Triple("❌", "-1.00u", BadColor)
+            else -> Triple("⏳", "en attente", Color(0xFFFFB800))
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(icon, style = MaterialTheme.typography.bodyMedium)
+            Text(pnlStr, style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold, color = color)
         }
     }
 }
@@ -130,17 +318,26 @@ private fun ValueCard(c: ValueComparison) {
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // ── Header : ligue + date + badge ────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    c.league.ifBlank { "—" },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        c.league.ifBlank { "—" },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    val dt = utcToLocalLabel(c.date)
+                    if (dt.isNotBlank()) {
+                        Text(dt,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (c.confidence_label.isNotBlank()) {
                     ConfidenceBadge(c.confidence_label, c.confidence)
                     Spacer(Modifier.size(6.dp))
@@ -168,14 +365,34 @@ private fun ValueCard(c: ValueComparison) {
             if (c.value && c.best_side != null) {
                 val odd = if (c.best_side == c.player1) c.odds.home else c.odds.away
                 val book = c.best_book?.takeIf { it.isNotBlank() }
-                Text(
-                    "✅ Pari conseillé : ${c.best_side} @ $odd" +
-                        (book?.let { " sur $it" } ?: "") +
-                        "  (EV ${fmtSigned(c.best_ev)})",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = GoodColor,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Badge terrain favorable
+                    if (c.terrain_favorable) {
+                        Text(
+                            "🌟 Terrain favorable — historique solide sur ce tournoi",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFFFD700),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Text(
+                        "✅ Pari conseillé : ${c.best_side} @ $odd" +
+                            (book?.let { " sur $it" } ?: "") +
+                            "  (EV ${fmtSigned(c.best_ev)})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GoodColor,
+                    )
+                    // Kelly criterion
+                    if (c.kelly_u > 0.0) {
+                        Text(
+                            "📐 Kelly 1/4 : miser ${c.kelly_u}% de ta bankroll",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF80DEEA),
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
             }
 
             // Badge cache DB + date si source est historique
@@ -197,7 +414,7 @@ private fun ValueCard(c: ValueComparison) {
                     }
                     if (c.date.isNotBlank()) {
                         Text(
-                            c.date.take(16).replace("T", " "),
+                            utcToLocalLabel(c.date),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline,
                         )
@@ -286,6 +503,8 @@ private fun EvBadge(bestEv: Double, value: Boolean) {
         )
     }
 }
+
+// Remplacé par utcToLocalLabel() dans DateUtils.kt
 
 private fun fmt(v: Double): String = String.format("%.0f%%", v)
 private fun fmtSigned(v: Double): String = String.format("%+.1f%%", v)

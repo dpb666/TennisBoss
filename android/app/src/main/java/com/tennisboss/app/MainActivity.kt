@@ -35,6 +35,7 @@ import com.tennisboss.app.ui.EdgeScreen
 import com.tennisboss.app.ui.LiveScreen
 import com.tennisboss.app.ui.LiveViewModel
 import com.tennisboss.app.ui.PerformanceScreen
+import com.tennisboss.app.ui.PlayerCompareViewModel
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
 import com.tennisboss.app.ui.PredictViewModel
@@ -58,14 +59,14 @@ fun AppRoot() {
     var tab by remember { mutableIntStateOf(0) }
     // ViewModel de prédiction partagé : la recherche joueurs peut le pré-remplir.
     val predictVM: PredictViewModel = viewModel()
+    val compareVM: PlayerCompareViewModel = viewModel()
     val chatVM: ChatViewModel = viewModel()
     val liveVM: LiveViewModel = viewModel()
 
-    // URL publique par défaut pour fonctionner hors réseau local.
     // Le token est chargé depuis TokenManager (variables de build ou stockage chiffré).
+    // baseUrl est déjà auto-détecté (localhost:8000 émulateur, ngrok sinon).
     val context = LocalContext.current
     LaunchedEffect(Unit) {
-        ApiClient.baseUrl = ApiClient.DEFAULT_BASE_URL
         TokenManager.initialize(context)
     }
 
@@ -115,8 +116,9 @@ fun AppRoot() {
                         selectedP2 = predictVM.player2,
                         onPlayerClick = { name ->
                             val pairComplete = predictVM.pick(name)
-                            if (pairComplete) tab = 0   // paire prête -> on bascule sur Prédire
+                            if (pairComplete) tab = 0
                         },
+                        vm = compareVM,
                     )
                     3 -> ValueScreen()
                     4 -> PerformanceScreen()

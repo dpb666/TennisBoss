@@ -24,6 +24,34 @@ class SettlementAlertSender:
         """Return True if at least one alert service is configured."""
         return bool(self.telegram_token or self.slack_webhook)
 
+    def on_value_pick(self, pick: Dict[str, Any]) -> None:
+        """Send alert when a high-confidence value pick is detected."""
+        if not self.is_enabled():
+            return
+        p1 = pick.get("player1", "?")
+        p2 = pick.get("player2", "?")
+        side = pick.get("best_side", "?")
+        ev = pick.get("best_ev", 0.0)
+        odds = pick.get("odds", {})
+        pick_odds = odds.get("home") if side == p1 else odds.get("away")
+        kelly = pick.get("kelly_u", 0.0)
+        conf = pick.get("confidence_label", "")
+        league = pick.get("league", "")
+        terrain = " 🌟 terrain favorable" if pick.get("terrain_favorable") else ""
+        book = pick.get("best_book", "")
+        msg = (
+            f"🎾 *VALUE PICK*{terrain}\n\n"
+            f"*{p1}* vs *{p2}*\n"
+            f"📍 {league}\n\n"
+            f"✅ Miser sur: *{side}*\n"
+            f"💹 Cote: `{pick_odds}` chez {book or '?'}\n"
+            f"📈 EV: `+{ev:.1f}%`\n"
+            f"🎯 Kelly 1/4: `{kelly:.1f}% bankroll`\n"
+            f"🔒 Confiance: {conf}\n"
+        )
+        if self.telegram_token:
+            self._send_telegram(msg)
+
     def on_settlement(self, event: Dict[str, Any]) -> None:
         """Send alert for a settled match."""
         if not self.is_enabled():

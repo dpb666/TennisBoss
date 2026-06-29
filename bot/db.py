@@ -135,6 +135,31 @@ CREATE TABLE IF NOT EXISTS clv_log (
     pnl_kelly      REAL,               -- fraction de bankroll (Kelly 0.25)
     settled_ts     TEXT
 );
+CREATE TABLE IF NOT EXISTS inplay_picks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    event_id     TEXT,          -- ID événement odds-api (pour auto-settlement)
+    player1      TEXT,
+    player2      TEXT,
+    league       TEXT,
+    market_type  TEXT,
+    market_label TEXT,
+    pick         TEXT,
+    odds         REAL,          -- cote bookmaker au moment du pick
+    odds_home    REAL,          -- cote live joueur 1 (snapshot)
+    odds_away    REAL,          -- cote live joueur 2 (snapshot)
+    odds_book    TEXT,          -- source (Betfair, Bet365...)
+    prob         REAL,          -- proba modèle (%)
+    score        TEXT,          -- score au moment du pick (ex: "6-3, 2-1")
+    sets_home    INTEGER,       -- sets du joueur 1 au moment du pick
+    sets_away    INTEGER,       -- sets du joueur 2 au moment du pick
+    minute       INTEGER,       -- minute de jeu
+    stake        REAL DEFAULT 10.0,
+    result       TEXT DEFAULT NULL,   -- 'W' 'L' 'V'(void)
+    pnl          REAL DEFAULT NULL,
+    auto_settled INTEGER DEFAULT 0    -- 1 si réglé automatiquement
+);
+CREATE INDEX IF NOT EXISTS idx_inplay_ts ON inplay_picks(ts);
 CREATE INDEX IF NOT EXISTS idx_clv_date ON clv_log(date);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
@@ -179,6 +204,9 @@ def init() -> None:
             ("accuracy_elo", "ALTER TABLE backtests ADD COLUMN accuracy_elo REAL"),
             ("logloss_elo",  "ALTER TABLE backtests ADD COLUMN logloss_elo REAL"),
             ("brier_elo",    "ALTER TABLE backtests ADD COLUMN brier_elo REAL"),
+            ("result", "ALTER TABLE value_picks ADD COLUMN result INTEGER"),
+            ("pnl",    "ALTER TABLE value_picks ADD COLUMN pnl REAL"),
+            ("winner", "ALTER TABLE value_picks ADD COLUMN winner TEXT"),
         ):
             try:
                 conn.execute(ddl)
@@ -385,6 +413,15 @@ def settled_exists(event_key: str) -> bool:
 def insert_settled(row: Dict[str, Any]) -> bool:
     """Insère un match réglé (ignore si event_key déjà présent). True si ajouté."""
     import datetime as _dt
+    # Guard: ne pas enregistrer de matchs ATP/WTA croisés (ELO non comparables)
+    p1, p2 = str(row.get("player1") or ""), str(row.get("player2") or "")
+    with connect() as _c:
+        _r1 = _c.execute("SELECT tour FROM players WHERE name=?", (p1,)).fetchone()
+        _r2 = _c.execute("SELECT tour FROM players WHERE name=?", (p2,)).fetchone()
+    _t1 = (_r1[0] if _r1 else "") or ""
+    _t2 = (_r2[0] if _r2 else "") or ""
+    if _t1 and _t2 and {_t1, _t2} == {"atp", "wta"}:
+        return False
     with connect() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO settled_matches "
@@ -520,6 +557,62 @@ def list_value_picks() -> List[sqlite3.Row]:
             "SELECT date,player1,player2,side,odds,ev FROM value_picks").fetchall()
 
 
+def settle_value_pick(p1: str, p2: str, winner: str) -> bool:
+    """Marque un value pick comme réglé (résultat connu). Retourne True si trouvé."""
+    with connect() as _c:
+        row = _c.execute(
+            "SELECT side, odds FROM value_picks WHERE player1=? AND player2=?",
+            (p1, p2),
+        ).fetchone()
+        if not row:
+            # Essai ordre inversé
+            row = _c.execute(
+                "SELECT side, odds FROM value_picks WHERE player1=? AND player2=?",
+                (p2, p1),
+            ).fetchone()
+        if not row:
+            return False
+        side, odds = row["side"], row["odds"]
+        won = int(winner == side)
+        pnl = round((odds - 1.0) if won else -1.0, 4)
+        _c.execute(
+            "UPDATE value_picks SET result=?, pnl=?, winner=? "
+            "WHERE (player1=? AND player2=?) OR (player1=? AND player2=?)",
+            (won, pnl, winner, p1, p2, p2, p1),
+        )
+    return True
+
+
+def list_value_history(limit: int = 50) -> List[sqlite3.Row]:
+    """Value picks réglés, du plus récent au plus ancien."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT date,player1,player2,side,odds,ev,result,pnl,winner "
+            "FROM value_picks WHERE result IS NOT NULL "
+            "ORDER BY date DESC, ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
+def value_picks_stats() -> dict:
+    """ROI et taux de réussite des value picks réglés."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT result, pnl FROM value_picks WHERE result IS NOT NULL"
+        ).fetchall()
+    if not rows:
+        return {"n": 0, "wins": 0, "win_rate": None, "roi": None}
+    wins = sum(1 for r in rows if r["result"] == 1)
+    total_pnl = sum(r["pnl"] for r in rows if r["pnl"] is not None)
+    n = len(rows)
+    return {
+        "n": n,
+        "wins": wins,
+        "win_rate": round(wins / n, 3) if n else None,
+        "roi": round(total_pnl / n, 4) if n else None,
+    }
+
+
 # --- CLV : closing line value (preuve d'edge) ------------------------------
 def log_clv_pick(event_key: str, date: str, p1: str, p2: str, side: str,
                  pick_odds: float, pick_prob: float, confidence: float) -> None:
@@ -640,3 +733,284 @@ def list_backtests(limit: int = 10) -> List[sqlite3.Row]:
         return conn.execute(
             "SELECT * FROM backtests ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
+
+
+# --- Inplay picks (tracking + ROI) -----------------------------------------
+def log_inplay_pick(player1: str, player2: str, league: str,
+                    market_type: str, market_label: str, pick: str,
+                    odds: Optional[float], prob: float, stake: float = 10.0,
+                    odds_home: Optional[float] = None, odds_away: Optional[float] = None,
+                    odds_book: Optional[str] = None, score: Optional[str] = None,
+                    minute: Optional[int] = None, event_id: Optional[str] = None,
+                    sets_home: Optional[int] = None, sets_away: Optional[int] = None) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO inplay_picks"
+            "(event_id,player1,player2,league,market_type,market_label,pick,"
+            " odds,odds_home,odds_away,odds_book,prob,score,sets_home,sets_away,minute,stake)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (event_id, player1, player2, league, market_type, market_label, pick,
+             odds, odds_home, odds_away, odds_book,
+             round(prob, 2), score, sets_home, sets_away, minute, round(stake, 2)),
+        )
+        return cur.lastrowid
+
+
+def settle_inplay_pick(pick_id: int, result: str, stake: Optional[float] = None) -> bool:
+    """result: 'W', 'L', or 'V' (void/annulé). Recalcule pnl automatiquement."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT odds, stake FROM inplay_picks WHERE id=?", (pick_id,)
+        ).fetchone()
+        if not row:
+            return False
+        odds_val, stake_val = row
+        if stake is not None:
+            stake_val = stake
+        if result == "W" and odds_val:
+            pnl = round((odds_val - 1) * stake_val, 2)
+        elif result == "L":
+            pnl = round(-stake_val, 2)
+        else:
+            pnl = 0.0
+        conn.execute(
+            "UPDATE inplay_picks SET result=?, pnl=?, stake=? WHERE id=?",
+            (result, pnl, stake_val, pick_id),
+        )
+        return True
+
+
+def list_inplay_picks(limit: int = 50) -> List[sqlite3.Row]:
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        return conn.execute(
+            "SELECT * FROM inplay_picks ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+
+def list_inplay_picks_pending() -> List[sqlite3.Row]:
+    """Retourne uniquement les picks en attente de règlement."""
+    with connect() as conn:
+        conn.row_factory = sqlite3.Row
+        return conn.execute(
+            "SELECT * FROM inplay_picks WHERE result IS NULL"
+        ).fetchall()
+
+
+def auto_settle_picks(live_event_ids: set) -> List[Dict]:
+    """Règle automatiquement les picks dont le match a disparu du live.
+
+    Stratégie :
+    1. Pick avec event_id absent des matchs en cours → match terminé
+    2. Cherche le résultat dans settled_matches (source de vérité)
+    3. Si trouvé → déduit W/L selon le type de marché + score final
+    4. Calcule P&L et met à jour la DB
+    """
+    settled_out = []
+    with connect() as conn:
+        pending = conn.execute(
+            "SELECT * FROM inplay_picks WHERE result IS NULL AND event_id IS NOT NULL"
+        ).fetchall()
+        pending = list(pending)
+
+    for row in pending:
+        eid = str(row["event_id"])
+        if eid in live_event_ids:
+            continue  # match encore en cours
+
+        # Chercher dans settled_matches par nom de joueur (event_key peut varier)
+        p1 = row["player1"] or ""
+        p2 = row["player2"] or ""
+        with connect() as conn:
+            sm = conn.execute(
+                """SELECT winner, final_score, sets FROM settled_matches
+                   WHERE (player1=? AND player2=?) OR (player1=? AND player2=?)
+                   ORDER BY settled_ts DESC LIMIT 1""",
+                (p1, p2, p2, p1),
+            ).fetchone()
+
+        if sm is None:
+            # Pas encore dans settled_matches — on tente heuristique snapshot
+            result = _infer_from_snapshot(row["market_type"], row["pick"], row)
+            if result is None:
+                continue
+        else:
+            result = _infer_from_settled(row["market_type"], row["pick"], row, sm)
+            if result is None:
+                continue
+
+        odds_val = row["odds"]
+        stake_val = row["stake"] or 10.0
+        if result == "W" and odds_val:
+            pnl = round((odds_val - 1) * stake_val, 2)
+        elif result == "L":
+            pnl = round(-stake_val, 2)
+        else:
+            pnl = 0.0
+
+        with connect() as conn:
+            conn.execute(
+                "UPDATE inplay_picks SET result=?, pnl=?, auto_settled=1 WHERE id=?",
+                (result, pnl, row["id"]),
+            )
+        settled_out.append({"id": row["id"], "pick": row["pick"],
+                            "result": result, "pnl": pnl})
+
+    return settled_out
+
+
+def _infer_from_settled(market_type: str, pick: str, row: Any, sm: Any) -> Optional[str]:
+    """Déduit W/L depuis le résultat réel dans settled_matches."""
+    import json as _json
+    winner = sm["winner"] or ""
+    final_score = sm["final_score"] or ""  # ex: "2 - 0" ou "6-3, 7-5"
+    p1 = (row["player1"] or "").strip()
+    p2 = (row["player2"] or "").strip()
+
+    if market_type in ("set_winner", "next_set"):
+        # Le pick est un nom de joueur → a-t-il gagné le match ?
+        # Pour un pick inplay set_winner, on utilise le gagnant du match comme proxy
+        # (car le set pris correspond généralement à la tendance du match)
+        pick_low = pick.lower()
+        win_low = winner.lower()
+        p1_low = p1.split(",")[0].strip().lower()
+        p2_low = p2.split(",")[0].strip().lower()
+        pick_is_p1 = p1_low in pick_low
+        winner_is_p1 = p1_low in win_low
+        return "W" if pick_is_p1 == winner_is_p1 else "L"
+
+    if market_type in ("total_games", "total_points"):
+        # Compter les jeux du score final
+        try:
+            threshold = float(pick.split()[-1])
+            is_over = pick.upper().startswith("OVER")
+        except Exception:
+            return None
+        # final_score peut être "2 - 0" (sets) ou "6-3, 7-5, 6-4" (jeux)
+        total = 0
+        for part in final_score.replace(" ", "").split(","):
+            if "-" in part:
+                try:
+                    h, a = [int(x) for x in part.split("-")]
+                    if h <= 7 and a <= 7:  # filtre sets vs jeux
+                        total += h + a
+                except Exception:
+                    pass
+        if total == 0:
+            # Fallback : essayer depuis le score snapshot
+            return _infer_from_snapshot(market_type, pick, row)
+        return "W" if (is_over and total > threshold) or \
+                      (not is_over and total < threshold) else "L"
+
+    if market_type == "handicap":
+        try:
+            parts_hcp = pick.rsplit(" ", 1)
+            hcp = float(parts_hcp[-1])
+            pick_name_low = parts_hcp[0].strip().lower()
+            p1_low = p1.split(",")[0].strip().lower()
+            total_h = total_a = 0
+            for part in final_score.replace(" ", "").split(","):
+                if "-" in part:
+                    try:
+                        h, a = [int(x) for x in part.split("-")]
+                        if h <= 7 and a <= 7:
+                            total_h += h; total_a += a
+                    except Exception:
+                        pass
+            pick_total = total_h if p1_low in pick_name_low else total_a
+            opp_total  = total_a if p1_low in pick_name_low else total_h
+            return "W" if (pick_total + hcp) > opp_total else "L"
+        except Exception:
+            return None
+
+    return None
+
+
+def _infer_from_snapshot(market_type: str, pick: str, row: Any) -> Optional[str]:
+    """Heuristique sur le score snapshot (fallback si pas encore dans settled_matches)."""
+    score = row["score"] or ""
+    odds_val = row["odds"]
+
+    if market_type in ("set_winner", "next_set"):
+        p1_low = (row["player1"] or "").split(",")[0].strip().lower()
+        pick_low = pick.lower()
+        pick_is_home = p1_low in pick_low
+
+        # Confiance extrême basée sur les cotes : < 1.10 → très forte probabilité de victoire
+        if odds_val and odds_val < 1.10:
+            return "W"
+        if odds_val and odds_val > 8.0:
+            return "L"
+
+        if not score:
+            return None
+        parts = [s.strip() for s in score.split(",")]
+        if not parts:
+            return None
+        last = parts[-1]
+        try:
+            h, a = [int(x) for x in last.split("-")]
+        except Exception:
+            return None
+        pg = h if pick_is_home else a
+        og = a if pick_is_home else h
+        if pg >= 6 and og <= 3:
+            return "W"
+        if og >= 6 and pg <= 3:
+            return "L"
+        return None
+
+    if market_type in ("total_games", "total_points"):
+        try:
+            threshold = float(pick.split()[-1])
+            is_over = pick.upper().startswith("OVER")
+        except Exception:
+            return None
+        total = 0
+        for p in score.split(","):
+            p = p.strip()
+            if "-" in p and all(x.strip().isdigit() for x in p.split("-", 1)):
+                h_g, a_g = p.split("-", 1)
+                total += int(h_g) + int(a_g)
+        if total == 0:
+            return None
+        return "W" if (is_over and total > threshold) or \
+                      (not is_over and total < threshold) else "L"
+
+    if market_type == "handicap":
+        try:
+            parts_hcp = pick.rsplit(" ", 1)
+            hcp = float(parts_hcp[-1])
+            pick_name_low = parts_hcp[0].strip().lower()
+            p1_low = (row["player1"] or "").split(",")[0].strip().lower()
+            total_h = sum(int(p.split("-")[0]) for p in score.split(",") if "-" in p)
+            total_a = sum(int(p.split("-")[1]) for p in score.split(",") if "-" in p)
+            pick_total = total_h if p1_low in pick_name_low else total_a
+            opp_total  = total_a if p1_low in pick_name_low else total_h
+            return "W" if (pick_total + hcp) > opp_total else "L"
+        except Exception:
+            return None
+
+    return None
+
+
+def inplay_roi_stats() -> Dict[str, Any]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT result, stake, pnl, odds FROM inplay_picks"
+        ).fetchall()
+    total = len(rows)
+    settled = [r for r in rows if r[0] in ("W", "L")]
+    wins = sum(1 for r in settled if r[0] == "W")
+    losses = sum(1 for r in settled if r[0] == "L")
+    pending = total - len(settled) - sum(1 for r in rows if r[0] == "V")
+    staked = sum(r[1] for r in settled if r[1])
+    pnl = sum(r[2] for r in settled if r[2] is not None)
+    roi = (pnl / staked * 100) if staked > 0 else 0.0
+    avg_odds = (sum(r[3] for r in settled if r[3]) / len(settled)) if settled else 0.0
+    return {
+        "total": total, "settled": len(settled), "wins": wins,
+        "losses": losses, "pending": pending,
+        "staked": round(staked, 2), "pnl": round(pnl, 2),
+        "roi_pct": round(roi, 1), "avg_odds": round(avg_odds, 2),
+    }
