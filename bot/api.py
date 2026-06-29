@@ -1981,6 +1981,11 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
                    daemon=True).start()
         log(f"Settlement inplay toutes les {inplay_interval}s.")
 
+    # Digest quotidien Telegram à 21h
+    import threading as _th2
+    _th2.Thread(target=_digest_loop, daemon=True).start()
+    log("Digest Telegram quotidien 21h activé.")
+
     # Self-healing agent (DeepSeek R1 via Ollama)
     from . import healer as _healer
     _healer.start(_MEM)
@@ -1996,6 +2001,21 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
         )
 
     app.run(host=host, port=port, threaded=True)
+
+
+def _digest_loop() -> None:
+    """Envoie le digest Telegram quotidien à 21h00 (heure locale)."""
+    import datetime as _dt2
+    import time as _time
+    sent_date: str = ""
+    while True:
+        now = _dt2.datetime.now()
+        today = now.date().isoformat()
+        if now.hour == 21 and sent_date != today:
+            from . import digest as _digest
+            _digest.send_daily_digest(today)
+            sent_date = today
+        _time.sleep(60)
 
 
 def _ws_on_status(msg: dict) -> None:
