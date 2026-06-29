@@ -876,6 +876,16 @@ def auto_settle_picks(live_event_ids: set) -> List[Dict]:
     import datetime as _dt
     settled_out = []
     cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=2)).isoformat()
+    stale_cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=48)).isoformat()
+
+    # Void picks vieux de >48h sans résultat (match terminé depuis longtemps)
+    with connect() as conn:
+        voided = conn.execute(
+            "UPDATE inplay_picks SET result='V', pnl=0 WHERE result IS NULL AND ts < ?",
+            (stale_cutoff,)
+        ).rowcount
+        if voided:
+            log.info(f"auto_settle: {voided} picks >48h sans résultat → V")
 
     with connect() as conn:
         # Tous les picks en attente — avec ET sans event_id
