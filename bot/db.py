@@ -11,6 +11,7 @@ Tout est en SQL standard (module sqlite3 de la lib standard, aucune dépendance)
 """
 from __future__ import annotations
 
+import difflib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -154,7 +155,7 @@ CREATE TABLE IF NOT EXISTS inplay_picks (
     sets_home    INTEGER,       -- sets du joueur 1 au moment du pick
     sets_away    INTEGER,       -- sets du joueur 2 au moment du pick
     minute       INTEGER,       -- minute de jeu
-    stake        REAL DEFAULT 10.0,
+    stake        REAL DEFAULT 1.0,
     result       TEXT DEFAULT NULL,   -- 'W' 'L' 'V'(void)
     pnl          REAL DEFAULT NULL,
     auto_settled INTEGER DEFAULT 0    -- 1 si réglé automatiquement
@@ -204,9 +205,12 @@ def init() -> None:
             ("accuracy_elo", "ALTER TABLE backtests ADD COLUMN accuracy_elo REAL"),
             ("logloss_elo",  "ALTER TABLE backtests ADD COLUMN logloss_elo REAL"),
             ("brier_elo",    "ALTER TABLE backtests ADD COLUMN brier_elo REAL"),
-            ("result", "ALTER TABLE value_picks ADD COLUMN result INTEGER"),
-            ("pnl",    "ALTER TABLE value_picks ADD COLUMN pnl REAL"),
-            ("winner", "ALTER TABLE value_picks ADD COLUMN winner TEXT"),
+            ("result",  "ALTER TABLE value_picks ADD COLUMN result INTEGER"),
+            ("pnl",     "ALTER TABLE value_picks ADD COLUMN pnl REAL"),
+            ("winner",  "ALTER TABLE value_picks ADD COLUMN winner TEXT"),
+            ("league",  "ALTER TABLE value_picks ADD COLUMN league TEXT"),
+            ("surface", "ALTER TABLE value_picks ADD COLUMN surface TEXT"),
+            ("kelly_u", "ALTER TABLE value_picks ADD COLUMN kelly_u REAL"),
         ):
             try:
                 conn.execute(ddl)
@@ -474,7 +478,7 @@ def settled_chrono() -> List[sqlite3.Row]:
     """Matchs réglés par ordre chronologique (pour rejouer l'ELO)."""
     with connect() as conn:
         return conn.execute(
-            "SELECT player1, player2, winner FROM settled_matches "
+            "SELECT player1, player2, winner, tournament, date FROM settled_matches "
             "ORDER BY date ASC, id ASC").fetchall()
 
 
@@ -539,15 +543,23 @@ def list_bets() -> List[sqlite3.Row]:
 
 # --- Paper-trading des picks blendés (stratégie value) ----------------------
 def log_value_pick(date: str, p1: str, p2: str, side: str,
-                   odds: float, ev: float) -> None:
+                   odds: float, ev: float,
+                   league: str = "", surface: str = "", kelly_u: float = 0.0) -> None:
     """Capture un value pick (EV blendée > 0) pour mesurer son ROI au settlement."""
     import datetime as _dt
     with connect() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO value_picks "
-            "(date,player1,player2,side,odds,ev,ts) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO value_picks "
+            "(date,player1,player2,side,odds,ev,ts,league,surface,kelly_u) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(player1,player2) DO UPDATE SET "
+            "date=excluded.date, side=excluded.side, odds=excluded.odds, "
+            "ev=excluded.ev, ts=excluded.ts, league=excluded.league, "
+            "surface=excluded.surface, kelly_u=excluded.kelly_u "
+            "WHERE result IS NULL",  # ne jamais écraser un pick déjà réglé
             (date, p1, p2, side, odds, ev,
-             _dt.datetime.now().isoformat(timespec="seconds")),
+             _dt.datetime.now().isoformat(timespec="seconds"),
+             league or "", surface or "", kelly_u or 0.0),
         )
 
 
@@ -557,37 +569,147 @@ def list_value_picks() -> List[sqlite3.Row]:
             "SELECT date,player1,player2,side,odds,ev FROM value_picks").fetchall()
 
 
+def list_value_picks_open() -> List[sqlite3.Row]:
+    """Picks ouverts (result IS NULL)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT rowid,date,player1,player2,side,odds,ev FROM value_picks "
+            "WHERE result IS NULL ORDER BY date DESC"
+        ).fetchall()
+
+
+def get_settled_by_players(p1: str, p2: str) -> Optional[sqlite3.Row]:
+    """Cherche un settled_match pour cette paire (dans les 2 sens)."""
+    p1_vars = _name_variants(p1)
+    p2_vars = _name_variants(p2)
+    with connect() as conn:
+        for a in p1_vars:
+            for b in p2_vars:
+                row = conn.execute(
+                    "SELECT player1, player2, winner FROM settled_matches "
+                    "WHERE (player1=? AND player2=?) OR (player1=? AND player2=?) "
+                    "ORDER BY date DESC LIMIT 1",
+                    (a, b, b, a),
+                ).fetchone()
+                if row:
+                    return row
+    return None
+
+
+def _name_variants(name: str) -> List[str]:
+    """Génère les variantes d'un nom : 'Last, First' ↔ 'First Last'."""
+    variants = [name]
+    if ", " in name:
+        parts = name.split(", ", 1)
+        variants.append(f"{parts[1]} {parts[0]}")  # "Munar, Jaume" → "Jaume Munar"
+    elif " " in name:
+        parts = name.rsplit(" ", 1)
+        variants.append(f"{parts[1]}, {parts[0]}")  # "Jaume Munar" → "Munar, Jaume"
+    return list(dict.fromkeys(variants))  # dédoublonne en gardant l'ordre
+
+
 def settle_value_pick(p1: str, p2: str, winner: str) -> bool:
-    """Marque un value pick comme réglé (résultat connu). Retourne True si trouvé."""
+    """Marque un value pick comme réglé (résultat connu). Retourne True si trouvé.
+
+    Stratégie (du plus précis au plus souple) :
+    1. Paire exacte + variantes Last,First ↔ First Last
+    2. Joueur parié (side) seul — adversaire peut différer
+    3. Fuzzy match SequenceMatcher > 0.85
+
+    Si winner est None/vide (retraite, walkover), void le pick sans pnl.
+    """
+    if not winner:
+        # Retraite ou abandon → void sans impacter le P&L
+        p1_vars = _name_variants(p1)
+        p2_vars = _name_variants(p2)
+        with connect() as _c:
+            for a in p1_vars:
+                for b in p2_vars:
+                    row = _c.execute(
+                        "SELECT rowid FROM value_picks "
+                        "WHERE result IS NULL AND ((player1=? AND player2=?) OR (player1=? AND player2=?))",
+                        (a, b, b, a),
+                    ).fetchone()
+                    if row:
+                        _c.execute(
+                            "UPDATE value_picks SET result=-1, pnl=0, winner=NULL WHERE rowid=?",
+                            (row["rowid"],)
+                        )
+                        return True
+        return False
+
+    p1_vars = _name_variants(p1)
+    p2_vars = _name_variants(p2)
+    w_vars = _name_variants(winner)
+
     with connect() as _c:
-        row = _c.execute(
-            "SELECT side, odds FROM value_picks WHERE player1=? AND player2=?",
-            (p1, p2),
-        ).fetchone()
-        if not row:
-            # Essai ordre inversé
-            row = _c.execute(
-                "SELECT side, odds FROM value_picks WHERE player1=? AND player2=?",
-                (p2, p1),
-            ).fetchone()
-        if not row:
-            return False
-        side, odds = row["side"], row["odds"]
-        won = int(winner == side)
-        pnl = round((odds - 1.0) if won else -1.0, 4)
-        _c.execute(
-            "UPDATE value_picks SET result=?, pnl=?, winner=? "
-            "WHERE (player1=? AND player2=?) OR (player1=? AND player2=?)",
-            (won, pnl, winner, p1, p2, p2, p1),
-        )
-    return True
+        # 1. Paire exacte (toutes combinaisons de variantes)
+        for a in p1_vars:
+            for b in p2_vars:
+                row = _c.execute(
+                    "SELECT rowid, side, odds FROM value_picks "
+                    "WHERE result IS NULL AND ((player1=? AND player2=?) OR (player1=? AND player2=?))",
+                    (a, b, b, a),
+                ).fetchone()
+                if row:
+                    side, odds = row["side"], row["odds"]
+                    won = int(side in w_vars)
+                    pnl = round((odds - 1.0) if won else -1.0, 4)
+                    _c.execute(
+                        "UPDATE value_picks SET result=?, pnl=?, winner=? WHERE rowid=?",
+                        (won, pnl, winner, row["rowid"]),
+                    )
+                    return True
+
+        # 2. Matching par joueur parié uniquement
+        for raw_player in (p1, p2):
+            for pick_player in _name_variants(raw_player):
+                rows = _c.execute(
+                    "SELECT rowid, side, odds FROM value_picks "
+                    "WHERE result IS NULL AND (player1=? OR player2=?) AND side=?",
+                    (pick_player, pick_player, pick_player),
+                ).fetchall()
+                if rows:
+                    for row in rows:
+                        side, odds = row["side"], row["odds"]
+                        won = int(side in w_vars)
+                        pnl = round((odds - 1.0) if won else -1.0, 4)
+                        _c.execute(
+                            "UPDATE value_picks SET result=?, pnl=?, winner=? WHERE rowid=?",
+                            (won, pnl, winner, row["rowid"]),
+                        )
+                    return True
+
+        # 3. Fuzzy match — SequenceMatcher (ratio > 0.85) pour les erreurs d'orthographe
+        open_picks = _c.execute(
+            "SELECT rowid, player1, player2, side, odds FROM value_picks WHERE result IS NULL"
+        ).fetchall()
+        p1_n = p1.lower(); p2_n = p2.lower()
+        for row in open_picks:
+            rp1 = row["player1"].lower(); rp2 = row["player2"].lower()
+            sim_a = max(difflib.SequenceMatcher(None, p1_n, rp1).ratio(),
+                        difflib.SequenceMatcher(None, p2_n, rp1).ratio())
+            sim_b = max(difflib.SequenceMatcher(None, p1_n, rp2).ratio(),
+                        difflib.SequenceMatcher(None, p2_n, rp2).ratio())
+            if sim_a > 0.85 and sim_b > 0.85:
+                side_lower = row["side"].lower()
+                winner_lower = winner.lower()
+                won = int(difflib.SequenceMatcher(None, side_lower, winner_lower).ratio() > 0.80)
+                pnl = round((row["odds"] - 1.0) if won else -1.0, 4)
+                _c.execute(
+                    "UPDATE value_picks SET result=?, pnl=?, winner=? WHERE rowid=?",
+                    (won, pnl, winner, row["rowid"]),
+                )
+                log(f"settle_value_pick: fuzzy match '{p1}' vs '{p2}' → '{row['player1']}' vs '{row['player2']}'")
+                return True
+    return False
 
 
 def list_value_history(limit: int = 50) -> List[sqlite3.Row]:
     """Value picks réglés, du plus récent au plus ancien."""
     with connect() as conn:
         return conn.execute(
-            "SELECT date,player1,player2,side,odds,ev,result,pnl,winner "
+            "SELECT date,player1,player2,side,odds,ev,result,pnl,winner,league,surface,kelly_u "
             "FROM value_picks WHERE result IS NOT NULL "
             "ORDER BY date DESC, ts DESC LIMIT ?",
             (limit,),
@@ -595,10 +717,10 @@ def list_value_history(limit: int = 50) -> List[sqlite3.Row]:
 
 
 def value_picks_stats() -> dict:
-    """ROI et taux de réussite des value picks réglés."""
+    """ROI et taux de réussite des value picks réglés (stratégie courante: EV≥8%, cotes≤5)."""
     with connect() as conn:
         rows = conn.execute(
-            "SELECT result, pnl FROM value_picks WHERE result IS NOT NULL"
+            "SELECT result, pnl FROM value_picks WHERE result IN (0,1) AND odds <= 5.0 AND ev >= 8.0"
         ).fetchall()
     if not rows:
         return {"n": 0, "wins": 0, "win_rate": None, "roi": None}
@@ -653,8 +775,8 @@ def update_clv_closing(event_key: str, closing_odds: float, src: str) -> None:
         if not row or not row["pick_odds"] or closing_odds <= 1.0:
             return
         pick_odds = float(row["pick_odds"])
-        # Rejeter les cotes manifestement post-match (ratio >8x = marché cloturé ou corrompu)
-        if closing_odds / pick_odds > 8.0 or pick_odds / closing_odds > 8.0:
+        # Rejeter le drift intraday / post-match (ratio >2.5x = marché pendant/après match)
+        if closing_odds / pick_odds > 2.5 or pick_odds / closing_odds > 2.5:
             return
         clv_pct = round((pick_odds / closing_odds - 1.0) * 100, 2)
         beat = 1 if pick_odds > closing_odds else 0
@@ -741,7 +863,7 @@ def list_backtests(limit: int = 10) -> List[sqlite3.Row]:
 # --- Inplay picks (tracking + ROI) -----------------------------------------
 def log_inplay_pick(player1: str, player2: str, league: str,
                     market_type: str, market_label: str, pick: str,
-                    odds: Optional[float], prob: float, stake: float = 10.0,
+                    odds: Optional[float], prob: float, stake: float = 1.0,
                     odds_home: Optional[float] = None, odds_away: Optional[float] = None,
                     odds_book: Optional[str] = None, score: Optional[str] = None,
                     minute: Optional[int] = None, event_id: Optional[str] = None,
@@ -781,12 +903,13 @@ def settle_inplay_pick(pick_id: int, result: str, stake: Optional[float] = None)
         odds_val, stake_val = row
         if stake is not None:
             stake_val = stake
-        if result == "W" and odds_val:
-            pnl = round((odds_val - 1) * stake_val, 2)
+        stake_val = stake_val or 1.0
+        if result == "W":
+            pnl = round((odds_val - 1) * stake_val, 2) if odds_val else None
         elif result == "L":
             pnl = round(-stake_val, 2)
         else:
-            pnl = 0.0
+            pnl = 0.0  # V = void
         conn.execute(
             "UPDATE inplay_picks SET result=?, pnl=?, stake=? WHERE id=?",
             (result, pnl, stake_val, pick_id),
@@ -930,7 +1053,7 @@ def auto_settle_picks(live_event_ids: set) -> List[Dict]:
                 odds_val = row["odds_home"]
             elif row["odds_away"]:
                 odds_val = row["odds_away"]
-        stake_val = row["stake"] or 10.0
+        stake_val = row["stake"] or 1.0
         if result == "W":
             pnl = round((odds_val - 1) * stake_val, 2) if odds_val else None
         elif result == "L":

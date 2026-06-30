@@ -96,11 +96,108 @@ def main():
             print(f"[MSG] @{username}: {text}")
 
             if text == "/start":
-                tg_send(chat_id, f"Bienvenue sur TennisBoss ! Pose ta question sur un match, joueur ou cote.")
+                tg_send(chat_id,
+                    "🎾 *TennisBoss*\n\n"
+                    "/picks — picks du jour (value + live)\n"
+                    "/value — picks ouverts en attente\n"
+                    "/roi — bilan P&L rapide\n"
+                    "/clv — bilan Closing Line Value\n"
+                    "/wimbledon — stats Wimbledon 2026\n"
+                    "/model — paramètres du modèle\n"
+                    "/stats — bilan global\n"
+                    "/digest — rapport complet\n"
+                    "/clear — effacer l'historique\n\n"
+                    "_Ou pose une question directement !_"
+                )
                 continue
             if text == "/clear":
                 requests.post(f"http://127.0.0.1:8001/tg-sessions/{user_id}/clear", timeout=5)
                 tg_send(chat_id, "Historique effacé.")
+                continue
+            if text in ("/picks", "/picks@TennisBossBot"):
+                from . import digest as _digest
+                tg_send(chat_id, _digest.build_picks_summary())
+                continue
+            if text in ("/value", "/value@TennisBossBot"):
+                from . import digest as _digest
+                tg_send(chat_id, _digest.build_value_open())
+                continue
+            if text in ("/clv", "/clv@TennisBossBot"):
+                from . import digest as _digest
+                tg_send(chat_id, _digest.build_clv_report())
+                continue
+            if text in ("/stats", "/stats@TennisBossBot"):
+                from . import digest as _digest
+                tg_send(chat_id, _digest.build_global_stats())
+                continue
+            if text in ("/roi", "/roi@TennisBossBot"):
+                from . import db as _db
+                _rows = [r for r in _db.list_value_history(limit=500)
+                         if (r["result"] in (0, 1)
+                             and (r["odds"] or 99) <= 5.0
+                             and (r["ev"] or 0) >= 8.0)]
+                if _rows:
+                    _n = len(_rows)
+                    _w = sum(1 for r in _rows if r["result"] == 1)
+                    _pnl = sum(r["pnl"] for r in _rows if r["pnl"] is not None)
+                    tg_send(chat_id,
+                        f"📈 *ROI (EV≥8%, cotes ≤5.0)*\n"
+                        f"  {_w}W / {_n-_w}L sur {_n} picks\n"
+                        f"  P&L `{'+' if _pnl>=0 else ''}{_pnl:.1f}u`\n"
+                        f"  ROI `{_pnl/_n*100:+.1f}%`\n"
+                        f"  WR `{_w/_n*100:.0f}%`"
+                    )
+                else:
+                    tg_send(chat_id, "Aucun pick réglé (EV≥8%).")
+                continue
+            if text in ("/wimbledon", "/wimbledon@TennisBossBot", "/grass"):
+                import sqlite3 as _sq, datetime as _dt2
+                _db_path = "/mnt/c/Users/donpa/TennisBoss/state/tennisboss.db"
+                _conn = _sq.connect(_db_path)
+                _conn.row_factory = _sq.Row
+                _wimb_start = "2026-06-23"
+                _rows = _conn.execute('''SELECT result, pnl, ev, odds, player1, player2, side
+                    FROM value_picks
+                    WHERE date >= ? AND result IN (0,1) AND odds <= 5.0 AND ev >= 8.0
+                    AND league LIKE "%Wimbledon%"''', (_wimb_start,)).fetchall()
+                _conn.close()
+                if _rows:
+                    _n = len(_rows)
+                    _w = sum(1 for r in _rows if r["result"] == 1)
+                    _pnl = sum(r["pnl"] for r in _rows if r["pnl"] is not None)
+                    _msg = (f"🌱 *Wimbledon 2026 (EV≥8%, cotes≤5)*\n"
+                            f"  {_w}W / {_n-_w}L sur {_n} picks\n"
+                            f"  P&L `{'+' if _pnl>=0 else ''}{_pnl:.1f}u`\n"
+                            f"  ROI `{_pnl/_n*100:+.1f}%`\n"
+                            f"  WR `{_w/_n*100:.0f}%`")
+                else:
+                    _msg = "Aucun pick Wimbledon réglé (EV≥8%)."
+                tg_send(chat_id, _msg)
+                continue
+            if text in ("/model", "/model@TennisBossBot"):
+                import sqlite3 as _sq2, json as _jj
+                _db_path = "/mnt/c/Users/donpa/TennisBoss/state/tennisboss.db"
+                _c2 = _sq2.connect(_db_path)
+                _c2.row_factory = _sq2.Row
+                _get = lambda k: (_c2.execute("SELECT value FROM meta WHERE key=?", (k,)).fetchone() or {}).get("value")
+                _blend = _get("elo_blend") or "?"
+                _blends = _jj.loads(_get("elo_blend_by_surface") or "{}")
+                _lc = _jj.loads(_get("last_learning_cycle") or "{}")
+                _c2.close()
+                _acc = _lc.get("kfold_accuracy", 0)
+                _bs = " | ".join(f"{s}={v:.2f}" for s, v in _blends.items()) if _blends else "—"
+                tg_send(chat_id,
+                    f"🤖 *Modèle TennisBoss*\n"
+                    f"  ELO blend global: `{float(_blend):.2f}` (settlement)\n"
+                    f"  Blends surface: `{_bs}`\n"
+                    f"  K-fold acc: `{_acc*100:.1f}%` (auto-learn)\n"
+                    f"  Dead zone: `EV 12-18%` bloquée\n"
+                    f"  Filter: `EV≥8%, cotes≤5.0`"
+                )
+                continue
+            if text in ("/digest", "/digest@TennisBossBot"):
+                from . import digest as _digest
+                tg_send(chat_id, _digest.build_digest())
                 continue
 
             # Indicate typing

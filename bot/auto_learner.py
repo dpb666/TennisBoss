@@ -63,14 +63,16 @@ class AutoLearner:
             rows_surf = [dict(r) for r in rows if dict(r).get("surface", "hard") == surf]
 
             # Convertir en tuples (logit_features, logit_elo, issue) pour calibrate.tune_blend
-            samples = self._blend_samples_for_surface(rows_surf)
+            samples = self._blend_samples_for_surface(rows_surf, surface=surf)
             if len(samples) < 20:
                 log(f"  Skipping {surf}: trop peu de samples ({len(samples)})", "WARN")
                 results[surf] = model.elo_blend
                 continue
 
             fit = calibrate.tune_blend(samples)
-            best_beta = fit.get("elo_blend", model.elo_blend)
+            raw_beta = fit.get("elo_blend", model.elo_blend)
+            # Clamp to [0.3, 3.0] — values outside indicate degenerate fit
+            best_beta = max(0.3, min(3.0, float(raw_beta)))
             model.elo_blend = best_beta
             results[surf] = best_beta
 
@@ -78,9 +80,9 @@ class AutoLearner:
         log(f"✓ Tuned ELO blends: {results}", "INFO")
         return results
 
-    def _blend_samples_for_surface(self, rows_surf: List[Dict]) -> List[Tuple[float, float, float]]:
+    def _blend_samples_for_surface(self, rows_surf: List[Dict], surface: str = "hard") -> List[Tuple[float, float, float]]:
         """Convertir matchs d'une surface en samples (logit_feat, logit_elo, issue)."""
-        elo_r = self.models_by_surface.get("hard", {}).elo or {}
+        elo_r = self.models_by_surface.get(surface, self.models_by_surface.get("hard", SurfaceModel(surface))).elo or {}
         w_serve = self.mem["weights"].get("serve", 1.0)
         w_ret1 = self.mem["weights"].get("return1", 1.0)
         w_ret2 = self.mem["weights"].get("return2", 1.0)
@@ -104,10 +106,14 @@ class AutoLearner:
                                  w_ret2 * (f1.get("return2", 0.5) - f2.get("return2", 0.5)) +
                                  w_recent * (f1.get("recent", 0.5) - f2.get("recent", 0.5)))
 
-            logit_elo = math.log(elo_r.get(winner, predictor.ELO_BASE) / elo_r.get(loser, predictor.ELO_BASE)) if winner in elo_r and loser in elo_r else 0.0
-            issue = 1.0  # winner correct par construction
+            # Use same formula as predictor._raw_logit: (r1-r2)/400 * log(10)
+            r_w = elo_r.get(winner, predictor.ELO_BASE)
+            r_l = elo_r.get(loser, predictor.ELO_BASE)
+            logit_elo = (r_w - r_l) / 400.0 * math.log(10)
 
-            samples.append((logit_feat, logit_elo, issue))
+            # Paires winner + loser pour que l'optimiseur voie les deux classes
+            samples.append((logit_feat, logit_elo, 1.0))
+            samples.append((-logit_feat, -logit_elo, 0.0))
 
         return samples
 
@@ -164,8 +170,11 @@ class AutoLearner:
             test_set = settled[test_start:test_end]
 
             correct = 0
+            evaluated = 0
             for match in test_set:
                 p1, p2, winner = match["player1"], match["player2"], match["winner"]
+                if not p1 or not p2 or not winner:
+                    continue
                 if p1 not in self.mem["players"] or p2 not in self.mem["players"]:
                     continue
 
@@ -176,8 +185,9 @@ class AutoLearner:
                 pred_winner = p1 if r["prob1"] > 50 else p2
                 if pred_winner == winner:
                     correct += 1
+                evaluated += 1
 
-            fold_acc = correct / len(test_set) if test_set else 0
+            fold_acc = correct / evaluated if evaluated > 0 else 0
             accuracies.append(fold_acc)
 
         mean_acc = sum(accuracies) / len(accuracies)
@@ -197,10 +207,21 @@ class AutoLearner:
         # 3. K-fold validation
         kfold = self.kfold_eval(k=5)
 
-        # 4. Metrics finales
+        # 4. Persist best overall elo_blend + surface-specific blends
+        if surface_blends:
+            overall_blend = sum(surface_blends.values()) / len(surface_blends)
+            db.set_meta("elo_blend", str(overall_blend))
+            db.set_meta("elo_blend_by_surface", json.dumps(surface_blends))
+            self.mem["elo_blend"] = overall_blend
+            self.mem["elo_blend_surface"] = surface_blends
+            memory.save(self.mem)
+            log(f"✓ Updated elo_blend={overall_blend:.3f}, surfaces={surface_blends}", "INFO")
+
+        # 5. Metrics finales
         metrics = {
             "cycle_timestamp": db.get_meta("last_settlement") or "2026-06-09",
             "elo_blends_by_surface": surface_blends,
+            "elo_blend_global": overall_blend if surface_blends else None,
             "synthetic_matches_generated": len(augmented),
             "kfold_accuracy": kfold["mean"],
             "kfold_accuracy_stddev": (max(kfold["folds"]) - min(kfold["folds"])) / 2 if kfold["folds"] else 0,

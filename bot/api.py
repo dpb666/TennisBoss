@@ -72,16 +72,21 @@ def _load_state() -> None:
         _MEM["elo_surface"][surf], _ = elo.build_dynamic(rows, surface_key=surf,
                                                           time_decay_days=365)
     _MEM["elo_recent"], _ = elo.build_recent(rows, days=180)
-    # Rejeu des matchs réglés sur l'ELO global (apprentissage continu, survit aux reboots).
+    # Rejeu des matchs réglés : global + surface + récent (survit aux reboots).
     known = _MEM["players"]
     replayed = 0
     for s in db.settled_chrono():
         w, p1, p2 = s["winner"], s["player1"], s["player2"]
+        loser = p2 if w == p1 else p1
         if w in known and p1 in known and p2 in known and w in (p1, p2):
-            elo.update(_MEM["elo"], w, p2 if w == p1 else p1)
+            elo.update(_MEM["elo"], w, loser)
+            elo.update(_MEM["elo_recent"], w, loser)
+            surf = config.surface_from_league((s["tournament"] if "tournament" in s.keys() else "") or "")
+            if surf and surf in _MEM["elo_surface"]:
+                elo.update(_MEM["elo_surface"][surf], w, loser)
             replayed += 1
     if replayed:
-        log(f"ELO : {replayed} matchs réglés rejoués (apprentissage continu).")
+        log(f"ELO : {replayed} matchs réglés rejoués (global + surface + récent).")
     # Cartes de résolution de surface (nom / token / semaine).
     try:
         _MEM["surface_maps"] = json.loads(db.get_meta("surface_maps") or "{}")
@@ -100,6 +105,13 @@ def _load_state() -> None:
         _MEM["elo_blend"] = float(db.get_meta("elo_blend") or predictor.ELO_BLEND)
     except (TypeError, ValueError):
         _MEM["elo_blend"] = predictor.ELO_BLEND
+    try:
+        import json as _json
+        _surf_blends = _json.loads(db.get_meta("elo_blend_by_surface") or "{}")
+        if _surf_blends:
+            _MEM["elo_blend_surface"] = {k: float(v) for k, v in _surf_blends.items()}
+    except Exception:
+        pass
     try:
         _PLATT_A = float(db.get_meta("platt_a") or 1.0)
     except (TypeError, ValueError):
@@ -300,18 +312,29 @@ def api_status():
 
 @app.get("/api/players")
 def api_players():
-    q = (request.args.get("q") or "").strip().lower()
+    # Accepte ?q= ou ?name= comme alias
+    q = (request.args.get("q") or request.args.get("name") or "").strip().lower()
     tour = request.args.get("tour")
     limit = min(int(request.args.get("limit", 20)), 200)
+    elo_dict = _MEM.get("elo") or {}
+    elo_grass = (_MEM.get("elo_surface") or {}).get("grass", {})
+    elo_clay = (_MEM.get("elo_surface") or {}).get("clay", {})
+    elo_hard = (_MEM.get("elo_surface") or {}).get("hard", {})
     results = []
     for name in _MEM["players"]:
         if q and q not in name.lower():
             continue
         if tour and (_MEM["players"][name].get("tour") != tour):
             continue
-        results.append(_player_payload(name))
+        p = _player_payload(name)
+        from .predictor import _lookup_elo, ELO_BASE
+        p["elo"] = round(_lookup_elo(elo_dict, name))
+        p["elo_grass"] = round(_lookup_elo(elo_grass, name)) if elo_grass else None
+        p["elo_clay"] = round(_lookup_elo(elo_clay, name)) if elo_clay else None
+        p["elo_hard"] = round(_lookup_elo(elo_hard, name)) if elo_hard else None
+        results.append(p)
     results.sort(key=lambda p: p["win_prob_vs_avg"], reverse=True)
-    return jsonify({"count": len(results), "players": results[:limit]})
+    return jsonify({"count": len(_MEM["players"]), "players": results[:limit]})
 
 
 _TORONTO_TZ = None
@@ -472,7 +495,8 @@ def api_predict():
 
     f1 = features.feature_vector(features.get_profile(_MEM, n1))
     f2 = features.feature_vector(features.get_profile(_MEM, n2))
-    r = predictor.predict(_MEM, n1, f1, n2, f2)
+    _surf_req = request.args.get("surface") or None
+    r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_surf_req)
 
     # Si les deux joueurs sont inconnus → 50/50 forcé, confiance nulle
     if len(unknown) == 2:
@@ -806,11 +830,14 @@ def api_live():
 
         # ── Prédiction pré-match ──────────────────────────────────────────────
         prediction = None
+        _live_lg = e.get("league") or {}
+        _live_league = _live_lg if isinstance(_live_lg, str) else _live_lg.get("name", "")
+        _live_surf = e.get("surface") or config.surface_from_league(_live_league) or None
         if n1 and n2:
             try:
                 f1 = features.feature_vector(features.get_profile(_MEM, n1))
                 f2 = features.feature_vector(features.get_profile(_MEM, n2))
-                r = predictor.predict(_MEM, n1, f1, n2, f2)
+                r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_live_surf)
                 pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
                 prediction = {
                     "player1": n1, "player2": n2,
@@ -830,12 +857,14 @@ def api_live():
         except Exception:  # noqa: BLE001
             pass
 
-        league = (e.get("league") or {}).get("name", "")
+        _lg = e.get("league") or {}
+        league = _lg if isinstance(_lg, str) else _lg.get("name", "")
         out.append({
             "event_id": e["id"],
             "player1": home_raw, "player2": away_raw,
             "player1_resolved": n1, "player2_resolved": n2,
             "league": league,
+            "surface": _live_surf,
             "sets_home": sets_home, "sets_away": sets_away,
             "set_scores": set_scores,
             "game_home": game_h, "game_away": game_a,
@@ -887,10 +916,13 @@ def api_inplay_best():
         if not n1 or not n2:
             continue
 
+        _ip_lg = e.get("league") or {}
+        _ip_league = _ip_lg if isinstance(_ip_lg, str) else _ip_lg.get("name", "")
+        _ip_surf = e.get("surface") or config.surface_from_league(_ip_league) or None
         try:
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
-            r = predictor.predict(_MEM, n1, f1, n2, f2)
+            r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_ip_surf)
         except Exception:
             continue
 
@@ -931,7 +963,8 @@ def api_inplay_best():
             if p and (p.get("home") is not None or p.get("away") is not None):
                 set_scores.append({"h": int(p.get("home") or 0), "a": int(p.get("away") or 0)})
 
-        league = (e.get("league") or {}).get("name", "")
+        _lg = e.get("league") or {}
+        league = _lg if isinstance(_lg, str) else _lg.get("name", "")
         clock = e.get("clock") or {}
 
         candidates.append({
@@ -1014,7 +1047,8 @@ def api_inplay_markets():
         games_h = int(current_period.get("home") or 0)
         games_a = int(current_period.get("away") or 0)
 
-        league = (e.get("league") or {}).get("name", "")
+        _lg = e.get("league") or {}
+        league = _lg if isinstance(_lg, str) else _lg.get("name", "")
         clock = e.get("clock") or {}
         minute = int(clock.get("minute") or 0)
 
@@ -1245,12 +1279,16 @@ def api_value():
 
     EV(parier J) = proba_match_modèle(J) × cote(J) − 1.  EV > 0 = value (+).
     min_confidence (float, défaut 0.55) : ignore les picks sous ce seuil de confiance.
-    min_ev (float, défaut 5.0) : EV minimum (%) pour qu'un pick soit tagué 'value'.
+    min_ev (float, défaut 8.0) : EV minimum (%) pour qu'un pick soit tagué 'value'.
     """
     limit = min(int(request.args.get("limit", 10)), 30)
     min_conf = float(request.args.get("min_confidence", 0.55))
-    min_ev = float(request.args.get("min_ev", 5.0))
-    max_odds = float(request.args.get("max_odds", 15.0))  # filtre les longshots extrêmes
+    min_ev = max(float(request.args.get("min_ev", 8.0)), 5.0)   # plancher absolu 5%
+    # Cap dur à 5.0 : données historiques montrent ROI négatif sur cotes > 5.
+    max_odds = min(float(request.args.get("max_odds", 5.0)), 5.0)
+    # Ratio max modèle/marché : si modèle > 3× la probabilité implicite, pick rejeté.
+    # Évite les picks aberrants (EV > 100% typiquement) dus à l'overconfidence sur longshots.
+    max_prob_ratio = 3.0
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
 
@@ -1269,7 +1307,8 @@ def api_value():
     events = odds_api.fetch_tennis_events(upcoming_only=True)
     # Priorité aux grands tournois : ATP/WTA principaux avant ITF/UTR.
     def _tourn_rank(e: Dict) -> int:
-        slug = (e.get("league") or {}).get("slug", "")
+        _lg_s = e.get("league") or {}
+        slug = "" if isinstance(_lg_s, str) else _lg_s.get("slug", "")
         if any(k in slug for k in ("wimbledon", "roland-garros", "us-open", "australian")):
             return 0
         if any(k in slug for k in ("eastbourne", "halle", "queens", "queens-club")):
@@ -1282,20 +1321,45 @@ def api_value():
     # Limite le nombre d'appels /odds pour préserver le quota (1 appel = 1 req)
     MAX_ODDS_CALLS = 30
     odds_calls = 0
+    import datetime as _dt
+    _now_utc = _dt.datetime.now(_dt.timezone.utc)
+    # Fenêtre de pick : 0h → 8h avant le coup d'envoi.
+    # Les lignes à >8h sont trop "souples" (early market) → CLV très négatif.
+    _MAX_HOURS_AHEAD = 8.0
+
     out = []
     for e in events:
         n1, n2 = _resolve(e.get("home", "")), _resolve(e.get("away", ""))
         if not n1 or not n2:
             continue
+        # Filtre temporel : ignore les matchs trop lointains (lignes non ajustées)
+        _e_date = e.get("commence_time") or e.get("date") or ""
+        if _e_date:
+            try:
+                _e_dt = _dt.datetime.fromisoformat(str(_e_date).replace("Z", "+00:00"))
+                _hours_ahead = (_e_dt - _now_utc).total_seconds() / 3600
+                if _hours_ahead > _MAX_HOURS_AHEAD or _hours_ahead < -3.0:
+                    continue  # trop lointain ou déjà commencé depuis >3h
+            except Exception:
+                pass
         if odds_calls >= MAX_ODDS_CALLS:
             break
         mw = odds_api.fetch_match_winner(e["id"])
         odds_calls += 1
         if not mw:
             continue
+        # Rejeter les matchs cross-genre (ITF mixte → picks impossibles)
+        t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
+        t2 = (_MEM.get("players") or {}).get(n2, {}).get("tour", "")
+        if t1 and t2 and {t1, t2} == {"atp", "wta"}:
+            continue
         f1 = features.feature_vector(features.get_profile(_MEM, n1))
         f2 = features.feature_vector(features.get_profile(_MEM, n2))
-        r = predictor.predict(_MEM, n1, f1, n2, f2)
+        _ev_surf = e.get("surface") or config.surface_from_league(
+            (e.get("league") or {}).get("name", "") if isinstance(e.get("league"), dict)
+            else str(e.get("league", ""))
+        )
+        r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_ev_surf or None)
 
         if r["confidence"] < min_conf:
             continue
@@ -1311,10 +1375,19 @@ def api_value():
         ev1 = pb1 * ho - 1.0
         ev2 = pb2 * ao - 1.0
 
+        # Ne pick que le côté où le modèle bat le marché no-vig.
+        # Si modèle < marché sur les deux côtés, c'est une mise contre l'edge → skip.
+        model_beats_mkt1 = pm1 > mw["home_prob"]   # modèle > marché sur J1
+        model_beats_mkt2 = pm2 > mw["away_prob"]   # modèle > marché sur J2
+
         if ev1 >= ev2:
             best_side, best_ev = n1, ev1
+            if not model_beats_mkt1:
+                continue  # modèle ne bat pas le marché sur ce côté → skip
         else:
             best_side, best_ev = n2, ev2
+            if not model_beats_mkt2:
+                continue
 
         # Capture la cote du favori du modèle (pour le ROI au settlement).
         if r["favorite"] is not None:
@@ -1327,25 +1400,52 @@ def api_value():
         # EV en % pour filtrage et affichage.
         best_ev_pct = round(best_ev * 100, 1)
         pick_odds_check = ho if best_side == n1 else ao
+
+        # Zone EV 12-18% : historiquement 2W/9L (14% WR) toutes cotes confondues → skip.
+        # Données : 16 picks en 12-18% EV, avg CLV -25%, WR 12.5%. La restriction
+        # précédente (odds > 2.8 seulement) était trop étroite — étendu à toutes cotes.
+        _dead_zone = (12.0 <= best_ev_pct < 18.0)
+        # Plancher 1.40 : cotes très basses = overcertitude modèle, aucune valeur réelle.
+        _below_floor = pick_odds_check < 1.40
+        _leag_raw = e.get("league") or {}
+        _leag_name = (_leag_raw if isinstance(_leag_raw, str) else _leag_raw.get("name", "")) or str(e.get("sport_key", ""))
+
+        # Ratio modèle/marché : cap à max_prob_ratio× la probabilité implicite.
+        # Bloque les picks aberrants (EV > 50%) où le modèle dépasse largement le marché.
+        _model_prob = pb1 if best_side == n1 else pb2
+        _implied_prob = (1.0 / pick_odds_check) if pick_odds_check > 1.0 else 1.0
+        _prob_ratio = _model_prob / _implied_prob if _implied_prob > 0 else 0
+        _overconfident = _prob_ratio > max_prob_ratio
+
         is_value = (best_ev_pct >= min_ev
-                    and pick_odds_check <= max_odds)  # filtre longshots extrêmes
+                    and pick_odds_check <= max_odds
+                    and not _dead_zone
+                    and not _below_floor
+                    and not _overconfident)
 
         # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
         if is_value:
             pick_odds = ho if best_side == n1 else ao
+            _surf_log = r.get("surface") or e.get("surface") or config.surface_from_league(_leag_name)
+            _p_log = pb1 if best_side == n1 else pb2
+            _b_log = pick_odds - 1.0
+            _kelly_u_log = round(max(0.0, (_p_log * _b_log - (1.0 - _p_log)) / _b_log * 0.25 * 100), 1) if _b_log > 0 else 0.0
             try:
                 db.log_value_pick(e.get("date", ""), n1, n2, best_side,
-                                  pick_odds, best_ev_pct)
+                                  pick_odds, best_ev_pct,
+                                  league=_leag_name, surface=_surf_log,
+                                  kelly_u=_kelly_u_log)
             except Exception:  # noqa: BLE001
                 pass
-            # CLV : sème le pick (1re cote = décision) puis rafraîchit la closing
-            # line au quote courant (le dernier vu avant le départ fait foi).
+            # CLV : sème le pick à la cote de décision.
+            # NE PAS appeler refresh_closing ici — la closing line doit être
+            # captée APRÈS la décision par le _clv_closing_loop (toutes les 20min)
+            # pour refléter la vraie variation de cote avant le départ.
             try:
                 ekey = str(e.get("id") or "")
                 pick_prob = pb1 if best_side == n1 else pb2
                 clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
                               pick_odds, pick_prob, r["confidence"])
-                clv.refresh_closing(ekey, best_side, n1, ho, ao)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1358,7 +1458,6 @@ def api_value():
         _kelly_u = round(_kelly_frac * 100, 1)                 # en % de bankroll
 
         # Badge tournoi profitable (> 58% de précision historique ATP/WTA)
-        _leag_name = (e.get("league") or {}).get("name", "")
         _GOOD_TOURN = {"berlin", "nottingham", "eastbourne", "parma", "plovdiv",
                        "brasov", "piracicaba", "dublin", "troyes", "wimbledon"}
         _tourn_label = _leag_name.lower()
@@ -1390,6 +1489,14 @@ def api_value():
             "best_book": (mw.get("home_book") if best_side == n1
                           else mw.get("away_book")) if is_value else None,
             "value": is_value,
+            "filter_reason": (
+                "overconfident" if _overconfident else
+                "dead_zone" if _dead_zone else
+                "below_floor" if _below_floor else
+                "low_ev" if best_ev_pct < min_ev else
+                "high_odds" if pick_odds_check > max_odds else
+                None
+            ) if not is_value else None,
         }
         out.append(_pick_entry)
 
@@ -1438,20 +1545,51 @@ def api_value():
         "market_blend_w": round(_MKT_W, 2),
         "min_confidence": round(min_conf, 2),
         "min_ev": round(min_ev, 1),
+        "min_odds": 1.40,
+        "max_odds": round(max_odds, 1),
         "note": ("proba match calibrée (best-of-3 + temperature), blendée au "
                  "marché (poids modèle w) ; EV = proba_blend×cote − 1 ; "
                  f"value = EV ≥ {min_ev}%"),
     })
 
 
+@app.get("/api/value/open")
+def api_value_open():
+    """Picks value ouverts (non réglés) — pour l'onglet Edge/Android."""
+    db.init()
+    with db.connect() as c:
+        rows = c.execute(
+            "SELECT date,player1,player2,side,odds,ev,kelly_u,league,surface "
+            "FROM value_picks WHERE result IS NULL ORDER BY ev DESC LIMIT 20"
+        ).fetchall()
+    picks = []
+    for r in rows:
+        p = dict(r)
+        # Surface fallback depuis le nom du tournoi si non renseignée
+        if not p.get("surface") and p.get("league"):
+            p["surface"] = config.surface_from_league(p["league"])
+        picks.append(p)
+    return jsonify({"count": len(picks), "picks": picks})
+
+
 @app.get("/api/value/history")
 def api_value_history():
-    """Historique des value picks réglés avec résultat et P&L."""
+    """Historique des value picks réglés avec résultat et P&L.
+
+    ?odds_max=5.0  (défaut 5.0) — filtre les cotes aberrantes historiques.
+    ?ev_min=0      (défaut 0)   — filtre par EV minimum.
+    """
     limit = int(request.args.get("limit", 50))
-    rows = db.list_value_history(limit=limit)
+    odds_max = float(request.args.get("odds_max", 5.0))
+    ev_min = float(request.args.get("ev_min", 8.0))
+    rows = db.list_value_history(limit=limit * 3)  # fetch extra to allow filtering
     stats = db.value_picks_stats()
     picks = []
     for r in rows:
+        if (r["odds"] or 999) > odds_max:
+            continue
+        if (r["ev"] or 0) < ev_min:
+            continue
         picks.append({
             "date": _fmt_date(r["date"]),
             "player1": r["player1"],
@@ -1459,13 +1597,19 @@ def api_value_history():
             "side": r["side"],
             "odds": r["odds"],
             "ev": r["ev"],
-            "result": r["result"],  # 1=gagné, 0=perdu
+            "result": r["result"],
             "pnl": r["pnl"],
             "winner": r["winner"],
+            "league": r["league"] if "league" in r.keys() else None,
+            "surface": r["surface"] if "surface" in r.keys() else None,
+            "kelly_u": r["kelly_u"] if "kelly_u" in r.keys() else None,
         })
+        if len(picks) >= limit:
+            break
     return jsonify({
         "picks": picks,
         "stats": stats,
+        "filters": {"odds_max": odds_max, "ev_min": ev_min},
     })
 
 
@@ -1683,16 +1827,49 @@ def api_clv():
     return jsonify({**stats, "recent": recent})
 
 
+_LEARN_LOCK = __import__("threading").Lock()
+_LEARN_LAST_RUN: float = 0.0
+_LEARN_MIN_INTERVAL = 3600 * 6  # 6h minimum entre deux cycles
+
+
 @app.post("/api/learn/run")
 def api_learn_run():
-    """Déclenche un cycle d'auto-learning : tuning par surface + k-fold eval."""
+    """Déclenche un cycle d'auto-learning : tuning par surface + k-fold eval.
+
+    Garde-fou : un seul cycle à la fois, min 6h entre deux runs.
+    """
+    global _LEARN_LAST_RUN
+    import time as _t
+
+    if not _LEARN_LOCK.acquire(blocking=False):
+        return jsonify({"status": "skipped",
+                        "reason": "Un cycle est déjà en cours."}), 429
+
+    now = _t.time()
+    if now - _LEARN_LAST_RUN < _LEARN_MIN_INTERVAL:
+        _LEARN_LOCK.release()
+        wait = int(_LEARN_MIN_INTERVAL - (now - _LEARN_LAST_RUN))
+        return jsonify({"status": "skipped",
+                        "reason": f"Cycle récent — prochain dans {wait}s."}), 429
     try:
+        _LEARN_LAST_RUN = now
         learner = auto_learner.AutoLearner()
         result = learner.run_full_cycle()
+        # Apply tuned elo_blend + surface blends to live server state
+        new_blend = db.get_meta("elo_blend")
+        if new_blend:
+            _MEM["elo_blend"] = float(new_blend)
+        import json as _jj
+        _sb = _jj.loads(db.get_meta("elo_blend_by_surface") or "{}")
+        if _sb:
+            _MEM["elo_blend_surface"] = {k: float(v) for k, v in _sb.items()}
+        log(f"✓ Live elo_blend={_MEM['elo_blend']:.3f}, surfaces={_MEM.get('elo_blend_surface')}", "INFO")
         return jsonify({"status": "ok", "learning": result})
     except Exception as e:  # noqa: BLE001
         log(f"auto-learning error: {e}", "ERROR")
         return jsonify({"error": str(e)}), 500
+    finally:
+        _LEARN_LOCK.release()
 
 
 @app.post("/api/ingest/sackmann")
@@ -1825,14 +2002,23 @@ def api_inplay_picks_log():
     if not all(k in body for k in required):
         return jsonify({"error": f"Champs requis : {required}"}), 400
 
+    # Cap cotes live : éviter les longs shots ITF > 5.0 sur "Gagnant match"
+    _raw_odds = body.get("odds") or body.get("odds_home") or body.get("odds_away")
+    _mkt = (body.get("market_type") or "").lower()
+    if _raw_odds and float(_raw_odds) > 5.0 and "winner" in _mkt:
+        return jsonify({"error": "odds > 5.0 sur Gagnant match — pick refusé (longshot)"}), 422
+
     # Enrichir avec les cotes live actuelles si event_id fourni
     odds_home = body.get("odds_home")
     odds_away = body.get("odds_away")
     odds_book = body.get("odds_book")
-    if not odds_home and body.get("event_id"):
+    eid = str(body["event_id"]) if body.get("event_id") else None
+
+    if not odds_home and eid:
+        # 1. Cache mémoire live (rapide, prioritaire)
         try:
             live_data = _MEM.get("live_matches") or {}
-            ev = live_data.get(str(body["event_id"])) or {}
+            ev = live_data.get(eid) or {}
             lo = ev.get("live_odds") or {}
             if lo.get("home"):
                 odds_home = lo["home"]
@@ -1841,6 +2027,28 @@ def api_inplay_picks_log():
         except Exception:
             pass
 
+    if not odds_home and eid:
+        # 2. Fallback : appel direct odds-api.io Betfair Exchange
+        try:
+            mw = odds_api.fetch_match_winner(eid)
+            if mw and mw.get("home_odds"):
+                odds_home = mw["home_odds"]
+                odds_away = mw["away_odds"]
+                odds_book = "Betfair Exchange"
+        except Exception:
+            pass
+
+    # Dériver odds du côté misé si pas fourni explicitement
+    pick_odds = body.get("odds")
+    if not pick_odds and odds_home and odds_away:
+        p1 = (body.get("player1") or "").strip().lower()
+        pick_lower = (body.get("pick") or "").strip().lower()
+        # Correspondance approximative : pick contient le nom du player1 ?
+        if p1 and any(tok in pick_lower for tok in p1.split() if len(tok) > 3):
+            pick_odds = odds_home
+        elif odds_away:
+            pick_odds = odds_away
+
     pick_id = db.log_inplay_pick(
         player1=body["player1"],
         player2=body["player2"],
@@ -1848,15 +2056,15 @@ def api_inplay_picks_log():
         market_type=body["market_type"],
         market_label=body.get("market_label", ""),
         pick=body["pick"],
-        odds=body.get("odds"),
+        odds=pick_odds,
         prob=float(body["prob"]),
-        stake=float(body.get("stake", 10.0)),
+        stake=float(body.get("stake", 1.0)),
         odds_home=odds_home,
         odds_away=odds_away,
         odds_book=odds_book or body.get("odds_book"),
         score=body.get("score"),
         minute=body.get("minute"),
-        event_id=str(body["event_id"]) if body.get("event_id") else None,
+        event_id=eid,
         sets_home=body.get("sets_home"),
         sets_away=body.get("sets_away"),
     )
@@ -1900,21 +2108,105 @@ def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
             "books": mw["books"]}
 
 
+def _clv_closing_loop() -> None:
+    """Snapshote les cotes pré-match pour les picks CLV ouverts (toutes les 20min).
+
+    Évite que closing_src reste 'last_seen' quand l'app n'est pas ouverte.
+    Consomme 0 requête supplémentaire si les cotes sont déjà dans le cache.
+    """
+    import time as _t
+    from .log import log
+
+    _t.sleep(30)  # laisse le serveur démarrer
+    while True:
+        try:
+            open_picks = db.list_clv_open()
+            if open_picks and odds_api.is_enabled() and odds_api._current_key():
+                events = odds_api.fetch_tennis_events(upcoming_only=True)
+                idx = odds_api.build_event_index(events)
+                updated = 0
+                for pick in open_picks:
+                    p1 = pick["player1"]
+                    p2 = pick["player2"]
+                    ev = odds_api.find_event(idx, p1, p2)
+                    if not ev:
+                        continue
+                    mw = odds_api.fetch_match_winner(ev["id"])
+                    if not mw:
+                        continue
+                    pick_side = pick["pick_side"]
+                    curr_odds = mw["home_odds"] if pick_side == p1 else mw["away_odds"]
+                    # Utilise l'event_key du pick (pas ev["id"]) pour éviter le
+                    # mismatch si l'API renvoie un ID différent entre deux appels.
+                    clv.refresh_closing(pick["event_key"], pick_side, p1,
+                                        mw["home_odds"], mw["away_odds"])
+                    # Alerte mouvement de cote ≥ 10% contre notre pick
+                    from . import realtime_alerts as _ra
+                    pick_odds_orig = float(pick["pick_odds"] or 0)
+                    if pick_odds_orig > 1.0 and curr_odds > 1.0:
+                        _ra.on_odds_move(p1, p2, pick_side, pick_odds_orig, curr_odds)
+                    updated += 1
+                if updated:
+                    log(f"CLV: {updated} closing odds mis à jour.")
+        except Exception as exc:
+            log(f"CLV closing loop erreur: {exc}", "WARN")
+        _t.sleep(1200)  # 20 min
+
+
 def _settlement_loop(interval: int) -> None:
-    """Boucle de fond : règle les matchs terminés et recalibre périodiquement."""
+    """Boucle de fond : règle les matchs terminés, envoie alertes, recalibre."""
     import time as _t
 
     from .log import log
+    from . import realtime_alerts as _ra
     while True:
         _t.sleep(interval)
         try:
+            # Snapshot des picks ouverts avant settlement (pour détecter les nouveaux réglés)
+            with db.connect() as _c:
+                _open_before = {r["rowid"]: r for r in _c.execute(
+                    "SELECT rowid,player1,player2,side,odds FROM value_picks WHERE result IS NULL"
+                ).fetchall()}
+
             summary = settlement.run_settlement(_MEM, _resolve, days_back=2)
+
+            # Alertes pour les picks qui viennent d'être réglés
+            if summary.get("added", 0) and _ra.get():
+                with db.connect() as _c:
+                    for rowid in list(_open_before):
+                        r = _c.execute(
+                            "SELECT result,pnl,winner FROM value_picks WHERE rowid=? AND result IS NOT NULL",
+                            (rowid,)
+                        ).fetchone()
+                        if r:
+                            p = _open_before[rowid]
+                            import threading as _thr
+                            _thr.Thread(
+                                target=_ra.on_settlement,
+                                args=(p["player1"], p["player2"],
+                                      r["winner"] or "", p["side"],
+                                      float(p["odds"] or 0), float(r["pnl"] or 0)),
+                                daemon=True
+                            ).start()
+
             _refit_calibration()
             metrics = settlement.calibration_metrics()
             if metrics["n"] > 0:
                 db.save_calibration(metrics)
             log(f"Settlement auto: +{summary['added']} réglés, "
                 f"n={metrics['n']} acc={metrics['accuracy']} k={round(_CALIB_K, 3)}")
+
+            # Void les picks ouverts depuis >48h (match annulé / résultat introuvable).
+            import datetime as _dt
+            _cutoff = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=48)).isoformat()
+            with db.connect() as _c:
+                _stale = _c.execute(
+                    "SELECT rowid, player1, player2, date FROM value_picks "
+                    "WHERE result IS NULL AND date < ?", (_cutoff,)
+                ).fetchall()
+            for _s in _stale:
+                db.settle_value_pick(_s["player1"], _s["player2"], None)
+                log(f"Void stale pick: {_s['player1']} vs {_s['player2']} ({_s['date']})", "WARN")
         except Exception as exc:  # noqa: BLE001
             log(f"Settlement auto en échec ({exc}).", "WARN")
 
@@ -1964,6 +2256,9 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
             "absent du .env) — tout le réseau peut lire les données ET déclencher "
             "/api/settlement/run, /api/learn/run, /api/upload. Définissez un token.",
             "WARN")
+    from . import realtime_alerts as _ra_init
+    _ra_init.init()
+
     log(f"API REST sur http://{host}:{port}  (auth token: {'OUI' if token else 'non'})")
     log(f"{len(_MEM['players'])} joueurs chargés. Endpoints sous /api/ + /health.")
 
@@ -1981,10 +2276,24 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
                    daemon=True).start()
         log(f"Settlement inplay toutes les {inplay_interval}s.")
 
+    # Snapshot closing odds pour tous les picks CLV ouverts (toutes les 20min)
+    import threading as _th_clv
+    _th_clv.Thread(target=_clv_closing_loop, daemon=True).start()
+    log("CLV closing snapshot démarré (20min).")
+
     # Digest quotidien Telegram à 21h
     import threading as _th2
     _th2.Thread(target=_digest_loop, daemon=True).start()
     log("Digest Telegram quotidien 21h activé.")
+
+    # Refresh données tennis (tennis-data.co.uk) à 2h du matin
+    import threading as _thd
+    _thd.Thread(target=_data_refresh_loop, daemon=True).start()
+
+    # Bot Telegram polling (/picks /digest /clear)
+    import threading as _th3
+    _th3.Thread(target=_tg_poll_loop, daemon=True).start()
+    log("Bot Telegram polling démarré (/picks /digest).")
 
     # Self-healing agent (DeepSeek R1 via Ollama)
     from . import healer as _healer
@@ -2004,18 +2313,157 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
 
 
 def _digest_loop() -> None:
-    """Envoie le digest Telegram quotidien à 21h00 (heure locale)."""
+    """Digest Telegram : à 21h ET quand tous les picks du jour sont settlés."""
     import datetime as _dt2
     import time as _time
     sent_date: str = ""
+    all_settled_notified: str = ""
+
     while True:
-        now = _dt2.datetime.now()
-        today = now.date().isoformat()
-        if now.hour == 21 and sent_date != today:
-            from . import digest as _digest
-            _digest.send_daily_digest(today)
-            sent_date = today
         _time.sleep(60)
+        try:
+            now = _dt2.datetime.now()
+            today = now.date().isoformat()
+
+            # 1. Digest 21h
+            if now.hour == 21 and sent_date != today:
+                from . import digest as _digest
+                _digest.send_daily_digest(today)
+                sent_date = today
+
+            # 2. Alerte "tous settlés" dès que plus aucun pick du jour n'est ouvert
+            if all_settled_notified != today and now.hour >= 14:
+                with db.connect() as _c:
+                    pending = _c.execute(
+                        "SELECT COUNT(*) FROM value_picks WHERE date LIKE ? AND result IS NULL",
+                        (f"{today}%",)
+                    ).fetchone()[0]
+                    total = _c.execute(
+                        "SELECT COUNT(*) FROM value_picks WHERE date LIKE ? AND odds<=5.0",
+                        (f"{today}%",)
+                    ).fetchone()[0]
+                if pending == 0 and total >= 3:
+                    from . import digest as _digest
+                    _digest.send_daily_digest(today)
+                    all_settled_notified = today
+        except Exception:
+            pass
+
+
+def _data_refresh_loop() -> None:
+    """Rafraîchit les données tennis (tennis-data.co.uk) à 2h du matin."""
+    import datetime as _dt_r
+    import time as _time_r
+    _refreshed_on: str = ""
+    _time_r.sleep(60)  # attendre démarrage complet
+    while True:
+        try:
+            now = _dt_r.datetime.now()
+            today = now.date().isoformat()
+            if now.hour == 2 and _refreshed_on != today:
+                log("Data refresh: ingest tennis-data.co.uk...")
+                from . import tennisdata_feeder as _tdf
+                result = _tdf.ingest(years=[now.year, now.year - 1])
+                inserted = result.get("inserted", 0)
+                log(f"Data refresh: {inserted} nouveaux matchs.")
+                if inserted > 0:
+                    # Rebuild ELO incrémental
+                    from . import elo as _elo, memory as _mem
+                    rows = db.all_matches_chrono()
+                    elo_r = {}
+                    for row in rows:
+                        _elo.update(elo_r, dict(row).get("winner"), dict(row).get("loser"))
+                    mem = _mem.load()
+                    mem["elo"] = elo_r
+                    _mem.save(mem)
+                    log(f"ELO rebuild: {len(elo_r)} joueurs.")
+                _refreshed_on = today
+        except Exception as exc:
+            log(f"Data refresh erreur: {exc}", "WARN")
+        _time_r.sleep(1800)  # check toutes les 30min
+
+
+def _tg_poll_loop() -> None:
+    """Bot Telegram polling — gère /picks, /digest, /clear et forward au chat IA."""
+    import time as _time
+    import requests as _req
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    admin_id = int(os.environ.get("TELEGRAM_ADMIN_ID", "0") or 0)
+    if not token:
+        return
+    base = f"https://api.telegram.org/bot{token}"
+    offset = 0
+
+    def _send(chat_id: int, text: str) -> None:
+        try:
+            _req.post(f"{base}/sendMessage",
+                      json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                      timeout=10)
+        except Exception:
+            pass
+
+    while True:
+        try:
+            r = _req.get(f"{base}/getUpdates",
+                         params={"offset": offset, "timeout": 10, "allowed_updates": ["message"]},
+                         timeout=16)
+            updates = r.json().get("result", []) if r.ok else []
+        except Exception:
+            _time.sleep(5)
+            continue
+        for upd in updates:
+            offset = upd["update_id"] + 1
+            msg = upd.get("message", {})
+            text = (msg.get("text") or "").strip()
+            if not text:
+                continue
+            chat_id = msg["chat"]["id"]
+            # Restriction admin uniquement
+            if admin_id and chat_id != admin_id:
+                _send(chat_id, "Accès restreint.")
+                continue
+            if text.startswith("/picks"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_picks_summary())
+            elif text.startswith("/value"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_value_open())
+            elif text.startswith("/clv"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_clv_report())
+            elif text.startswith("/digest"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_digest())
+            elif text.startswith("/stats"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_global_stats())
+            elif text.startswith("/start"):
+                _send(chat_id,
+                    "🎾 *TennisBoss*\n\n"
+                    "/picks — picks du jour\n"
+                    "/value — picks ouverts\n"
+                    "/clv — Closing Line Value\n"
+                    "/stats — bilan global\n"
+                    "/digest — rapport complet\n"
+                    "/clear — reset chat"
+                )
+            elif text.startswith("/clear"):
+                try:
+                    _req.post(f"http://127.0.0.1:8001/tg-sessions/{chat_id}/clear", timeout=5)
+                except Exception:
+                    pass
+                _send(chat_id, "Historique effacé.")
+            else:
+                # Forward vers le chat IA
+                try:
+                    resp = _req.post("http://127.0.0.1:8001/api/chat",
+                                     json={"user_id": chat_id, "username": "tg",
+                                           "message": text}, timeout=60)
+                    reply = resp.json().get("reply") or resp.json().get("response") or "..."
+                except Exception as exc:
+                    reply = f"Erreur chat: {exc}"
+                _send(chat_id, reply)
+        _time.sleep(1)
 
 
 def _ws_on_status(msg: dict) -> None:

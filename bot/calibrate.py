@@ -110,7 +110,7 @@ def tune_blend(samples: List[Tuple[float, float, float]],
             tot += -(y * math.log(p) + (1 - y) * math.log(1 - p))
         return tot / len(samples)
 
-    grid = [i / 10.0 for i in range(0, 21)]   # 0.0 .. 2.0
+    grid = [i / 10.0 for i in range(0, 31)]   # 0.0 .. 3.0
     best = min(grid, key=ll)
     return {"elo_blend": round(best, 2), "n": len(samples), "fitted": True,
             "logloss_no_elo": round(ll(0.0), 4), "logloss_best": round(ll(best), 4)}

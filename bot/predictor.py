@@ -56,8 +56,46 @@ ELO_BLEND = 0.8
 ELO_BASE = 1500.0
 
 
+def _lookup_elo(ratings: Dict[str, float], name: str) -> float:
+    """Lookup ELO avec fallback sur variantes de format de nom.
+
+    Essaie: "First Last", "Last F.", "F. Last", "Last, First".
+    """
+    if not name:
+        return ELO_BASE
+    if name in ratings:
+        return ratings[name]
+    # Variant 1: "Last F." — initial seul
+    parts = name.strip().split()
+    if len(parts) == 2:
+        v1 = f"{parts[1]} {parts[0][0]}."  # "Last F."
+        v2 = f"{parts[0][0]}. {parts[1]}"  # "F. Last"
+        v3 = f"{parts[1]}, {parts[0]}"     # "Last, First"
+        for v in (v1, v2, v3):
+            if v in ratings:
+                return ratings[v]
+    elif len(parts) >= 3:
+        # "First Middle Last" → try "Last F." or "Last, First"
+        last = parts[-1]
+        first = parts[0]
+        for v in (f"{last} {first[0]}.", f"{first[0]}. {last}", f"{last}, {first}"):
+            if v in ratings:
+                return ratings[v]
+    # Reverse "Last, First" → "First Last"
+    if ", " in name:
+        p = name.split(", ", 1)
+        canonical = f"{p[1]} {p[0]}"
+        if canonical in ratings:
+            return ratings[canonical]
+        # Also try initial only: "Last F."
+        abbrev = f"{p[0]} {p[1][0]}."
+        if abbrev in ratings:
+            return ratings[abbrev]
+    return ELO_BASE
+
+
 def _raw_logit(ratings: Dict[str, float], n1: str, n2: str) -> float:
-    return (ratings.get(n1, ELO_BASE) - ratings.get(n2, ELO_BASE)) / 400.0 * math.log(10)
+    return (_lookup_elo(ratings, n1) - _lookup_elo(ratings, n2)) / 400.0 * math.log(10)
 
 
 def elo_logit(mem: Dict[str, Any], name1: str, name2: str,
@@ -73,7 +111,9 @@ def elo_logit(mem: Dict[str, Any], name1: str, name2: str,
     elo = mem.get("elo") or {}
     if not elo:
         return 0.0
-    blend = float(mem.get("elo_blend", ELO_BLEND))
+    global_blend = float(mem.get("elo_blend", ELO_BLEND))
+    surf_blends = mem.get("elo_blend_surface") or {}
+    blend = float(surf_blends.get(surface, global_blend)) if surface else global_blend
     base = _raw_logit(elo, name1, name2)
 
     surf_map = mem.get("elo_surface") or {}

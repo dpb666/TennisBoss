@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from . import clv, db, elo, features, live_api, odds_api, predictor
+from . import clv, config, db, elo, features, live_api, odds_api, predictor
 
 
 def run_settlement(mem: Dict[str, Any],
@@ -101,10 +101,36 @@ def run_settlement(mem: Dict[str, Any],
             # Apprentissage continu : ELO mis à jour, pondéré par la dominance.
             if "elo" in mem:
                 mult = elo.dominance_mult(r["sets"], r["winner"])
-                elo.update(mem["elo"], winner_name,
-                           n2 if r["winner"] == "p1" else n1, mult=mult)
+                loser_name = n2 if r["winner"] == "p1" else n1
+                elo.update(mem["elo"], winner_name, loser_name, mult=mult)
+                # Mise à jour ELO récent (forme courte 180j) — toujours
+                if "elo_recent" in mem:
+                    elo.update(mem["elo_recent"], winner_name, loser_name, mult=mult)
+                # Mise à jour ELO de surface si détectable depuis le tournoi
+                surface = config.surface_from_league(r.get("tournament", ""))
+                if surface and "elo_surface" in mem:
+                    surf_ratings = mem["elo_surface"].setdefault(surface, {})
+                    elo.update(surf_ratings, winner_name, loser_name, mult=mult)
 
-    return {"results_seen": len(results), "added": added}
+    # Repair pass: settle value_picks whose match is already in settled_matches.
+    # Needed when a value_pick is logged after the match was already settled.
+    repaired = 0
+    try:
+        open_picks = db.list_value_picks_open()
+        for pick in open_picks:
+            p1, p2 = pick["player1"], pick["player2"]
+            sm = db.get_settled_by_players(p1, p2)
+            if sm and sm["winner"]:
+                if db.settle_value_pick(p1, p2, sm["winner"]):
+                    repaired += 1
+                    try:
+                        clv.settle(p1, p2, sm["winner"])
+                    except Exception:  # noqa: BLE001
+                        pass
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"results_seen": len(results), "added": added, "repaired": repaired}
 
 
 def _acc(rows: List[Any]) -> Optional[float]:
@@ -186,7 +212,7 @@ def calibration_metrics() -> Dict[str, Any]:
         if r["winner"] is None:
             continue
         p = picks.get(frozenset((r["player1"], r["player2"])))
-        if not p or not p["odds"] or p["odds"] <= 1.0:
+        if not p or not p["odds"] or p["odds"] <= 1.0 or p["odds"] > 5.0:
             continue
         won = (r["winner"] == p["side"])
         v_profits.append((p["odds"] - 1.0) if won else -1.0)
