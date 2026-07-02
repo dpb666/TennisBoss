@@ -21,9 +21,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import com.tennisboss.app.data.ClvAgg
 import com.tennisboss.app.data.ClvRecent
 import com.tennisboss.app.data.ClvResponse
+import com.tennisboss.app.data.IntelligenceStats
+import com.tennisboss.app.data.LearnerStats
 import com.tennisboss.app.ui.components.SkeletonList
 
 private val GoodColor = Color(0xFF00E5A0)
@@ -61,7 +70,7 @@ fun EdgeScreen(vm: EdgeViewModel = viewModel()) {
                 is EdgeUiState.Loading -> SkeletonList(count = 3)
                 is EdgeUiState.Error ->
                     Text(s.message, color = MaterialTheme.colorScheme.error)
-                is EdgeUiState.Success -> Content(s.data)
+                is EdgeUiState.Success -> Content(s.data.clv, s.data.intelligence, s.data.learner)
                 else -> {}
             }
         }
@@ -76,7 +85,7 @@ private fun verdictColor(verdict: String): Color = when (verdict) {
 }
 
 @Composable
-private fun Content(d: ClvResponse) {
+private fun Content(d: ClvResponse, intel: IntelligenceStats, learner: LearnerStats) {
     val g = d.global
     if (g.n_clv == 0 && g.n_settled == 0) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -87,6 +96,7 @@ private fun Content(d: ClvResponse) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            IntelligenceCard(intel, learner)
         }
         return
     }
@@ -133,6 +143,10 @@ private fun Content(d: ClvResponse) {
             Text(d.note, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline)
         }
+
+        // ── Intelligence autonome ─────────────────────────────────────
+        item { IntelligenceCard(intel, learner) }
+
         if (d.recent.isNotEmpty()) {
             item {
                 Text("Derniers picks", fontWeight = FontWeight.Bold,
@@ -229,6 +243,118 @@ private fun RecentRow(r: ClvRecent) {
         }
     }
 }
+
+@Composable
+private fun IntelligenceCard(intel: IntelligenceStats, learner: LearnerStats) {
+    val driftColor = when {
+        intel.accuracy_drift_pts > 5.0 -> GoodColor
+        intel.accuracy_drift_pts < -5.0 -> BadColor
+        else -> WarnColor
+    }
+    val driftSign = if (intel.accuracy_drift_pts >= 0) "+" else ""
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("🧠 Intelligence autonome", fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "${driftSign}${String.format("%.1f", intel.accuracy_drift_pts)} pts",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = driftColor,
+                )
+            }
+            Text(
+                "Drift modèle : précision récente vs all-time",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            HorizontalDivider()
+
+            // Zones dangereuses
+            if (learner.zones.isNotEmpty()) {
+                Text("Zones bloquées (ROI systématiquement négatif)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = BadColor)
+                learner.zones.forEach { zone ->
+                    val label = buildString {
+                        append("EV ${zone.ev_bucket}%")
+                        zone.odds_bucket?.let { append(" · cotes $it") }
+                        zone.surface?.let { if (it != "unknown" && it.isNotBlank()) append(" · $it") }
+                        append("  →  ROI ${String.format("%.0f%%", zone.roi * 100)}  (n=${zone.n})")
+                    }
+                    Text("🚫 $label", style = MaterialTheme.typography.bodySmall, color = BadColor)
+                }
+            } else {
+                Text("Aucune zone dangereuse détectée",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = GoodColor)
+            }
+
+            // Surfaces en danger
+            if (intel.surface_danger.isNotEmpty()) {
+                Text("⚠️ Surfaces en danger : ${intel.surface_danger.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall, color = WarnColor)
+            }
+
+            // Joueurs blacklistés
+            if (intel.blacklist.isNotEmpty()) {
+                HorizontalDivider()
+                Text("Joueurs sur-évalués (bloqués par l'IA)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Chips pour les 6 premiers
+                val shown = intel.blacklist.take(6)
+                val overflow = intel.blacklist.size - shown.size
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    shown.take(3).forEach { name ->
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(name.take(12), style = MaterialTheme.typography.labelSmall) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = BadColor.copy(alpha = 0.12f)
+                            ),
+                        )
+                    }
+                }
+                if (shown.size > 3) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        shown.drop(3).forEach { name ->
+                            AssistChip(
+                                onClick = {},
+                                label = { Text(name.take(12), style = MaterialTheme.typography.labelSmall) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = BadColor.copy(alpha = 0.12f)
+                                ),
+                            )
+                        }
+                    }
+                }
+                if (overflow > 0) {
+                    Text("+ $overflow autres", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        }
+    }
+}
+
 
 private fun pct(v: Double?): String = v?.let { String.format("%.0f%%", it) } ?: "—"
 private fun signedPct(v: Double?): String = v?.let { String.format("%+.1f%%", it) } ?: "—"

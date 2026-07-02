@@ -43,6 +43,7 @@ import com.tennisboss.app.data.ValueComparison
 import com.tennisboss.app.data.ValuePickHistory
 import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SkeletonList
+import com.tennisboss.app.ui.components.SurfaceBadge
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -292,8 +293,14 @@ private fun HistoryPickRow(p: ValuePickHistory) {
             Text("Pari : ${p.side} @ ${p.odds}  •  EV ${String.format("%+.1f%%", p.ev)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(p.date, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(p.date, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline)
+                SurfaceBadge(p.surface)
+            }
         }
         Spacer(Modifier.size(8.dp))
         val (icon, pnlStr, color) = when {
@@ -338,11 +345,13 @@ private fun ValueCard(c: ValueComparison) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                SurfaceBadge(c.surface)
+                if (c.surface != null) Spacer(Modifier.size(4.dp))
                 if (c.confidence_label.isNotBlank()) {
                     ConfidenceBadge(c.confidence_label, c.confidence)
                     Spacer(Modifier.size(6.dp))
                 }
-                EvBadge(c.best_ev, c.value)
+                EvBadge(c.best_ev, c.value, c.filter_reason)
             }
 
             Text("${c.player1}  vs  ${c.player2}", fontWeight = FontWeight.SemiBold)
@@ -486,9 +495,18 @@ private fun SideBox(
 }
 
 @Composable
-private fun EvBadge(bestEv: Double, value: Boolean) {
-    val bg = if (value) GoodColor else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (value) Color(0xFF00251A) else MaterialTheme.colorScheme.onSurfaceVariant
+private fun EvBadge(bestEv: Double, value: Boolean, filterReason: String? = null) {
+    val deadZone = filterReason == "dead_zone"
+    val bg = when {
+        deadZone -> Color(0xFF3E2723)
+        value    -> GoodColor
+        else     -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = when {
+        deadZone -> Color(0xFFFF8A65)
+        value    -> Color(0xFF00251A)
+        else     -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
@@ -496,7 +514,11 @@ private fun EvBadge(bestEv: Double, value: Boolean) {
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(
-            if (value) "🟢 VALUE ${fmtSigned(bestEv)}" else "Pas de value",
+            when {
+                deadZone -> "⛔ Zone EV 12-18%"
+                value    -> "🟢 VALUE ${fmtSigned(bestEv)}"
+                else     -> "Pas de value"
+            },
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             color = fg,

@@ -50,14 +50,31 @@ async def lifespan(app: FastAPI):
         _MEM.update(state)
 
         # Dynamic ELO (K=64/28/12 + dominance) from chronological DB archive
+        from bot import config as _config
         rows = db.all_matches_chrono()
         _MEM["elo"], _ = elo.build_dynamic(rows)
         _MEM["elo_surface"] = {}
         for surf in ("hard", "clay", "grass"):
             _MEM["elo_surface"][surf], _ = elo.build_dynamic(rows, surface_key=surf)
+        _MEM["elo_recent"], _ = elo.build_recent(rows, days=180)
 
-        n_players = len(_MEM.get("players") or {})
-        logger.info("Loaded %d players, ELO built.", n_players)
+        # Replay settled matches: update global + surface + recent ELO
+        known = _MEM.get("players") or {}
+        replayed = 0
+        for s in db.settled_chrono():
+            w, p1, p2 = s["winner"], s["player1"], s["player2"]
+            loser = p2 if w == p1 else p1
+            if w in known and p1 in known and p2 in known and w in (p1, p2):
+                elo.update(_MEM["elo"], w, loser)
+                elo.update(_MEM["elo_recent"], w, loser)
+                tourn = s["tournament"] if "tournament" in s.keys() else ""
+                surf = _config.surface_from_league(tourn or "")
+                if surf and surf in _MEM["elo_surface"]:
+                    elo.update(_MEM["elo_surface"][surf], w, loser)
+                replayed += 1
+
+        n_players = len(known)
+        logger.info("Loaded %d players, ELO built + %d settled replayed.", n_players, replayed)
     except Exception as exc:
         logger.error("Failed to load model state: %s", exc)
 

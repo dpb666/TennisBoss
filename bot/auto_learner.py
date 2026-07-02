@@ -218,14 +218,16 @@ class AutoLearner:
             log(f"✓ Updated elo_blend={overall_blend:.3f}, surfaces={surface_blends}", "INFO")
 
         # 5. Metrics finales
+        import datetime as _dt
+        _total = db.count_settled()
         metrics = {
-            "cycle_timestamp": db.get_meta("last_settlement") or "2026-06-09",
+            "cycle_timestamp": _dt.date.today().isoformat(),
             "elo_blends_by_surface": surface_blends,
             "elo_blend_global": overall_blend if surface_blends else None,
             "synthetic_matches_generated": len(augmented),
             "kfold_accuracy": kfold["mean"],
             "kfold_accuracy_stddev": (max(kfold["folds"]) - min(kfold["folds"])) / 2 if kfold["folds"] else 0,
-            "total_settled_matches": len(db.list_settled()),
+            "total_settled_matches": _total,
         }
 
         db.set_meta("last_learning_cycle", json.dumps(metrics))

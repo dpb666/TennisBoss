@@ -324,6 +324,8 @@ data class ValueComparison(
     val terrain_favorable: Boolean = false,
     val date: String = "",
     val source: String = "",
+    val surface: String? = null,
+    val filter_reason: String? = null,
 )
 
 data class ValueResponse(
@@ -345,6 +347,9 @@ data class ValuePickHistory(
     val result: Int? = null,
     val pnl: Double? = null,
     val winner: String? = null,
+    val league: String? = null,
+    val surface: String? = null,
+    val kelly_u: Double? = null,
 )
 
 data class ValuePickStats(
@@ -632,4 +637,36 @@ data class ClvResponse(
     val verdict_label: String = "",
     val note: String = "",
     val recent: List<ClvRecent> = emptyList(),
+)
+
+/** Zones dangereuses apprises (EV bucket × cotes × surface). */
+data class DangerZone(
+    val type: String = "",
+    val ev_bucket: String = "",
+    val odds_bucket: String? = null,
+    val surface: String? = null,
+    val n: Int = 0,
+    val roi: Double = 0.0,
+)
+
+/** Thresholds du mistake_learner. */
+data class LearnerThresholds(
+    val min_n: Int = 7,
+    val roi_threshold_pct: Double = -12.0,
+)
+
+/** Réponse /api/learner/stats. */
+data class LearnerStats(
+    val n_zones: Int = 0,
+    val zones: List<DangerZone> = emptyList(),
+    val thresholds: LearnerThresholds = LearnerThresholds(),
+)
+
+/** Réponse /api/intelligence/stats — cerveau autonome. */
+data class IntelligenceStats(
+    val blacklist: List<String> = emptyList(),
+    val surface_danger: List<String> = emptyList(),
+    val accuracy_drift_pts: Double = 0.0,
+    val last_cycle_ts: Double = 0.0,
+    val thresholds: Map<String, Double> = emptyMap(),
 )

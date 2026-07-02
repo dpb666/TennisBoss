@@ -60,6 +60,18 @@ def refresh_closing(event_key: str, side: str,
         db.update_clv_closing(event_key, float(closing), "snapshot")
 
 
+def _name_vars(name: str):
+    """Last,First ↔ First Last variants pour la comparaison."""
+    variants = {name}
+    if ", " in name:
+        parts = name.split(", ", 1)
+        variants.add(f"{parts[1]} {parts[0]}")
+    elif " " in name:
+        parts = name.rsplit(" ", 1)
+        variants.add(f"{parts[1]}, {parts[0]}")
+    return variants
+
+
 def settle(p1: str, p2: str, winner_name: str) -> bool:
     """Règle un pick CLV au résultat. True si un pick a été réglé.
 
@@ -68,9 +80,19 @@ def settle(p1: str, p2: str, winner_name: str) -> bool:
     line n'a été captée, on retombe sur la cote du pick (CLV=0, flag
     'last_seen') pour ne pas perdre le P&L.
     """
-    pair = frozenset((p1, p2))
-    row = next((r for r in db.list_clv_unsettled()
-                if frozenset((r["player1"], r["player2"])) == pair), None)
+    p1_vars = _name_vars(p1)
+    p2_vars = _name_vars(p2)
+    winner_vars = _name_vars(winner_name)
+
+    unsettled = db.list_clv_unsettled()
+    row = None
+    for r in unsettled:
+        r1_vars = _name_vars(r["player1"])
+        r2_vars = _name_vars(r["player2"])
+        if (r1_vars & p1_vars and r2_vars & p2_vars) or \
+           (r1_vars & p2_vars and r2_vars & p1_vars):
+            row = r
+            break
     if row is None:
         return False
     event_key = row["event_key"]
@@ -83,7 +105,8 @@ def settle(p1: str, p2: str, winner_name: str) -> bool:
     if row["closing_odds"] is None:
         db.update_clv_closing(event_key, pick_odds, "last_seen")
 
-    won = 1 if row["pick_side"] == winner_name else 0
+    pick_side_vars = _name_vars(row["pick_side"])
+    won = 1 if pick_side_vars & winner_vars else 0
     pnl_flat = (pick_odds - 1.0) if won else -1.0
 
     frac = kelly_fraction(float(row["pick_prob"] or 0), pick_odds, 0.25)
@@ -107,7 +130,7 @@ def _agg(rows: List[Any]) -> Dict[str, Any]:
     if not with_clv and n == 0:
         return {"n": 0}
 
-    out: Dict[str, Any] = {"n_picks": len(rows), "n_settled": n}
+    out: Dict[str, Any] = {"n": len(rows), "n_picks": len(rows), "n_settled": n}
 
     if with_clv:
         clvs = [r["clv_pct"] for r in with_clv]

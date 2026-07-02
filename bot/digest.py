@@ -484,3 +484,177 @@ def send_picks_summary() -> bool:
     except Exception as e:
         log(f"digest: /picks erreur — {e}", "ERROR")
         return False
+
+
+def build_intel_report() -> str:
+    """Rapport /intel — ce que l'IA a appris depuis les résultats réels."""
+    try:
+        from . import intelligence as _intel, mistake_learner as _ml
+        is_data = _intel.stats()
+        ml_data = _ml.stats()
+    except Exception as exc:
+        return f"❌ Erreur intelligence: {exc}"
+
+    lines = ["🧠 *Intelligence autonome TennisBoss*", ""]
+
+    # Drift
+    drift = is_data.get("accuracy_drift_pts", 0.0)
+    arrow = "⬆️" if drift > 0 else "⬇️" if drift < 0 else "➡️"
+    alert = " ⚠️" if drift < -5 else ""
+    lines.append(f"{arrow} *Drift modèle* : `{drift:+.1f} pts`{alert}")
+    lines.append("  _Précision 50 derniers vs all-time_")
+    lines.append("")
+
+    # Zones EV bloquées
+    zones = ml_data.get("zones", [])
+    lines.append(f"🚫 *Zones EV bloquées* ({len(zones)} zone(s))")
+    if zones:
+        for z in zones:
+            extra = f" · cotes {z['odds_bucket']}" if z.get("odds_bucket") else ""
+            surf = f" · {z['surface']}" if z.get("surface") and z["surface"] != "unknown" else ""
+            lines.append(f"  EV {z['ev_bucket']}%{extra}{surf} → ROI `{z['roi']*100:.0f}%` (n={z['n']})")
+    else:
+        lines.append("  Aucune zone dangereuse détectée ✅")
+    lines.append("")
+
+    # Surfaces en danger
+    surf_danger = is_data.get("surface_danger", [])
+    if surf_danger:
+        lines.append(f"⚠️ *Surfaces en danger* : {', '.join(surf_danger)}")
+    else:
+        lines.append("✅ *Surfaces* : toutes OK")
+    lines.append("")
+
+    # Blacklist joueurs
+    bl = is_data.get("blacklist", [])
+    lines.append(f"🔴 *Joueurs sur-évalués bloqués* ({len(bl)})")
+    if bl:
+        # 3 par ligne
+        for i in range(0, min(12, len(bl)), 3):
+            chunk = bl[i:i+3]
+            lines.append("  " + "  ·  ".join(n[:16] for n in chunk))
+        if len(bl) > 12:
+            lines.append(f"  _+ {len(bl)-12} autres_")
+    else:
+        lines.append("  Aucun joueur blacklisté")
+
+    lines.append("")
+    # Thresholds
+    t = is_data.get("thresholds", {})
+    lines.append(f"_Seuils : ≥{t.get('min_miss', 5)} erreurs → blacklist · "
+                 f"acc <{t.get('surf_danger_acc_pct', 48)}% → surface bloquée · "
+                 f"drift >{t.get('drift_alert_pts', 5)}pts → alerte_")
+    lines.append("_/intel /roi /scanner — TennisBoss_")
+    return "\n".join(lines)
+
+
+def build_roi_breakdown() -> str:
+    """Rapport /roi — ROI détaillé par tranche EV, surface, streak."""
+    db.init()
+    with db.connect() as c:
+        all_picks = c.execute(
+            "SELECT ev, odds, result, pnl, surface, league FROM value_picks "
+            "WHERE result IN (0,1) AND odds <= 5.0 ORDER BY ts DESC"
+        ).fetchall()
+
+    if not all_picks:
+        return "📈 *ROI par tranche EV*\n\nAucun pick réglé pour l'instant."
+
+    def bucket(ev):
+        if ev < 12: return "8-12%"
+        if ev < 18: return "12-18%"
+        if ev < 25: return "18-25%"
+        return "25%+"
+
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    for r in all_picks:
+        b = bucket(float(r["ev"] or 0))
+        buckets[b].append(r)
+
+    lines = ["📈 *ROI par tranche EV*", ""]
+
+    total_n = len(all_picks)
+    total_w = sum(1 for r in all_picks if r["result"] == 1)
+    total_pnl = sum(r["pnl"] or 0 for r in all_picks)
+    lines.append(f"*Global* : {total_w}W/{total_n-total_w}L · P&L `{_fmt_pnl(total_pnl)}` · ROI `{total_pnl/total_n*100:+.1f}%`")
+    lines.append("")
+
+    for b in ["8-12%", "12-18%", "18-25%", "25%+"]:
+        items = buckets.get(b, [])
+        if not items:
+            continue
+        n = len(items)
+        w = sum(1 for r in items if r["result"] == 1)
+        pnl = sum(r["pnl"] or 0 for r in items)
+        roi = pnl / n * 100
+        blocked = " 🚫 _(bloquée)_" if b == "12-18%" else ""
+        em = "🟢" if roi > 5 else "🔴" if roi < -10 else "🟡"
+        lines.append(f"{em} *EV {b}*{blocked}")
+        lines.append(f"  {w}W/{n-w}L (n={n}) · P&L `{_fmt_pnl(pnl)}` · ROI `{roi:+.1f}%`")
+
+    lines.append("")
+
+    # Sweet spot
+    sweet = buckets.get("18-25%", [])
+    if sweet:
+        sw = sum(1 for r in sweet if r["result"] == 1)
+        sp = sum(r["pnl"] or 0 for r in sweet)
+        lines.append(f"🎯 *Sweet spot EV 18-25%* : {sw}W/{len(sweet)-sw}L · P&L `{_fmt_pnl(sp)}`")
+        lines.append("")
+
+    # Streak actuel
+    recent = sorted(all_picks, key=lambda r: 0)  # already sorted
+    if recent:
+        streak_val = recent[0]["result"]
+        streak_n = 0
+        for r in recent:
+            if r["result"] == streak_val:
+                streak_n += 1
+            else:
+                break
+        em_s = "🔥" if streak_val == 1 else "❄️"
+        label_s = "WIN" if streak_val == 1 else "LOSS"
+        lines.append(f"{em_s} Série actuelle : *{streak_n} {label_s}*")
+
+    lines.append("")
+    lines.append("_/picks /intel /clv — TennisBoss_")
+    return "\n".join(lines)
+
+
+def build_scanner_status() -> str:
+    """Rapport /scanner — état du scanner temps réel."""
+    db.init()
+    with db.connect() as c:
+        # Derniers picks value loggués (scanner ou manuels)
+        recent_vp = c.execute(
+            "SELECT player1, player2, side, odds, ev, ts, result "
+            "FROM value_picks ORDER BY ts DESC LIMIT 5"
+        ).fetchall()
+        # Picks ouverts
+        open_vp = c.execute(
+            "SELECT COUNT(*) FROM value_picks WHERE result IS NULL"
+        ).fetchone()[0]
+
+    lines = ["🔭 *Scanner temps réel*", ""]
+    lines.append("Intervalle : `90s` · Budget : ~25 req/h · Fenêtre : 0→6h avant match")
+    lines.append("")
+
+    if open_vp:
+        lines.append(f"⏳ *{open_vp} pick(s) ouvert(s)* en attente de résultat")
+    else:
+        lines.append("Aucun pick ouvert actuellement")
+    lines.append("")
+
+    if recent_vp:
+        lines.append("*5 derniers picks détectés :*")
+        for r in recent_vp:
+            side = (r["side"] or r["player1"] or "?")[:18]
+            ts = (r["ts"] or "")[:16].replace("T", " ")
+            em = "✅" if r["result"] == 1 else "❌" if r["result"] == 0 else "⏳"
+            lines.append(f"  {em} *{side}* @ {r['odds']:.2f} EV{r['ev']:+.0f}% _{ts}_")
+
+    lines.append("")
+    lines.append("_Scanner actif 24/7 · Alerte Telegram dès détection_")
+    lines.append("_/picks /intel /roi — TennisBoss_")
+    return "\n".join(lines)

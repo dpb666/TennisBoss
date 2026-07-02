@@ -73,6 +73,32 @@ SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
 GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
+# Surface detection from league/tournament name
+_GRASS_KEYWORDS = {"wimbledon", "queen", "halle", "eastbourne", "hertogenbosch",
+                   "notting", "grass", "'s-hertogenbosch", "birmingham"}
+_CLAY_KEYWORDS  = {"clay", "roland", "french", "rome", "madrid", "barcelona",
+                   "hamburg", "monte", "bucharest", "istanbul", "estoril",
+                   "lyon", "geneva", "marrakech", "bastad", "umag",
+                   "kitzbuhel", "gstaad", "cordoba", "rio", "buenos"}
+_HARD_KEYWORDS  = {"hard", "open", "us open", "australian", "dubai",
+                   "doha", "miami", "indian wells", "montreal", "toronto",
+                   "cincinnati", "winston", "washington", "tokyo", "beijing",
+                   "paris", "vienna", "rotterdam", "brisbane", "auckland",
+                   "adelaide", "sydney", "indoor"}
+
+
+def surface_from_league(league_name: str) -> str:
+    """Dérive la surface ('grass'|'clay'|'hard') depuis le nom du tournoi."""
+    ln = (league_name or "").lower()
+    if any(k in ln for k in _GRASS_KEYWORDS):
+        return "grass"
+    if any(k in ln for k in _CLAY_KEYWORDS):
+        return "clay"
+    if any(k in ln for k in _HARD_KEYWORDS):
+        return "hard"
+    return ""
+
+
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"

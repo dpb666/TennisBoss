@@ -112,9 +112,9 @@ private fun StatsContent(m: CalibMetrics, k: Double, recent: List<SettledRecent>
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatCard("Précision", pct(m.accuracy), AccentColor, Modifier.weight(1f),
                     sub = "${m.n} matchs prédits")
-                StatCard("Couverture", pct(
-                    if (m.n > 0 && m.roi_n > 0) m.n.toDouble() / (m.n + 2331) else null
-                ), AccentColor, Modifier.weight(1f), sub = "% matchs modélisés")
+                StatCard("Value/Prédits", pct(
+                    if (m.n > 0 && m.roi_value_n > 0) m.roi_value_n.toDouble() / m.n else null
+                ), AccentColor, Modifier.weight(1f), sub = "picks EV / matchs prédits")
             }
         }
         item {

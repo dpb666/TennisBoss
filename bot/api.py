@@ -25,8 +25,8 @@ from typing import Any, Dict, Optional
 from flask import Flask, jsonify, request
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
-               db, elo, espn_api, features, live_api, memory, namematch,
-               odds_api, predictor, sackmann_feeder, settlement, weather)
+               db, elo, espn_api, features, intelligence, live_api, memory, mistake_learner,
+               namematch, odds_api, predictor, sackmann_feeder, settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -120,6 +120,20 @@ def _load_state() -> None:
         _PLATT_B = float(db.get_meta("platt_b") or 0.0)
     except (TypeError, ValueError):
         _PLATT_B = 0.0
+
+    # Charge les zones dangereuses apprises, puis recalcule sur les picks récents
+    try:
+        mistake_learner.load_from_db()
+        mistake_learner.update()
+    except Exception:
+        pass
+
+    # Intelligence autonome : blacklist joueurs + surfaces en danger
+    try:
+        intelligence.load_from_db()
+        intelligence.run_cycle(send_telegram=False)
+    except Exception:
+        pass
 
 
 def _calib(p_match: float) -> float:
@@ -795,7 +809,30 @@ def api_live():
     if not odds_api.is_enabled():
         return jsonify({"error": "ODDS_API_KEY absente"}), 503
 
-    live_events = odds_api.fetch_live_events()
+    live_events = odds_api.fetch_live_events() or []
+    # Priorité ATP/WTA → ITF en dernier ; cap à 30 pour éviter les timeouts
+    def _live_prio(ev):
+        lg = (ev.get("league") or {}).get("name", "") if isinstance(ev.get("league"), dict) else str(ev.get("league", ""))
+        if "ATP" in lg or "WTA" in lg: return 0
+        if "Challenger" in lg or "ITF" in lg: return 2
+        return 1
+    live_events = sorted(live_events, key=_live_prio)[:30]
+
+    # Pré-charger les cotes live en une seule passe (max 5 matchs ATP/WTA)
+    _odds_fetched: dict = {}
+    _odds_budget = 5
+    for _ev in live_events:
+        if _odds_budget <= 0:
+            break
+        _lg_n = (_ev.get("league") or {}).get("name", "") if isinstance(_ev.get("league"), dict) else str(_ev.get("league", ""))
+        if "ATP" in _lg_n or "WTA" in _lg_n:
+            try:
+                _mw = odds_api.fetch_match_winner(_ev["id"])
+                if _mw:
+                    _odds_fetched[str(_ev["id"])] = _mw
+                    _odds_budget -= 1
+            except Exception:
+                pass
 
     out = []
     for e in live_events:
@@ -850,12 +887,8 @@ def api_live():
             except Exception:  # noqa: BLE001
                 pass
 
-        # ── Cotes live ────────────────────────────────────────────────────────
-        live_mw = None
-        try:
-            live_mw = odds_api.fetch_match_winner(e["id"])
-        except Exception:  # noqa: BLE001
-            pass
+        # ── Cotes live (pré-chargées pour ATP/WTA uniquement) ────────────────
+        live_mw = _odds_fetched.get(str(e["id"]))
 
         _lg = e.get("league") or {}
         league = _lg if isinstance(_lg, str) else _lg.get("name", "")
@@ -1417,11 +1450,24 @@ def api_value():
         _prob_ratio = _model_prob / _implied_prob if _implied_prob > 0 else 0
         _overconfident = _prob_ratio > max_prob_ratio
 
+        # Zones dangereuses apprises automatiquement (mistake_learner)
+        _surf_pick = r.get("surface") or e.get("surface") or config.surface_from_league(
+            (e.get("league") or {}).get("name", "") if isinstance(e.get("league"), dict) else str(e.get("league", ""))
+        )
+        _learned_danger = mistake_learner.is_danger_zone(best_ev_pct, pick_odds_check, _surf_pick)
+
+        # Intelligence autonome : joueur sur-évalué ou surface systématiquement mauvaise
+        _intel_blacklist = intelligence.is_blacklisted(best_side)
+        _intel_surf_danger = intelligence.is_surface_danger(_surf_pick)
+
         is_value = (best_ev_pct >= min_ev
                     and pick_odds_check <= max_odds
                     and not _dead_zone
                     and not _below_floor
-                    and not _overconfident)
+                    and not _overconfident
+                    and not _learned_danger
+                    and not _intel_blacklist
+                    and not _intel_surf_danger)
 
         # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
         if is_value:
@@ -1468,6 +1514,7 @@ def api_value():
             "date": e.get("date", ""),
             "time": e.get("time", ""),
             "league": _leag_name,
+            "surface": _ev_surf or None,
             "confidence": r["confidence"],
             "confidence_label": r["confidence_label"],
             "kelly_u": _kelly_u,
@@ -1606,6 +1653,8 @@ def api_value_history():
         })
         if len(picks) >= limit:
             break
+    total_pnl = round(sum(p["pnl"] for p in picks if p["pnl"] is not None), 2)
+    stats["pnl"] = total_pnl
     return jsonify({
         "picks": picks,
         "stats": stats,
@@ -1825,6 +1874,29 @@ def api_clv():
         "result": r["result"], "pnl_flat": r["pnl_flat"],
     } for r in db.list_clv(limit=30)]
     return jsonify({**stats, "recent": recent})
+
+
+@app.get("/api/intelligence/stats")
+def api_intelligence_stats():
+    """Auto-diagnostic: drift, surfaces en danger, blacklist joueurs."""
+    return jsonify({**intelligence.stats(), "ok": True})
+
+
+@app.post("/api/intelligence/cycle")
+def api_intelligence_cycle():
+    """Force un cycle d'intelligence immédiat (sans attendre les 6h)."""
+    result = intelligence.run_cycle(send_telegram=False)
+    return jsonify({**result, "ok": True})
+
+
+@app.get("/api/learner/stats")
+def api_learner_stats():
+    """Zones dangereuses apprises automatiquement depuis les résultats réels.
+
+    Retourne les segments (EV bucket × cote × surface) où le ROI est
+    systématiquement négatif et que le scanner bloque automatiquement.
+    """
+    return jsonify({**mistake_learner.stats(), "ok": True})
 
 
 _LEARN_LOCK = __import__("threading").Lock()
@@ -2108,6 +2180,236 @@ def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
             "books": mw["books"]}
 
 
+def _value_scanner_loop(interval: int = 90) -> None:
+    """Scanner autonome : détecte les value picks dès l'ouverture des cotes.
+
+    Tourne toutes les `interval` secondes (défaut 90s). Budget API :
+    - 1 req /events (cache 15min) → ~4 vraies req/h
+    - 1 req /odds par NOUVEL event ou event < 2h du départ → ~10-15 vraies req/h
+    Total estimé : < 25 vraies req/h (bien sous la limite 100 req/h).
+
+    Logique dédup :
+    - _seen : {event_id → ts_premier_check}. Évite de refetch les events déjà
+      évalués et situés à > 2h (cotes peu intéressantes = early market).
+    - _alerted : set d'event_ids ayant déjà généré un pick value → pas de double alerte.
+    """
+    import time as _t
+    import datetime as _dt
+    from .log import log
+    from . import realtime_alerts as _ra
+
+    _seen: Dict[str, float] = {}       # event_id → timestamp du dernier check
+    _no_odds_seen: Dict[str, float] = {}  # event_id → ts du dernier no-odds (skip 10min)
+    _alerted: set = set()              # event_ids déjà alertés ce cycle
+
+    _t.sleep(45)  # laisse le serveur et les autres threads démarrer
+    log(f"Value scanner démarré (intervalle {interval}s).")
+
+    while True:
+        try:
+            if not odds_api.is_enabled() or odds_api._current_key() is None:
+                _t.sleep(interval)
+                continue
+
+            events = odds_api.fetch_tennis_events(upcoming_only=True)
+            now_utc = _dt.datetime.now(_dt.timezone.utc)
+
+            # Tri priorité : grands tournois en premier
+            def _tourn_rank_s(e: Dict) -> int:
+                _lg = e.get("league") or {}
+                slug = "" if isinstance(_lg, str) else _lg.get("slug", "")
+                if any(k in slug for k in ("wimbledon", "roland-garros", "us-open", "australian")):
+                    return 0
+                if slug.startswith("atp") or slug.startswith("wta"):
+                    return 1
+                if any(k in slug for k in ("challenger", "125k", "itf")):
+                    return 3
+                return 2
+            events = sorted(events, key=_tourn_rank_s)
+
+            odds_calls_this_cycle = 0
+            MAX_ODDS_PER_CYCLE = 25  # plafond par cycle de 90s
+            # Compteurs de rejet pour diagnostic
+            _rej_time = _rej_seen = _rej_no_odds = _rej_conf = _rej_mkt = _rej_ev = _rej_dead = _rej_bl = _rej_surf = 0
+
+            for e in events:
+                if odds_calls_this_cycle >= MAX_ODDS_PER_CYCLE:
+                    break
+
+                eid = str(e.get("id", ""))
+                if not eid:
+                    continue
+
+                # Filtre temporel : 0→6h avant le coup d'envoi
+                _e_date = e.get("commence_time") or e.get("date") or ""
+                hours_ahead = None
+                if _e_date:
+                    try:
+                        _edt = _dt.datetime.fromisoformat(str(_e_date).replace("Z", "+00:00"))
+                        hours_ahead = (_edt - now_utc).total_seconds() / 3600
+                        if hours_ahead > 6.0 or hours_ahead < -1.0:
+                            _rej_time += 1
+                            continue
+                    except Exception:
+                        pass
+
+                # Déjà alerté = pas la peine de re-fetcher les cotes
+                if eid in _alerted:
+                    continue
+
+                # Déjà vu et à > 2h : skip (cotes stables, pas de nouvelle valeur)
+                last_check = _seen.get(eid, 0.0)
+                recheck_window = (hours_ahead is not None and hours_ahead < 2.0)
+                if last_check and not recheck_window:
+                    if _t.time() - last_check < 600:  # re-check toutes les 10min max
+                        _rej_seen += 1
+                        continue
+
+                # Skip rapide : event sans cotes connues depuis < 10min
+                _no_odds_ts = _no_odds_seen.get(eid, 0.0)
+                if _no_odds_ts and _t.time() - _no_odds_ts < 600:
+                    _rej_no_odds += 1
+                    continue
+
+                # Fetch des cotes (1 req, cache 10min)
+                mw = odds_api.fetch_match_winner(eid)
+                _seen[eid] = _t.time()
+                odds_calls_this_cycle += 1
+
+                if not mw or not mw.get("home_odds") or not mw.get("away_odds"):
+                    _no_odds_seen[eid] = _t.time()
+                    _rej_no_odds += 1
+                    continue
+
+                # Résolution des noms
+                n1 = _resolve(e.get("home", "")) or e.get("home", "").strip()
+                n2 = _resolve(e.get("away", "")) or e.get("away", "").strip()
+                if not n1 or not n2:
+                    continue
+
+                # Guard cross-genre
+                t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
+                t2 = (_MEM.get("players") or {}).get(n2, {}).get("tour", "")
+                if t1 and t2 and {t1, t2} == {"atp", "wta"}:
+                    continue
+
+                # Prédiction modèle
+                try:
+                    f1 = features.feature_vector(features.get_profile(_MEM, n1))
+                    f2 = features.feature_vector(features.get_profile(_MEM, n2))
+                    _lg_name = (e.get("league") or {}).get("name", "") if isinstance(e.get("league"), dict) else str(e.get("league", ""))
+                    _surf = e.get("surface") or config.surface_from_league(_lg_name)
+                    r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_surf or None)
+                except Exception:
+                    continue
+
+                # Seuil de confiance : plus strict pour ITF (rang 3)
+                _tier = _tourn_rank_s(e)
+                _conf_seuil = 0.65 if _tier >= 3 else 0.55
+                if r.get("confidence", 0.0) < _conf_seuil:
+                    _rej_conf += 1
+                    continue
+
+                pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+                pm2 = 1.0 - pm1
+                ho, ao = mw["home_odds"], mw["away_odds"]
+                pb1 = calibrate.blend_probs(pm1, mw["home_prob"], _MKT_W)
+                pb2 = 1.0 - pb1
+                ev1 = pb1 * ho - 1.0
+                ev2 = pb2 * ao - 1.0
+
+                model_beats_mkt1 = pm1 > mw["home_prob"]
+                model_beats_mkt2 = pm2 > mw["away_prob"]
+
+                if ev1 >= ev2:
+                    best_side, best_ev, pick_odds, pb_pick = n1, ev1, ho, pb1
+                    if not model_beats_mkt1:
+                        _rej_mkt += 1
+                        continue
+                else:
+                    best_side, best_ev, pick_odds, pb_pick = n2, ev2, ao, pb2
+                    if not model_beats_mkt2:
+                        _rej_mkt += 1
+                        continue
+
+                best_ev_pct = round(best_ev * 100, 1)
+                dead_zone = 12.0 <= best_ev_pct < 18.0
+                below_floor = pick_odds < 1.40
+                above_ceil = pick_odds > 5.0
+                _implied = 1.0 / pick_odds if pick_odds > 1.0 else 1.0
+                overconfident = (pb_pick / _implied) > 3.0
+                learned_danger = mistake_learner.is_danger_zone(best_ev_pct, pick_odds, _surf or None)
+                intel_blacklist = intelligence.is_blacklisted(best_side)
+                intel_surf_danger = intelligence.is_surface_danger(_surf or None)
+
+                if best_ev_pct < 8.0 or below_floor or above_ceil or overconfident:
+                    _rej_ev += 1
+                    continue
+                if dead_zone or learned_danger:
+                    _rej_dead += 1
+                    continue
+                if intel_blacklist:
+                    _rej_bl += 1
+                    continue
+                if intel_surf_danger:
+                    _rej_surf += 1
+                    continue
+
+                # Log en DB (idempotent : log_value_pick garde le premier pick)
+                _b = pick_odds - 1.0
+                _kelly = round(max(0.0, (pb_pick * _b - (1.0 - pb_pick)) / _b * 0.25 * 100), 1) if _b > 0 else 0.0
+                try:
+                    db.log_value_pick(e.get("date", ""), n1, n2, best_side,
+                                      pick_odds, best_ev_pct, league=_lg_name,
+                                      surface=_surf, kelly_u=_kelly)
+                    ekey = str(eid)
+                    clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
+                                  pick_odds, pb_pick, r["confidence"])
+                except Exception:
+                    pass
+
+                # Alerte Telegram immédiate (priorité haute = scanner temps réel)
+                alerter = _ra.get()
+                if alerter:
+                    _h = f"{hours_ahead:.1f}h" if hours_ahead is not None else "?"
+                    _urgency = "⚡" if (hours_ahead is not None and hours_ahead < 1.0) else "🔔"
+                    _pick_entry = {
+                        "player1": n1, "player2": n2,
+                        "best_side": best_side, "best_ev": best_ev_pct,
+                        "pick_odds": pick_odds, "kelly_u": _kelly,
+                        "confidence_label": r.get("confidence_label", ""),
+                        "league": _lg_name,
+                        "best_book": (mw.get("books") or [""])[0] if mw.get("books") else "",
+                        "hours_ahead": hours_ahead,
+                        "urgency": _urgency,
+                        "scanner": True,
+                    }
+                    import threading as _th_sc
+                    _th_sc.Thread(target=alerter.on_value_pick,
+                                  args=(_pick_entry,), daemon=True).start()
+                    log(f"{_urgency} Scanner value pick: {best_side} EV+{best_ev_pct}% @ {pick_odds} ({_h} avant match)")
+
+                _alerted.add(eid)
+
+            # Purge des caches d'events trop anciens (> 8h)
+            if len(_seen) > 500 or len(_no_odds_seen) > 500:
+                cutoff = _t.time() - 28800  # 8h
+                _seen = {k: v for k, v in _seen.items() if v > cutoff}
+                _no_odds_seen = {k: v for k, v in _no_odds_seen.items() if v > cutoff}
+
+            log(
+                f"Scanner: {odds_calls_this_cycle}/{MAX_ODDS_PER_CYCLE} vérifiés ({len(events)} events)"
+                f" | skip: fenêtre={_rej_time} cache={_rej_seen} no_odds={_rej_no_odds}"
+                f" conf={_rej_conf} mkt={_rej_mkt} EV={_rej_ev} zone={_rej_dead} BL={_rej_bl} surf={_rej_surf}"
+                f" | {len(_alerted)} pick(s) actifs"
+            )
+
+        except Exception as exc:
+            log(f"Value scanner erreur: {exc}", "WARN")
+
+        _t.sleep(interval)
+
+
 def _clv_closing_loop() -> None:
     """Snapshote les cotes pré-match pour les picks CLV ouverts (toutes les 20min).
 
@@ -2150,7 +2452,7 @@ def _clv_closing_loop() -> None:
                     log(f"CLV: {updated} closing odds mis à jour.")
         except Exception as exc:
             log(f"CLV closing loop erreur: {exc}", "WARN")
-        _t.sleep(1200)  # 20 min
+        _t.sleep(600)  # 10 min
 
 
 def _settlement_loop(interval: int) -> None:
@@ -2195,6 +2497,12 @@ def _settlement_loop(interval: int) -> None:
                 db.save_calibration(metrics)
             log(f"Settlement auto: +{summary['added']} réglés, "
                 f"n={metrics['n']} acc={metrics['accuracy']} k={round(_CALIB_K, 3)}")
+
+            # Apprentissage des erreurs : recalcule les zones dangereuses
+            try:
+                mistake_learner.update()
+            except Exception as _ml_exc:
+                log(f"mistake_learner.update échoué: {_ml_exc}", "WARN")
 
             # Void les picks ouverts depuis >48h (match annulé / résultat introuvable).
             import datetime as _dt
@@ -2280,6 +2588,20 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     import threading as _th_clv
     _th_clv.Thread(target=_clv_closing_loop, daemon=True).start()
     log("CLV closing snapshot démarré (20min).")
+
+    # Scanner temps réel — détecte les value picks dès l'ouverture des cotes
+    _scan_interval = int(os.environ.get("SCANNER_INTERVAL_S", "90"))
+    if _scan_interval > 0 and odds_api.is_enabled():
+        import threading as _th_scan
+        _th_scan.Thread(target=_value_scanner_loop, args=(_scan_interval,),
+                        daemon=True).start()
+        log(f"Value scanner temps réel démarré ({_scan_interval}s).")
+
+    # Intelligence autonome — cycle diagnostic toutes les 6h
+    import threading as _th_intel
+    _th_intel.Thread(target=intelligence._loop, kwargs={"first_delay": 600},
+                     daemon=True).start()
+    log("Intelligence autonome démarrée (cycle 6h).")
 
     # Digest quotidien Telegram à 21h
     import threading as _th2
@@ -2437,15 +2759,28 @@ def _tg_poll_loop() -> None:
             elif text.startswith("/stats"):
                 from . import digest as _dig
                 _send(chat_id, _dig.build_global_stats())
+            elif text.startswith("/intel"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_intel_report())
+            elif text.startswith("/roi"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_roi_breakdown())
+            elif text.startswith("/scanner"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_scanner_status())
             elif text.startswith("/start"):
                 _send(chat_id,
                     "🎾 *TennisBoss*\n\n"
                     "/picks — picks du jour\n"
                     "/value — picks ouverts\n"
                     "/clv — Closing Line Value\n"
+                    "/roi — ROI par tranche EV\n"
+                    "/intel — cerveau IA (blacklist, zones)\n"
+                    "/scanner — état du scanner 90s\n"
                     "/stats — bilan global\n"
                     "/digest — rapport complet\n"
-                    "/clear — reset chat"
+                    "/clear — reset chat\n\n"
+                    "_Ou posez n'importe quelle question en texte libre._"
                 )
             elif text.startswith("/clear"):
                 try:

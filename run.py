@@ -287,7 +287,12 @@ def cmd_value(args) -> None:
 
 
 def cmd_serve(args) -> None:
+    import os
+    from pathlib import Path
     from bot import api
+
+    # Écrit le PID pour que le watchdog externe puisse tuer/redémarrer le bon process
+    Path("/tmp/tennisboss_server.pid").write_text(str(os.getpid()))
 
     api.serve(host=args.host, port=args.port)
 

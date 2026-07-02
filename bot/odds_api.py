@@ -12,6 +12,7 @@ Chaque clé = 100 req/h → 5 clés = 500 req/h.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -36,12 +37,15 @@ def _sharp_book() -> str:
     return os.environ.get("ODDS_SHARP_BOOK", "Betfair Exchange").strip()
 
 TTL_EVENTS = 900       # 15 min — économise le quota 100 req/h
-TTL_ODDS = 300         # 5 min
+TTL_ODDS = 600         # 10 min (était 5min — divisé par 2 le nombre de req/h)
 TTL_LEAGUES = 3600
 RL_SAFETY = 5          # seuil bas -> on passe à la clé suivante
 
 _CACHE: Dict[str, tuple] = {}
+_CACHE_LOCK = threading.Lock()           # évite les race conditions entre threads
+_IN_FLIGHT: Dict[str, threading.Event] = {}  # une seule requête par cache key
 _RL_WARN_AT: float = 0.0
+_RL_WARN_LOCK = threading.Lock()
 _RL: Dict[str, Any] = {"remaining": None, "reset": 0.0}  # compat tests / ancien format
 
 # Pool de clés : {key_str -> {remaining, reset}}
@@ -108,10 +112,14 @@ def _current_key() -> Optional[str]:
             # Avance d'1 pour le prochain appel (round-robin)
             _CURRENT_KEY_IDX = (idx + 1) % n
             return k
-    # Toutes épuisées — attend la prochaine reset
+    # Toutes épuisées — log throttlé 1x/5min (lock pour éviter flood multi-thread)
+    global _RL_WARN_AT
     best = min(_KEY_ORDER, key=lambda k: _KEY_POOL[k]["reset"] or 0)
     reset_in = max(0, int((_KEY_POOL[best]["reset"] or 0) - now))
-    log(f"odds-api: toutes les clés épuisées — reset dans {reset_in}s.", "WARN")
+    with _RL_WARN_LOCK:
+        if now - _RL_WARN_AT > 300:
+            log(f"odds-api: toutes les clés épuisées — reset dans {reset_in}s.", "WARN")
+            _RL_WARN_AT = now
     return None
 
 
@@ -194,71 +202,103 @@ def clear_cache() -> None:
 
 
 def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
-    """GET caché + pool de clés rotatif. Ne bloque jamais longtemps."""
+    """GET caché + pool de clés rotatif. Thread-safe : une seule requête par cache key."""
     cache_key_str = _cache_key(path, params)
     now = time.time()
+
+    # Lecture rapide du cache (hors lock pour la perf)
     hit = _CACHE.get(cache_key_str)
     if hit and hit[0] > now:
         return hit[1]
 
-    explicit_api_key = str(params.get("apiKey") or "").strip()
-    if explicit_api_key:
-        _explicit_key(explicit_api_key)
-    api_key = _current_key()
-    if not api_key:
-        global _RL_WARN_AT
-        if time.time() - _RL_WARN_AT > 60:
-            log(f"odds-api: toutes les clés épuisées ({len(_KEY_ORDER)} clés).", "WARN")
-            _RL_WARN_AT = time.time()
-        return hit[1] if hit else None
+    # Évite les requêtes dupliquées concurrentes sur la même cache key
+    with _CACHE_LOCK:
+        hit = _CACHE.get(cache_key_str)  # re-check sous lock
+        if hit and hit[0] > now:
+            return hit[1]
+        # Marque la key comme "en vol" si pas déjà le cas
+        if cache_key_str in _IN_FLIGHT:
+            evt = _IN_FLIGHT[cache_key_str]
+        else:
+            evt = threading.Event()
+            _IN_FLIGHT[cache_key_str] = evt
+            evt = None  # ce thread fait la requête
 
-    call_params = {**params, "apiKey": api_key}
-    # Retry avec backoff exponentiel : 3s → 9s → 27s (max 3 essais)
-    _last_exc = None
-    for _attempt, _wait in enumerate([0, 3, 9]):
-        if _wait:
-            time.sleep(_wait)
-        try:
-            r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
-            _last_exc = None
-            break
-        except requests.RequestException as exc:
-            _last_exc = exc
-    if _last_exc is not None:
-        log(f"odds-api {path} réseau KO après 3 essais ({_last_exc}).", "WARN")
-        return hit[1] if hit else None
+    if evt is not None:
+        # Un autre thread est en train de fetcher — on attend son résultat (max 25s)
+        evt.wait(timeout=25)
+        hit = _CACHE.get(cache_key_str)
+        return hit[1] if (hit and hit[0] > now) else None
 
-    _update_rl(r, api_key)
+    # Ce thread est responsable de la requête
+    result = None
+    try:
+        explicit_api_key = str(params.get("apiKey") or "").strip()
+        if explicit_api_key:
+            _explicit_key(explicit_api_key)
+        api_key = _current_key()
+        if not api_key:
+            result = _CACHE.get(cache_key_str, (None, None))[1]
+            return result
 
-    if r.status_code == 429:
-        rl = _KEY_POOL[api_key]
-        reset_at = rl["reset"] if (rl["reset"] and rl["reset"] > now) else now + 10
-        rl["remaining"] = 0
-        rl["reset"] = reset_at
-        # Essai immédiat avec la clé suivante du pool
-        next_key = _current_key()
-        if next_key and next_key != api_key:
-            log(f"odds-api 429 sur clé ...{api_key[-6:]} — bascule sur ...{next_key[-6:]}.", "WARN")
-            call_params["apiKey"] = next_key
+        call_params = {**params, "apiKey": api_key}
+        # Retry avec backoff exponentiel : 3s → 9s (max 2 essais)
+        _last_exc = None
+        for _attempt, _wait in enumerate([0, 3, 9]):
+            if _wait:
+                time.sleep(_wait)
             try:
                 r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
-                _update_rl(r, next_key)
-                api_key = next_key
-            except requests.RequestException:
-                return hit[1] if hit else None
-        else:
-            log(f"odds-api 429 — pool épuisé.", "WARN")
-            return hit[1] if hit else None
+                _last_exc = None
+                break
+            except requests.RequestException as exc:
+                _last_exc = exc
+        if _last_exc is not None:
+            log(f"odds-api {path} réseau KO après 3 essais ({_last_exc}).", "WARN")
+            result = hit[1] if hit else None
+            return result
 
-    if r.status_code != 200:
-        return hit[1] if hit else None
-    try:
-        payload = r.json()
-    except ValueError:
-        return hit[1] if hit else None
+        _update_rl(r, api_key)
 
-    _CACHE[cache_key_str] = (now + ttl, payload)
-    return payload
+        if r.status_code == 429:
+            rl = _KEY_POOL[api_key]
+            reset_at = rl["reset"] if (rl["reset"] and rl["reset"] > now) else now + 10
+            rl["remaining"] = 0
+            rl["reset"] = reset_at
+            next_key = _current_key()
+            if next_key and next_key != api_key:
+                log(f"odds-api 429 sur clé ...{api_key[-6:]} — bascule sur ...{next_key[-6:]}.", "WARN")
+                call_params["apiKey"] = next_key
+                try:
+                    r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
+                    _update_rl(r, next_key)
+                    api_key = next_key
+                except requests.RequestException:
+                    result = hit[1] if hit else None
+                    return result
+            else:
+                log(f"odds-api 429 — pool épuisé.", "WARN")
+                result = hit[1] if hit else None
+                return result
+
+        if r.status_code != 200:
+            result = hit[1] if hit else None
+            return result
+        try:
+            payload = r.json()
+        except ValueError:
+            result = hit[1] if hit else None
+            return result
+
+        _CACHE[cache_key_str] = (now + ttl, payload)
+        result = payload
+        return payload
+    finally:
+        # Libère l'event pour les threads qui attendaient
+        with _CACHE_LOCK:
+            ev_done = _IN_FLIGHT.pop(cache_key_str, None)
+        if ev_done is not None:
+            ev_done.set()
 
 
 def _key() -> Optional[str]:
@@ -305,7 +345,7 @@ def fetch_live_events() -> List[Dict[str, Any]]:
     """
     if not is_enabled():
         return []
-    events = _get("/events", {"sport": "tennis", "status": "live"}, ttl=30)
+    events = _get("/events", {"sport": "tennis", "status": "live"}, ttl=60)
     if not isinstance(events, list):
         return []
     return [e for e in events if e.get("status") in ("live", "inplay")]

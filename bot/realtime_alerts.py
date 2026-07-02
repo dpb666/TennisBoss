@@ -1,165 +1,215 @@
-"""Telegram + Slack alerts for settlement events (optional add-on).
-
-If TELEGRAM_TOKEN + TELEGRAM_CHAT_ID are set, send instant notifications
-when matches settle with ROI results.
-"""
+"""Alertes Telegram temps réel : nouveaux picks value + résultats settlement."""
 from __future__ import annotations
 
-import logging
+import json
 import os
-from typing import Any, Dict, Optional
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional, Set
 
-logger = logging.getLogger("tennisboss.alerts")
+import requests
+
+from .log import log
+
+_ALERTED_LOCK = threading.Lock()
+_ALERT_COOLDOWN = 3600              # 1h avant de réalerter le même pick
+_DEDUP_FILE = Path("/tmp/tennisboss_alerted.json")
 
 
-class SettlementAlertSender:
-    """Send settlement notifications to Telegram / Slack."""
+def _load_alerted() -> Dict[str, float]:
+    try:
+        if _DEDUP_FILE.exists():
+            data = json.loads(_DEDUP_FILE.read_text())
+            cutoff = time.time() - _ALERT_COOLDOWN
+            return {k: v for k, v in data.items() if v > cutoff}
+    except Exception:
+        pass
+    return {}
 
-    def __init__(self):
-        self.telegram_token = os.environ.get("TELEGRAM_TOKEN")
-        self.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-        self.slack_webhook = os.environ.get("SLACK_WEBHOOK_URL")
 
-    def is_enabled(self) -> bool:
-        """Return True if at least one alert service is configured."""
-        return bool(self.telegram_token or self.slack_webhook)
+def _save_alerted(data: Dict[str, float]) -> None:
+    try:
+        _DEDUP_FILE.write_text(json.dumps(data))
+    except Exception:
+        pass
 
-    def on_value_pick(self, pick: Dict[str, Any]) -> None:
-        """Send alert when a high-confidence value pick is detected."""
-        if not self.is_enabled():
-            return
-        p1 = pick.get("player1", "?")
-        p2 = pick.get("player2", "?")
-        side = pick.get("best_side", "?")
-        ev = pick.get("best_ev", 0.0)
-        odds = pick.get("odds", {})
-        pick_odds = odds.get("home") if side == p1 else odds.get("away")
-        kelly = pick.get("kelly_u", 0.0)
-        conf = pick.get("confidence_label", "")
-        league = pick.get("league", "")
-        terrain = " 🌟 terrain favorable" if pick.get("terrain_favorable") else ""
-        book = pick.get("best_book", "")
-        msg = (
-            f"🎾 *VALUE PICK*{terrain}\n\n"
-            f"*{p1}* vs *{p2}*\n"
-            f"📍 {league}\n\n"
-            f"✅ Miser sur: *{side}*\n"
-            f"💹 Cote: `{pick_odds}` chez {book or '?'}\n"
-            f"📈 EV: `+{ev:.1f}%`\n"
-            f"🎯 Kelly 1/4: `{kelly:.1f}% bankroll`\n"
-            f"🔒 Confiance: {conf}\n"
+
+_ALERTED_AT: Dict[str, float] = _load_alerted()
+
+
+def _bot_token() -> str:
+    return os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+
+def _chat_id() -> int:
+    raw = os.environ.get("TELEGRAM_OWNER_CHAT_ID") or os.environ.get("TELEGRAM_ADMIN_ID", "")
+    try:
+        return int(raw.strip()) if raw.strip() else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def _send(text: str) -> None:
+    token = _bot_token()
+    cid = _chat_id()
+    if not token or not cid:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
+            timeout=8,
         )
-        if self.telegram_token:
-            self._send_telegram(msg)
+    except Exception as exc:
+        log(f"realtime_alerts: envoi échoué — {exc}", "WARN")
+
+
+def on_value_pick(pick: Dict[str, Any]) -> None:
+    """Alerte immédiate pour un nouveau pick value. Dédupliqué sur 1h."""
+    p1 = pick.get("player1", "?")
+    p2 = pick.get("player2", "?")
+    side = pick.get("best_side") or pick.get("side", "?")
+    ev = pick.get("best_ev") or pick.get("ev") or 0.0
+    pick_odds = pick.get("pick_odds") or pick.get("odds")
+    kelly = pick.get("kelly_u", 0.0)
+    conf_label = pick.get("confidence_label", "")
+    league = pick.get("league", "")
+    terrain = pick.get("terrain_favorable", False)
+    book = pick.get("best_book", "") or pick.get("odds_book", "")
+
+    alert_key = f"{p1}|{p2}|{side}"
+    now = time.time()
+
+    with _ALERTED_LOCK:
+        last = _ALERTED_AT.get(alert_key, 0)
+        if now - last < _ALERT_COOLDOWN:
+            return
+        _ALERTED_AT[alert_key] = now
+        _save_alerted(_ALERTED_AT)
+
+    is_scanner = pick.get("scanner", False)
+    hours_ahead = pick.get("hours_ahead")
+    urgency = pick.get("urgency", "🎾")
+
+    terrain_s = " 🌟" if terrain else ""
+    odds_s = f"`{pick_odds:.2f}`" if pick_odds else "—"
+    book_s = f" _{book}_" if book else ""
+    league_s = f"\n📍 _{league}_" if league else ""
+
+    # Titre selon source : scanner (temps réel) vs app (à la demande)
+    if is_scanner and hours_ahead is not None:
+        if hours_ahead < 1.0:
+            time_s = f"dans {int(hours_ahead * 60)}min"
+        else:
+            time_s = f"dans {hours_ahead:.1f}h"
+        title = f"{urgency} *VALUE PICK — {time_s}*{terrain_s}"
+    else:
+        title = f"🎾 *VALUE PICK*{terrain_s}"
+
+    msg = (
+        f"{title}{league_s}\n\n"
+        f"*{p1}* vs *{p2}*\n"
+        f"✅ *{side}* @ {odds_s}{book_s}\n"
+        f"📈 EV `+{ev:.0f}%`"
+    )
+    if kelly and kelly > 0:
+        msg += f" · Kelly `{kelly:.1f}%`"
+    if conf_label:
+        msg += f"\n🔒 {conf_label}"
+
+    _send(msg)
+
+
+def on_odds_move(p1: str, p2: str, side: str,
+                 pick_odds: float, current_odds: float) -> None:
+    """Alerte quand la cote a bougé ≥ 10% contre notre pick depuis la décision."""
+    move_pct = (current_odds - pick_odds) / pick_odds * 100
+    if abs(move_pct) < 10.0:
+        return
+
+    alert_key = f"move|{p1}|{p2}|{side}"
+    now = time.time()
+    with _ALERTED_LOCK:
+        last = _ALERTED_AT.get(alert_key, 0)
+        if now - last < _ALERT_COOLDOWN:
+            return
+        _ALERTED_AT[alert_key] = now
+        _save_alerted(_ALERTED_AT)
+
+    direction = "⬇️ baissé" if move_pct < 0 else "⬆️ monté"
+    warn = "⚠️" if move_pct < 0 else "ℹ️"
+    msg = (
+        f"{warn} *Mouvement de cote*\n\n"
+        f"*{p1}* vs *{p2}*\n"
+        f"Pick : *{side}* @ {pick_odds:.2f}\n"
+        f"Actuel : `{current_odds:.2f}` ({direction} {abs(move_pct):.0f}%)"
+    )
+    if move_pct < 0:
+        msg += "\n_⚠️ Marché contre nous — surveiller_"
+    _send(msg)
+
+
+def on_settlement(p1: str, p2: str, winner: str, side: str,
+                  odds: float, pnl: float) -> None:
+    """Alerte résultat quand un value pick est réglé."""
+    won = winner == side
+    em = "✅" if won else "❌"
+    pnl_s = f"+{pnl:.2f}u" if pnl >= 0 else f"{pnl:.2f}u"
+    msg = (
+        f"{em} *Résultat pick*\n\n"
+        f"*{p1}* vs *{p2}*\n"
+        f"Misé : *{side}* @ {odds:.2f}\n"
+        f"Gagnant : *{winner}*\n"
+        f"P&L : `{pnl_s}`"
+    )
+    _send(msg)
+
+
+# --- Compat singleton (ancien code utilise _ra.get()) ---
+
+class _Compat:
+    """Shim pour l'ancien code qui appelle _ra.get().on_value_pick(pick)."""
+    def on_value_pick(self, pick: Dict[str, Any]) -> None:
+        on_value_pick(pick)
 
     def on_settlement(self, event: Dict[str, Any]) -> None:
-        """Send alert for a settled match."""
-        if not self.is_enabled():
-            return
-
         data = event.get("data", {})
-        msg = self._format_message(data)
-
-        if self.telegram_token:
-            self._send_telegram(msg)
-        if self.slack_webhook:
-            self._send_slack(data)
-
-    def _format_message(self, data: Dict[str, Any]) -> str:
-        """Format settlement into a readable alert message."""
-        player1 = data.get("player1", "?")
-        player2 = data.get("player2", "?")
-        winner = data.get("winner", "?")
-        pred_fav = data.get("pred_favorite", "?")
-        correct = data.get("correct")
-        roi = data.get("roi_delta", 0.0)
-
-        correct_emoji = "✓" if correct == 1 else "✗" if correct == 0 else "?"
-        roi_emoji = "🟢" if roi > 0 else "🔴" if roi < 0 else "⚪"
-
-        return (
-            f"{roi_emoji} *Settlement Alert*\n\n"
-            f"{player1} vs {player2}\n"
-            f"🏆 Winner: {winner}\n"
-            f"📊 Model: {pred_fav} ({data.get('pred_prob1', '?')}%)\n"
-            f"{correct_emoji} Result: {'Correct' if correct == 1 else 'Wrong' if correct == 0 else 'Unpredicted'}\n"
-            f"💰 ROI: {roi:+.2f}\n"
-        )
-
-    def _send_telegram(self, msg: str) -> None:
-        """Send message to Telegram."""
+        p1, p2 = data.get("player1", ""), data.get("player2", "")
+        winner = data.get("winner", "")
+        # Chercher dans value_picks pour avoir les vraies cotes et le pnl
         try:
-            import requests
+            from . import db as _db
+            with _db.connect() as _c:
+                vp = _c.execute(
+                    "SELECT side, odds, pnl FROM value_picks "
+                    "WHERE ((player1=? AND player2=?) OR (player1=? AND player2=?)) "
+                    "AND result IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+                    (p1, p2, p2, p1)
+                ).fetchone()
+        except Exception:
+            vp = None
+        if not vp or not vp["odds"] or vp["odds"] <= 0:
+            return  # pas de value pick → pas d'alerte
+        on_settlement(p1, p2, winner, vp["side"],
+                      float(vp["odds"]), float(vp["pnl"] or 0))
 
-            url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
-            requests.post(
-                url,
-                json={
-                    "chat_id": self.telegram_chat_id,
-                    "text": msg,
-                    "parse_mode": "Markdown",
-                },
-                timeout=5,
-            )
-            logger.debug("Telegram alert sent.")
-        except Exception as e:
-            logger.warning("Telegram send failed: %s", e)
-
-    def _send_slack(self, data: Dict[str, Any]) -> None:
-        """Send message to Slack."""
-        try:
-            import requests
-
-            player1 = data.get("player1", "?")
-            player2 = data.get("player2", "?")
-            winner = data.get("winner", "?")
-            roi = data.get("roi_delta", 0.0)
-
-            color = "#36a64f" if roi > 0 else "#ff0000" if roi < 0 else "#ffa500"
-
-            payload = {
-                "attachments": [
-                    {
-                        "color": color,
-                        "title": f"{player1} vs {player2}",
-                        "fields": [
-                            {"title": "Winner", "value": winner, "short": True},
-                            {
-                                "title": "Prediction",
-                                "value": data.get("pred_favorite", "?"),
-                                "short": True,
-                            },
-                            {"title": "ROI", "value": f"{roi:+.2f}", "short": True},
-                            {
-                                "title": "Result",
-                                "value": "✓ Correct"
-                                if data.get("correct") == 1
-                                else "✗ Wrong",
-                                "short": True,
-                            },
-                        ],
-                    }
-                ]
-            }
-            requests.post(self.slack_webhook, json=payload, timeout=5)
-            logger.debug("Slack alert sent.")
-        except Exception as e:
-            logger.warning("Slack send failed: %s", e)
+    def is_enabled(self) -> bool:
+        return bool(_bot_token() and _chat_id())
 
 
-# Global singleton
-_ALERTER: Optional[SettlementAlertSender] = None
+_SINGLETON: Optional[_Compat] = None
 
 
-def init() -> SettlementAlertSender:
-    """Initialize the alert sender."""
-    global _ALERTER
-    _ALERTER = SettlementAlertSender()
-    if _ALERTER.is_enabled():
-        logger.info("Settlement alerts enabled (Telegram and/or Slack).")
-    return _ALERTER
+def init() -> _Compat:
+    global _SINGLETON
+    _SINGLETON = _Compat()
+    if _SINGLETON.is_enabled():
+        log("Alertes Telegram temps réel activées.")
+    return _SINGLETON
 
 
-def get() -> Optional[SettlementAlertSender]:
-    """Get the global alert sender."""
-    return _ALERTER
+def get() -> Optional[_Compat]:
+    if _SINGLETON is None:
+        init()
+    return _SINGLETON if (_SINGLETON and _SINGLETON.is_enabled()) else None

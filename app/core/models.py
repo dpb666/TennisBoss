@@ -37,18 +37,28 @@ def elo_probability(
     name2: str,
     surface: Optional[str] = None,
 ) -> float:
-    """ELO-based P(player1 beats player2) — global + surface blend (50/50)."""
+    """ELO-based P(player1 beats player2) — global + surface + recent blend."""
+    from bot.predictor import _lookup_elo
     BASE = 1500.0
     elo = mem.get("elo") or {}
-    r1 = elo.get(name1, BASE)
-    r2 = elo.get(name2, BASE)
+    r1 = _lookup_elo(elo, name1)
+    r2 = _lookup_elo(elo, name2)
     base_logit = (r1 - r2) / 400.0 * math.log(10)
 
     surf_map = mem.get("elo_surface") or {}
+    elo_rec = mem.get("elo_recent") or {}
+
     if surface and surface in surf_map:
         sr = surf_map[surface]
-        surf_logit = (sr.get(name1, BASE) - sr.get(name2, BASE)) / 400.0 * math.log(10)
-        logit = 0.5 * base_logit + 0.5 * surf_logit
+        surf_logit = (_lookup_elo(sr, name1) - _lookup_elo(sr, name2)) / 400.0 * math.log(10)
+        if elo_rec:
+            rec_logit = (_lookup_elo(elo_rec, name1) - _lookup_elo(elo_rec, name2)) / 400.0 * math.log(10)
+            logit = 0.40 * base_logit + 0.40 * surf_logit + 0.20 * rec_logit
+        else:
+            logit = 0.50 * base_logit + 0.50 * surf_logit
+    elif elo_rec:
+        rec_logit = (_lookup_elo(elo_rec, name1) - _lookup_elo(elo_rec, name2)) / 400.0 * math.log(10)
+        logit = 0.80 * base_logit + 0.20 * rec_logit
     else:
         logit = base_logit
 

@@ -446,7 +446,12 @@ def insert_settled(row: Dict[str, Any]) -> bool:
         return cur.rowcount > 0
 
 
-def list_settled(limit: int = 50) -> List[sqlite3.Row]:
+def count_settled() -> int:
+    with connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM settled_matches").fetchone()[0]
+
+
+def list_settled(limit: int = 5000) -> List[sqlite3.Row]:
     with connect() as conn:
         return conn.execute(
             "SELECT * FROM settled_matches ORDER BY date DESC, id DESC LIMIT ?",
@@ -546,6 +551,8 @@ def log_value_pick(date: str, p1: str, p2: str, side: str,
                    odds: float, ev: float,
                    league: str = "", surface: str = "", kelly_u: float = 0.0) -> None:
     """Capture un value pick (EV blendée > 0) pour mesurer son ROI au settlement."""
+    if odds <= 0 or odds > 5.0 or ev < 8.0:  # filtre de sécurité côté DB
+        return
     import datetime as _dt
     with connect() as conn:
         conn.execute(
@@ -868,16 +875,22 @@ def log_inplay_pick(player1: str, player2: str, league: str,
                     odds_book: Optional[str] = None, score: Optional[str] = None,
                     minute: Optional[int] = None, event_id: Optional[str] = None,
                     sets_home: Optional[int] = None, sets_away: Optional[int] = None) -> int:
-    import datetime as _dt
-    dedup_window = (_dt.datetime.utcnow() - _dt.timedelta(hours=4)).isoformat()
     with connect() as conn:
-        # Déduplique : même match + même pick dans les 4 dernières heures → skip
-        existing = conn.execute(
-            """SELECT id FROM inplay_picks
-               WHERE player1=? AND player2=? AND pick=? AND result IS NULL
-               AND ts > ?""",
-            (player1, player2, pick, dedup_window),
-        ).fetchone()
+        # Déduplique par event_id (priorité) ou par paire joueurs si pas d'event_id
+        if event_id:
+            existing = conn.execute(
+                "SELECT id FROM inplay_picks WHERE event_id=? AND pick=? AND result IS NULL",
+                (event_id, pick),
+            ).fetchone()
+        else:
+            import datetime as _dt
+            dedup_window = (_dt.datetime.utcnow() - _dt.timedelta(hours=24)).isoformat()
+            existing = conn.execute(
+                """SELECT id FROM inplay_picks
+                   WHERE player1=? AND player2=? AND pick=? AND result IS NULL
+                   AND ts > ?""",
+                (player1, player2, pick, dedup_window),
+            ).fetchone()
         if existing:
             return existing["id"]
         cur = conn.execute(
@@ -1011,7 +1024,7 @@ def auto_settle_picks(live_event_ids: set) -> List[Dict]:
             (stale_cutoff,)
         ).rowcount
         if voided:
-            log.info(f"auto_settle: {voided} picks >48h sans résultat → V")
+            log(f"auto_settle: {voided} picks >48h sans résultat → V", "INFO")
 
     with connect() as conn:
         # Tous les picks en attente — avec ET sans event_id

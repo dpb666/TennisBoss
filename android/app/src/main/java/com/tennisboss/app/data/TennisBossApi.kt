@@ -90,6 +90,12 @@ interface TennisBossApi {
     @GET("api/clv")
     suspend fun clv(): ClvResponse
 
+    @GET("api/intelligence/stats")
+    suspend fun intelligenceStats(): IntelligenceStats
+
+    @GET("api/learner/stats")
+    suspend fun learnerStats(): LearnerStats
+
     @GET("api/value/history")
     suspend fun valueHistory(
         @Query("limit") limit: Int = 50,
