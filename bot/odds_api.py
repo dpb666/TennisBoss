@@ -28,8 +28,12 @@ BASE = "https://api.odds-api.io/v3"
 # load_env() ne charge le .env (ordre d'import dans bot/api.py) — lire au
 # chargement retomberait sur le défaut. On lit donc à chaque appel.
 def _bookmakers() -> str:
-    """Liste de books à comparer (line shopping). Élargissable via ODDS_BOOKMAKERS."""
-    return os.environ.get("ODDS_BOOKMAKERS", "Betfair Exchange").strip()
+    """Liste de books à comparer (line shopping). Configurable via ODDS_BOOKMAKERS.
+
+    Plan actuel = 2 books max. Recommandé: Bet365,Betfair Exchange
+    (Bet365 = soft haute liquidité ATP/WTA/GS, Betfair Exchange = sharp reference).
+    """
+    return os.environ.get("ODDS_BOOKMAKERS", "Bet365,Betfair Exchange").strip()
 
 
 def _sharp_book() -> str:
