@@ -39,6 +39,7 @@ import com.tennisboss.app.ui.PlayerCompareViewModel
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
 import com.tennisboss.app.ui.PredictViewModel
+import com.tennisboss.app.ui.ScannerScreen
 import com.tennisboss.app.ui.UpcomingScreen
 import com.tennisboss.app.ui.ValueScreen
 import com.tennisboss.app.ui.theme.TennisBossTheme
@@ -81,7 +82,8 @@ fun AppRoot() {
                     Triple(4, "📊", "Perf"),
                     Triple(5, "🔴", "Live"),
                     Triple(6, "💰", "Edge"),
-                    Triple(7, "🤖", "Chat"),
+                    Triple(7, "🔍", "Scan"),
+                    Triple(8, "🤖", "Chat"),
                 )
                 tabs.forEach { (idx, icon, label) ->
                     NavigationBarItem(
@@ -124,6 +126,7 @@ fun AppRoot() {
                     4 -> PerformanceScreen()
                     5 -> LiveScreen(liveVM)
                     6 -> EdgeScreen()
+                    7 -> ScannerScreen()
                     else -> ChatScreen(chatVM)
                 }
             }

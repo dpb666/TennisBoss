@@ -96,6 +96,9 @@ interface TennisBossApi {
     @GET("api/learner/stats")
     suspend fun learnerStats(): LearnerStats
 
+    @GET("api/scanner/status")
+    suspend fun scannerStatus(): ScannerStatus
+
     @GET("api/value/history")
     suspend fun valueHistory(
         @Query("limit") limit: Int = 50,

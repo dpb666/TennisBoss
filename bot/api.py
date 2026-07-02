@@ -1899,6 +1899,13 @@ def api_learner_stats():
     return jsonify({**mistake_learner.stats(), "ok": True})
 
 
+@app.get("/api/scanner/status")
+def api_scanner_status():
+    """État temps réel du scanner : cycle, rejets, near-misses, picks actifs."""
+    with _SCANNER_STATE_LOCK:
+        return jsonify({**_SCANNER_STATE, "ok": True})
+
+
 _LEARN_LOCK = __import__("threading").Lock()
 _LEARN_LAST_RUN: float = 0.0
 _LEARN_MIN_INTERVAL = 3600 * 6  # 6h minimum entre deux cycles
@@ -2180,6 +2187,23 @@ def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
             "books": mw["books"]}
 
 
+# État global du scanner (partagé avec l'endpoint /api/scanner/status)
+_SCANNER_STATE: Dict[str, Any] = {
+    "running": False,
+    "last_cycle_ts": None,       # timestamp ISO du dernier cycle
+    "next_cycle_ts": None,       # timestamp ISO du prochain cycle (approx)
+    "interval": 90,
+    "total_events": 0,
+    "checked": 0,
+    "cap": 25,
+    "active_picks": 0,
+    "last_pick_ts": None,
+    "rejections": {},            # {fenetre, cache, no_odds, conf, mkt, ev, zone, bl, surf}
+    "near_misses": [],           # events EV 2-8% (pas encore picks)
+}
+_SCANNER_STATE_LOCK = __import__("threading").Lock()
+
+
 def _value_scanner_loop(interval: int = 90) -> None:
     """Scanner autonome : détecte les value picks dès l'ouverture des cotes.
 
@@ -2204,6 +2228,11 @@ def _value_scanner_loop(interval: int = 90) -> None:
 
     _t.sleep(45)  # laisse le serveur et les autres threads démarrer
     log(f"Value scanner démarré (intervalle {interval}s).")
+    with _SCANNER_STATE_LOCK:
+        _SCANNER_STATE["running"] = True
+        _SCANNER_STATE["interval"] = interval
+
+    _near_misses: list = []  # buffer local des near-misses du cycle courant
 
     while True:
         try:
@@ -2213,6 +2242,7 @@ def _value_scanner_loop(interval: int = 90) -> None:
 
             events = odds_api.fetch_tennis_events(upcoming_only=True)
             now_utc = _dt.datetime.now(_dt.timezone.utc)
+            _near_misses = []
 
             # Tri priorité : grands tournois en premier
             def _tourn_rank_s(e: Dict) -> int:
@@ -2344,6 +2374,14 @@ def _value_scanner_loop(interval: int = 90) -> None:
 
                 if best_ev_pct < 8.0 or below_floor or above_ceil or overconfident:
                     _rej_ev += 1
+                    # Near-miss : EV positif mais sous le seuil (2-8%)
+                    if 2.0 <= best_ev_pct < 8.0 and not below_floor and not above_ceil and not overconfident:
+                        _near_misses.append({
+                            "player1": n1, "player2": n2,
+                            "side": best_side, "ev": best_ev_pct,
+                            "odds": pick_odds, "hours": round(hours_ahead, 1) if hours_ahead else None,
+                            "league": _lg_name,
+                        })
                     continue
                 if dead_zone or learned_danger:
                     _rej_dead += 1
@@ -2390,6 +2428,28 @@ def _value_scanner_loop(interval: int = 90) -> None:
                     log(f"{_urgency} Scanner value pick: {best_side} EV+{best_ev_pct}% @ {pick_odds} ({_h} avant match)")
 
                 _alerted.add(eid)
+                with _SCANNER_STATE_LOCK:
+                    _SCANNER_STATE["last_pick_ts"] = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Mise à jour de l'état global (endpoint /api/scanner/status)
+            _now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            _next_iso = (_dt.datetime.utcnow() + _dt.timedelta(seconds=interval)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            with _SCANNER_STATE_LOCK:
+                _SCANNER_STATE.update({
+                    "last_cycle_ts": _now_iso,
+                    "next_cycle_ts": _next_iso,
+                    "total_events": len(events),
+                    "checked": odds_calls_this_cycle,
+                    "cap": MAX_ODDS_PER_CYCLE,
+                    "active_picks": len(_alerted),
+                    "rejections": {
+                        "fenetre": _rej_time, "cache": _rej_seen,
+                        "no_odds": _rej_no_odds, "conf": _rej_conf,
+                        "mkt": _rej_mkt, "ev": _rej_ev,
+                        "zone": _rej_dead, "bl": _rej_bl, "surf": _rej_surf,
+                    },
+                    "near_misses": _near_misses[:10],
+                })
 
             # Purge des caches d'events trop anciens (> 8h)
             if len(_seen) > 500 or len(_no_odds_seen) > 500:
