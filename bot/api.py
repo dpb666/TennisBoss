@@ -2477,36 +2477,74 @@ def _value_scanner_loop(interval: int = 90) -> None:
 
 
 def _clv_closing_loop() -> None:
-    """Snapshote les cotes pré-match pour les picks CLV ouverts (toutes les 20min).
+    """Snapshote les cotes pré-match pour les picks CLV ouverts (toutes les 10min).
 
-    Évite que closing_src reste 'last_seen' quand l'app n'est pas ouverte.
-    Consomme 0 requête supplémentaire si les cotes sont déjà dans le cache.
+    - Mise à jour closing : seulement sur events PRÉ-MATCH (pas live/inplay).
+      Closing = Betfair Exchange (sharp reference). CLV = Bet365_pick / Betfair_closing.
+    - Settlement rapide : si un event live montre sets≥2 pour un côté, règle immédiatement
+      le pick CLV sans attendre le settlement loop (qui dépend de status=settled, 24h+).
     """
     import time as _t
     from .log import log
+
+    _LIVE_STATUSES = {"live", "inplay"}
 
     _t.sleep(30)  # laisse le serveur démarrer
     while True:
         try:
             open_picks = db.list_clv_open()
             if open_picks and odds_api.is_enabled() and odds_api._current_key():
-                events = odds_api.fetch_tennis_events(upcoming_only=True)
-                idx = odds_api.build_event_index(events)
+                # Tous les events upcoming (pending + live) — source unique
+                all_events = odds_api.fetch_tennis_events(upcoming_only=True)
+
+                # Index pré-match seulement (closing line = avant le coup d'envoi)
+                prematch = [e for e in all_events
+                            if e.get("status") not in _LIVE_STATUSES]
+                idx = odds_api.build_event_index(prematch)
+
+                # Index live pour settlement rapide via scores
+                live_evs = [e for e in all_events
+                            if e.get("status") in _LIVE_STATUSES]
+                idx_live = odds_api.build_event_index(live_evs)
+
                 updated = 0
+                settled_live = 0
                 for pick in open_picks:
                     p1 = pick["player1"]
                     p2 = pick["player2"]
+                    pick_side = pick["pick_side"]
+
+                    # ── Settlement rapide depuis scores live ─────────────────
+                    lev = odds_api.find_event(idx_live, p1, p2)
+                    if lev:
+                        scores = lev.get("scores") or {}
+                        try:
+                            h_sets = int(scores.get("home", 0))
+                            a_sets = int(scores.get("away", 0))
+                        except (TypeError, ValueError):
+                            h_sets = a_sets = 0
+                        # Best-of-3 : fin à 2 sets. Best-of-5 : fin à 3 sets.
+                        target = 3 if max(h_sets, a_sets) >= 3 else 2
+                        if h_sets >= target or a_sets >= target:
+                            live_winner = lev.get("home") if h_sets > a_sets else lev.get("away")
+                            if live_winner:
+                                try:
+                                    clv.settle(p1, p2, live_winner)
+                                    log(f"CLV live-settle: {p1} vs {p2} → {live_winner} "
+                                        f"({h_sets}-{a_sets})")
+                                    settled_live += 1
+                                except Exception as _se:
+                                    log(f"CLV live-settle erreur: {_se}", "WARN")
+                        continue  # match en cours : pas de closing update
+
+                    # ── Closing update (pré-match seulement) ─────────────────
                     ev = odds_api.find_event(idx, p1, p2)
                     if not ev:
                         continue
-                    # Soft book (exécution) → pour détecter drift de cote
                     mw = odds_api.fetch_match_winner(ev["id"])
                     if not mw:
                         continue
-                    pick_side = pick["pick_side"]
                     curr_odds = mw["home_odds"] if pick_side == p1 else mw["away_odds"]
-                    # Sharp book (Betfair Exchange) → closing line de référence CLV
-                    # CLV = pick_odds(Bet365) / closing_odds(Betfair) - 1
                     mw_sharp = odds_api.fetch_match_winner(
                         ev["id"], bookmakers=odds_api._sharp_book()
                     )
@@ -2514,21 +2552,23 @@ def _clv_closing_loop() -> None:
                         sharp_h = mw_sharp["home_odds"]
                         sharp_a = mw_sharp["away_odds"]
                     else:
-                        # Betfair absent → fallback consensus
                         sharp_h, sharp_a = mw["home_odds"], mw["away_odds"]
-                    # Utilise l'event_key du pick (pas ev["id"]) pour éviter le
-                    # mismatch si l'API renvoie un ID différent entre deux appels.
                     clv.refresh_closing(pick["event_key"], pick_side, p1,
                                         sharp_h, sharp_a,
                                         match_date=ev.get("date") or ev.get("commence_time") or "")
-                    # Alerte mouvement de cote ≥ 10% contre notre pick
                     from . import realtime_alerts as _ra
                     pick_odds_orig = float(pick["pick_odds"] or 0)
                     if pick_odds_orig > 1.0 and curr_odds > 1.0:
                         _ra.on_odds_move(p1, p2, pick_side, pick_odds_orig, curr_odds)
                     updated += 1
+
+                parts = []
                 if updated:
-                    log(f"CLV: {updated} closing odds mis à jour.")
+                    parts.append(f"{updated} closing MAJ")
+                if settled_live:
+                    parts.append(f"{settled_live} settled live")
+                if parts:
+                    log(f"CLV: {', '.join(parts)}.")
         except Exception as exc:
             log(f"CLV closing loop erreur: {exc}", "WARN")
         _t.sleep(600)  # 10 min
@@ -2649,7 +2689,7 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     log(f"API REST sur http://{host}:{port}  (auth token: {'OUI' if token else 'non'})")
     log(f"{len(_MEM['players'])} joueurs chargés. Endpoints sous /api/ + /health.")
 
-    interval = int(os.environ.get("SETTLEMENT_INTERVAL_S", "1800"))
+    interval = int(os.environ.get("SETTLEMENT_INTERVAL_S", "600"))
     if interval > 0:
         import threading
         threading.Thread(target=_settlement_loop, args=(interval,),
