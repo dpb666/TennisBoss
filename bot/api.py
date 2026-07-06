@@ -1408,19 +1408,25 @@ def api_value():
         ev1 = pb1 * ho - 1.0
         ev2 = pb2 * ao - 1.0
 
-        # Ne pick que le côté où le modèle bat le marché no-vig.
-        # Si modèle < marché sur les deux côtés, c'est une mise contre l'edge → skip.
-        model_beats_mkt1 = pm1 > mw["home_prob"]   # modèle > marché sur J1
-        model_beats_mkt2 = pm2 > mw["away_prob"]   # modèle > marché sur J2
+        # Sélection du meilleur côté.
+        # model_beats_mkt supprimé quand _MKT_W=0 : avec w=0, pm1 est compressé
+        # vers 50% par Platt (a≈0.21) → filtre presque toujours False sur les favs
+        # → rejette de bons picks de line-shopping. On garde un check direction
+        # uniquement si le modèle contribue réellement (w > 0.05).
+        if _MKT_W > 0.05:
+            model_beats_mkt1 = pm1 > mw["home_prob"]
+            model_beats_mkt2 = pm2 > mw["away_prob"]
+        else:
+            model_beats_mkt1 = model_beats_mkt2 = True  # pure line-shopping
 
         if ev1 >= ev2:
             best_side, best_ev = n1, ev1
             if not model_beats_mkt1:
-                continue  # modèle ne bat pas le marché sur ce côté → skip
+                _rej_mkt += 1; continue
         else:
             best_side, best_ev = n2, ev2
             if not model_beats_mkt2:
-                continue
+                _rej_mkt += 1; continue
 
         # Capture la cote du favori du modèle (pour le ROI au settlement).
         if r["favorite"] is not None:
@@ -2349,8 +2355,11 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 ev1 = pb1 * ho - 1.0
                 ev2 = pb2 * ao - 1.0
 
-                model_beats_mkt1 = pm1 > mw["home_prob"]
-                model_beats_mkt2 = pm2 > mw["away_prob"]
+                if _MKT_W > 0.05:
+                    model_beats_mkt1 = pm1 > mw["home_prob"]
+                    model_beats_mkt2 = pm2 > mw["away_prob"]
+                else:
+                    model_beats_mkt1 = model_beats_mkt2 = True
 
                 if ev1 >= ev2:
                     best_side, best_ev, pick_odds, pb_pick = n1, ev1, ho, pb1
