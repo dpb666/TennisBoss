@@ -2499,15 +2499,27 @@ def _clv_closing_loop() -> None:
                     ev = odds_api.find_event(idx, p1, p2)
                     if not ev:
                         continue
+                    # Soft book (exécution) → pour détecter drift de cote
                     mw = odds_api.fetch_match_winner(ev["id"])
                     if not mw:
                         continue
                     pick_side = pick["pick_side"]
                     curr_odds = mw["home_odds"] if pick_side == p1 else mw["away_odds"]
+                    # Sharp book (Betfair Exchange) → closing line de référence CLV
+                    # CLV = pick_odds(Bet365) / closing_odds(Betfair) - 1
+                    mw_sharp = odds_api.fetch_match_winner(
+                        ev["id"], bookmakers=odds_api._sharp_book()
+                    )
+                    if mw_sharp:
+                        sharp_h = mw_sharp["home_odds"]
+                        sharp_a = mw_sharp["away_odds"]
+                    else:
+                        # Betfair absent → fallback consensus
+                        sharp_h, sharp_a = mw["home_odds"], mw["away_odds"]
                     # Utilise l'event_key du pick (pas ev["id"]) pour éviter le
                     # mismatch si l'API renvoie un ID différent entre deux appels.
                     clv.refresh_closing(pick["event_key"], pick_side, p1,
-                                        mw["home_odds"], mw["away_odds"],
+                                        sharp_h, sharp_a,
                                         match_date=ev.get("date") or ev.get("commence_time") or "")
                     # Alerte mouvement de cote ≥ 10% contre notre pick
                     from . import realtime_alerts as _ra
