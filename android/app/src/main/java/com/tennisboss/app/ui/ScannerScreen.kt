@@ -50,9 +50,15 @@ fun ScannerScreen(vm: ScannerViewModel = viewModel()) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("🔍 Scanner", style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold)
-        Text("Détection value picks en temps réel (toutes les 90s)",
+        Row(modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("🔍 Scanner", style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold)
+            Text("🔔 Notifs actives", style = MaterialTheme.typography.labelSmall,
+                color = GreenColor)
+        }
+        Text("Détection value picks en temps réel · Polling toutes les 15min en fond",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
 

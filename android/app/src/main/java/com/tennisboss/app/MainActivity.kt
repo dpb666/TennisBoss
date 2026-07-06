@@ -1,8 +1,15 @@
 package com.tennisboss.app
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -39,14 +46,39 @@ import com.tennisboss.app.ui.PlayerCompareViewModel
 import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
 import com.tennisboss.app.ui.PredictViewModel
+import com.tennisboss.app.notifications.PickNotificationHelper
+import com.tennisboss.app.notifications.ScannerPollWorker
 import com.tennisboss.app.ui.ScannerScreen
 import com.tennisboss.app.ui.UpcomingScreen
 import com.tennisboss.app.ui.ValueScreen
 import com.tennisboss.app.ui.theme.TennisBossTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val requestNotifPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* accordée ou refusée — silencieux */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Notification channel (Android 8+)
+        PickNotificationHelper.createChannel(this)
+
+        // Demande permission POST_NOTIFICATIONS (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestNotifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        // Worker périodique : poll scanner toutes les 15min
+        val pollRequest = PeriodicWorkRequestBuilder<ScannerPollWorker>(15, TimeUnit.MINUTES)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            ScannerPollWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            pollRequest,
+        )
+
         setContent {
             TennisBossTheme {
                 AppRoot()

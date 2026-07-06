@@ -82,6 +82,9 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // Background polling + notifications push locales
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     // Tests unitaires (JVM)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")

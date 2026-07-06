@@ -683,6 +683,15 @@ data class NearMiss(
     val league: String = "",
 )
 
+/** Détail du dernier pick trouvé par le scanner. */
+data class LastPick(
+    val side: String = "",
+    val ev: Double = 0.0,
+    val odds: Double = 0.0,
+    val hours: Double? = null,
+    val league: String = "",
+)
+
 /** Réponse /api/scanner/status — état temps réel du scanner. */
 data class ScannerStatus(
     val running: Boolean = false,
@@ -694,6 +703,7 @@ data class ScannerStatus(
     val cap: Int = 25,
     val active_picks: Int = 0,
     val last_pick_ts: String? = null,
+    val last_pick: LastPick? = null,
     val rejections: Map<String, Int> = emptyMap(),
     val near_misses: List<NearMiss> = emptyList(),
 )

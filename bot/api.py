@@ -2198,6 +2198,7 @@ _SCANNER_STATE: Dict[str, Any] = {
     "cap": 25,
     "active_picks": 0,
     "last_pick_ts": None,
+    "last_pick": None,           # détail du dernier pick {side, ev, odds, hours, league}
     "rejections": {},            # {fenetre, cache, no_odds, conf, mkt, ev, zone, bl, surf}
     "near_misses": [],           # events EV 2-8% (pas encore picks)
 }
@@ -2430,6 +2431,11 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 _alerted.add(eid)
                 with _SCANNER_STATE_LOCK:
                     _SCANNER_STATE["last_pick_ts"] = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+                    _SCANNER_STATE["last_pick"] = {
+                        "side": best_side, "ev": best_ev_pct,
+                        "odds": pick_odds, "hours": round(hours_ahead, 1) if hours_ahead else None,
+                        "league": _lg_name,
+                    }
 
             # Mise à jour de l'état global (endpoint /api/scanner/status)
             _now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
