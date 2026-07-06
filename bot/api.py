@@ -2501,7 +2501,8 @@ def _clv_closing_loop() -> None:
                     # Utilise l'event_key du pick (pas ev["id"]) pour éviter le
                     # mismatch si l'API renvoie un ID différent entre deux appels.
                     clv.refresh_closing(pick["event_key"], pick_side, p1,
-                                        mw["home_odds"], mw["away_odds"])
+                                        mw["home_odds"], mw["away_odds"],
+                                        match_date=ev.get("date") or ev.get("commence_time") or "")
                     # Alerte mouvement de cote ≥ 10% contre notre pick
                     from . import realtime_alerts as _ra
                     pick_odds_orig = float(pick["pick_odds"] or 0)

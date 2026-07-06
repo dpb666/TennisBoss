@@ -139,6 +139,11 @@ private fun Content(d: ClvResponse, intel: IntelligenceStats, learner: LearnerSt
                 }
             }
         }
+        // ── Scanner post-filtre (signal propre, sans historique contaminé) ──
+        if ((d.scanner.n_settled ?: 0) > 0) {
+            item { ScannerStatsCard(d.scanner) }
+        }
+
         item {
             Text(d.note, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline)
@@ -355,6 +360,35 @@ private fun IntelligenceCard(intel: IntelligenceStats, learner: LearnerStats) {
     }
 }
 
+
+@Composable
+private fun ScannerStatsCard(s: com.tennisboss.app.data.ClvAgg) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = GoodColor.copy(alpha = 0.08f)),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("🎯 Scanner (post-filtre)", fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall)
+                Text("depuis 03/07", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline)
+            }
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard("ROI", signedPct(s.roi_flat_pct), roiColor(s.roi_flat_pct),
+                    Modifier.weight(1f), sub = "${s.n_settled} réglés")
+                StatCard("Win rate", pct(s.win_rate_pct), roiColor((s.win_rate_pct ?: 0.0) - 50.0),
+                    Modifier.weight(1f), sub = "${s.n_picks} picks")
+            }
+            Text("Picks avec filtres actifs : dead zone, Bet365, confiance ITF 0.65",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 private fun pct(v: Double?): String = v?.let { String.format("%.0f%%", it) } ?: "—"
 private fun signedPct(v: Double?): String = v?.let { String.format("%+.1f%%", it) } ?: "—"

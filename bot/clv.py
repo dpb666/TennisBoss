@@ -50,14 +50,33 @@ def seed_pick(event_key: str, date: str, p1: str, p2: str, side: str,
 
 
 def refresh_closing(event_key: str, side: str,
-                    home: str, home_odds: float, away_odds: float) -> None:
-    """Met à jour la closing line d'un pick avec un quote frais (snapshot).
+                    home: str, home_odds: float, away_odds: float,
+                    match_date: str = "") -> None:
+    """Met à jour la closing line d'un pick avec un quote frais.
 
     `side` = joueur misé ; on prend sa cote selon qu'il est home ou away.
+    `match_date` (ISO) : si fourni, on marque 'closing' seulement dans la
+    fenêtre 0-2h pré-match ; avant ce délai on stocke sous 'pre_closing'
+    pour suivre le drift sans polluer la closing line finale.
     """
+    import datetime as _dt
     closing = home_odds if side == home else away_odds
-    if closing and closing > 1.0:
-        db.update_clv_closing(event_key, float(closing), "snapshot")
+    if not closing or closing <= 1.0:
+        return
+
+    # Déterminer si on est dans la fenêtre pré-match (<2h)
+    src = "snapshot"
+    if match_date:
+        try:
+            match_ts = _dt.datetime.fromisoformat(str(match_date).replace("Z", "+00:00"))
+            now_utc = _dt.datetime.now(_dt.timezone.utc)
+            hours_to_match = (match_ts - now_utc).total_seconds() / 3600
+            if hours_to_match > 2.0:
+                src = "pre_closing"   # trop tôt — on stocke mais pas comme final
+        except Exception:
+            pass
+
+    db.update_clv_closing(event_key, float(closing), src)
 
 
 def _name_vars(name: str):
@@ -156,23 +175,34 @@ def stats() -> Dict[str, Any]:
     - prometteur   : avg_clv_pct > 0 mais échantillon trop petit
     - pas d'edge   : CLV ≤ 0 sur échantillon suffisant
     - insuffisant  : pas assez de données réglées
+
+    `scanner` = picks post-filtre seulement (depuis Bet365 + dead zone, 2026-07-03).
+    Les anciens picks (pre-filtre, juin 2026) sont contaminés par des règles d'avant.
     """
     rows = db.list_clv()
-    glob = _agg(rows)
+    # Scanner-only = picks après activation du filtre complet (Bet365 + dead zone)
+    SCANNER_CUTOFF = "2026-07-03"
+    scanner_rows = [r for r in rows if (r["pick_ts"] or "") >= SCANNER_CUTOFF]
 
-    def tier(lo: float, hi: float) -> List[Any]:
-        return [r for r in rows if r["confidence"] is not None
+    glob = _agg(rows)
+    scanner = _agg(scanner_rows)
+
+    def tier(pool: List[Any], lo: float, hi: float) -> List[Any]:
+        return [r for r in pool if r["confidence"] is not None
                 and lo <= r["confidence"] < hi]
 
     by_conf = {
-        "high":   _agg(tier(0.75, 1.01)),
-        "medium": _agg(tier(0.60, 0.75)),
-        "low":    _agg(tier(0.0, 0.60)),
+        "high":   _agg(tier(rows, 0.75, 1.01)),
+        "medium": _agg(tier(rows, 0.60, 0.75)),
+        "low":    _agg(tier(rows, 0.0, 0.60)),
     }
 
-    verdict, label = _verdict(glob)
+    # Verdict basé sur le scanner (post-filtre) si assez de data, sinon global
+    verdict_src = scanner if scanner.get("n_clv", 0) >= 15 else glob
+    verdict, label = _verdict(verdict_src)
     return {
         "global": glob,
+        "scanner": scanner,      # stats post-filtre (signal propre)
         "by_confidence": by_conf,
         "verdict": verdict,
         "verdict_label": label,

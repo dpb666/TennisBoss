@@ -632,6 +632,7 @@ data class ClvRecent(
 
 data class ClvResponse(
     val global: ClvAgg = ClvAgg(),
+    val scanner: ClvAgg = ClvAgg(),   // stats post-filtre uniquement (signal propre)
     val by_confidence: ClvByConfidence = ClvByConfidence(),
     val verdict: String = "insuffisant",
     val verdict_label: String = "",

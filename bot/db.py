@@ -815,8 +815,12 @@ def update_clv_result(event_key: str, result: int, pnl_flat: float,
         )
 
 
-def list_clv(limit: int = 100000) -> List[sqlite3.Row]:
+def list_clv(limit: int = 100000, since: str = "") -> List[sqlite3.Row]:
     with connect() as conn:
+        if since:
+            return conn.execute(
+                "SELECT * FROM clv_log WHERE pick_ts >= ? ORDER BY date DESC, pick_ts DESC LIMIT ?",
+                (since, limit)).fetchall()
         return conn.execute(
             "SELECT * FROM clv_log ORDER BY date DESC, pick_ts DESC LIMIT ?",
             (limit,)).fetchall()
