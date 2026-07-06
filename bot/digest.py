@@ -176,6 +176,32 @@ def build_digest(date: Optional[str] = None) -> str:
         )
         lines.append("")
 
+    # ── Scanner post-filtre ───────────────────────────────
+    try:
+        scanner_stats = clv.stats().get("scanner", {})
+        sc_n = scanner_stats.get("n_picks", 0)
+        sc_settled = scanner_stats.get("n_settled", 0)
+        sc_roi = scanner_stats.get("roi_flat_pct")
+        sc_wr = scanner_stats.get("win_rate_pct")
+        sc_clv = scanner_stats.get("avg_clv_pct")
+
+        if sc_n >= 1:
+            lines.append("🔍 *Scanner post-filtre (03/07+)*")
+            if sc_settled >= 1:
+                roi_em = "🟢" if (sc_roi or 0) > 0 else "🔴"
+                clv_em = "🟢" if (sc_clv or 0) > 2 else "🟡" if (sc_clv or 0) > 0 else "🔴"
+                lines.append(
+                    f"  {roi_em} ROI {sc_roi:+.0f}% · {sc_wr:.0f}% WR "
+                    f"({sc_settled}/{sc_n} réglés)"
+                )
+                if sc_clv is not None:
+                    lines.append(f"  {clv_em} CLV moyen {sc_clv:+.1f}%")
+            else:
+                lines.append(f"  {sc_n} pick(s) · résultats en attente")
+            lines.append("")
+    except Exception:
+        pass
+
     lines.append("_TennisBoss — rapport automatique 21h_")
     return "\n".join(lines)
 

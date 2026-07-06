@@ -2421,12 +2421,17 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 if alerter:
                     _h = f"{hours_ahead:.1f}h" if hours_ahead is not None else "?"
                     _urgency = "⚡" if (hours_ahead is not None and hours_ahead < 1.0) else "🔔"
+                    # Cote sharp (Betfair) de référence pour afficher le gap line-shopping
+                    _fair_prob = mw["home_prob"] if best_side == n1 else mw["away_prob"]
+                    _fair_odds = round(1.0 / _fair_prob, 2) if _fair_prob > 0 else None
                     _pick_entry = {
                         "player1": n1, "player2": n2,
                         "best_side": best_side, "best_ev": best_ev_pct,
                         "pick_odds": pick_odds, "kelly_u": _kelly,
                         "confidence_label": r.get("confidence_label", ""),
                         "league": _lg_name,
+                        "surface": _surf or "",
+                        "fair_odds": _fair_odds,
                         "best_book": (mw.get("books") or [""])[0] if mw.get("books") else "",
                         "hours_ahead": hours_ahead,
                         "urgency": _urgency,

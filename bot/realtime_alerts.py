@@ -65,6 +65,9 @@ def _send(text: str) -> None:
         log(f"realtime_alerts: envoi échoué — {exc}", "WARN")
 
 
+_SURF_EMOJI = {"clay": "🔴", "grass": "🟢", "hard": "🔵"}
+
+
 def on_value_pick(pick: Dict[str, Any]) -> None:
     """Alerte immédiate pour un nouveau pick value. Dédupliqué sur 1h."""
     p1 = pick.get("player1", "?")
@@ -72,10 +75,11 @@ def on_value_pick(pick: Dict[str, Any]) -> None:
     side = pick.get("best_side") or pick.get("side", "?")
     ev = pick.get("best_ev") or pick.get("ev") or 0.0
     pick_odds = pick.get("pick_odds") or pick.get("odds")
+    fair_odds = pick.get("fair_odds")
     kelly = pick.get("kelly_u", 0.0)
     conf_label = pick.get("confidence_label", "")
     league = pick.get("league", "")
-    terrain = pick.get("terrain_favorable", False)
+    surface = (pick.get("surface") or "").lower()
     book = pick.get("best_book", "") or pick.get("odds_book", "")
 
     alert_key = f"{p1}|{p2}|{side}"
@@ -92,31 +96,50 @@ def on_value_pick(pick: Dict[str, Any]) -> None:
     hours_ahead = pick.get("hours_ahead")
     urgency = pick.get("urgency", "🎾")
 
-    terrain_s = " 🌟" if terrain else ""
-    odds_s = f"`{pick_odds:.2f}`" if pick_odds else "—"
-    book_s = f" _{book}_" if book else ""
-    league_s = f"\n📍 _{league}_" if league else ""
-
-    # Titre selon source : scanner (temps réel) vs app (à la demande)
-    if is_scanner and hours_ahead is not None:
+    # Countdown
+    if hours_ahead is not None:
         if hours_ahead < 1.0:
-            time_s = f"dans {int(hours_ahead * 60)}min"
+            time_s = f"⏱ {int(hours_ahead * 60)}min avant le match"
+        elif hours_ahead < 3.0:
+            time_s = f"⏱ {hours_ahead:.1f}h avant le match"
         else:
-            time_s = f"dans {hours_ahead:.1f}h"
-        title = f"{urgency} *VALUE PICK — {time_s}*{terrain_s}"
+            time_s = f"⏱ {hours_ahead:.0f}h avant le match"
     else:
-        title = f"🎾 *VALUE PICK*{terrain_s}"
+        time_s = ""
+
+    # Surface
+    surf_em = _SURF_EMOJI.get(surface, "")
+    surf_s = f" {surf_em} {surface.capitalize()}" if surface and surf_em else ""
+
+    # Line shopping gap : Bet365 vs Betfair
+    odds_s = f"`{pick_odds:.2f}`" if pick_odds else "—"
+    if fair_odds and pick_odds and fair_odds > 1.0:
+        gap_pct = (pick_odds / fair_odds - 1) * 100
+        shop_s = f"\n🏦 Bet365 `{pick_odds:.2f}` vs Betfair `{fair_odds:.2f}` (+{gap_pct:.0f}%)"
+    else:
+        shop_s = ""
+
+    # Titre
+    if is_scanner:
+        title = f"{urgency} *SCANNER PICK*{surf_s}"
+    else:
+        title = f"🎾 *VALUE PICK*{surf_s}"
+
+    league_s = f"\n📍 _{league}_" if league else ""
 
     msg = (
         f"{title}{league_s}\n\n"
         f"*{p1}* vs *{p2}*\n"
-        f"✅ *{side}* @ {odds_s}{book_s}\n"
+        f"✅ Miser *{side}* @ {odds_s}"
+        f"{shop_s}\n"
         f"📈 EV `+{ev:.0f}%`"
     )
     if kelly and kelly > 0:
         msg += f" · Kelly `{kelly:.1f}%`"
+    if time_s:
+        msg += f"\n{time_s}"
     if conf_label:
-        msg += f"\n🔒 {conf_label}"
+        msg += f"\n🔒 Confiance : {conf_label}"
 
     _send(msg)
 
@@ -156,6 +179,7 @@ def on_settlement(p1: str, p2: str, winner: str, side: str,
     won = winner == side
     em = "✅" if won else "❌"
     pnl_s = f"+{pnl:.2f}u" if pnl >= 0 else f"{pnl:.2f}u"
+
     msg = (
         f"{em} *Résultat pick*\n\n"
         f"*{p1}* vs *{p2}*\n"
@@ -163,6 +187,37 @@ def on_settlement(p1: str, p2: str, winner: str, side: str,
         f"Gagnant : *{winner}*\n"
         f"P&L : `{pnl_s}`"
     )
+
+    # CLV du pick (si disponible dans clv_log)
+    try:
+        from . import db as _db
+        with _db.connect() as _c:
+            clv_row = _c.execute(
+                "SELECT clv_pct, closing_odds, closing_src FROM clv_log "
+                "WHERE player1=? AND player2=? AND pick_side=? "
+                "AND result IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+                (p1, p2, side)
+            ).fetchone()
+        if clv_row and clv_row["closing_src"] not in (None, "last_seen"):
+            clv_pct = clv_row["clv_pct"] or 0.0
+            clv_em = "🟢" if clv_pct > 2 else "🟡" if clv_pct > 0 else "🔴"
+            msg += f"\nCLV : {clv_em} `{clv_pct:+.1f}%` vs clôture `{clv_row['closing_odds']:.2f}`"
+    except Exception:
+        pass
+
+    # Stats cumulées scanner (post-filtre)
+    try:
+        from . import clv as _clv
+        sc = _clv.stats().get("scanner", {})
+        if sc and sc.get("n_settled", 0) >= 3:
+            roi = sc.get("roi_flat_pct", 0)
+            wr = sc.get("win_rate_pct", 0)
+            n = sc.get("n_settled", 0)
+            roi_em = "📈" if roi > 0 else "📉"
+            msg += f"\n{roi_em} _Scanner : {wr:.0f}% WR · ROI {roi:+.0f}% ({n} picks)_"
+    except Exception:
+        pass
+
     _send(msg)
 
 
