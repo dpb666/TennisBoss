@@ -74,28 +74,168 @@ GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/ch
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # Surface detection from league/tournament name
-_GRASS_KEYWORDS = {"wimbledon", "queen", "halle", "eastbourne", "hertogenbosch",
-                   "notting", "grass", "'s-hertogenbosch", "birmingham"}
-_CLAY_KEYWORDS  = {"clay", "roland", "french", "rome", "madrid", "barcelona",
-                   "hamburg", "monte", "bucharest", "istanbul", "estoril",
-                   "lyon", "geneva", "marrakech", "bastad", "umag",
-                   "kitzbuhel", "gstaad", "cordoba", "rio", "buenos"}
-_HARD_KEYWORDS  = {"hard", "open", "us open", "australian", "dubai",
-                   "doha", "miami", "indian wells", "montreal", "toronto",
-                   "cincinnati", "winston", "washington", "tokyo", "beijing",
-                   "paris", "vienna", "rotterdam", "brisbane", "auckland",
-                   "adelaide", "sydney", "indoor"}
+_GRASS_KEYWORDS = {
+    "wimbledon", "queen", "halle", "eastbourne", "hertogenbosch",
+    "nottingham", "grass", "'s-hertogenbosch", "birmingham",
+    "ilkley", "mallorca", "surbiton", "southsea", "roehampton",
+    "newport grass", "aldershot",
+}
+_CLAY_KEYWORDS = {
+    "clay", "roland", "french", "rome", "madrid", "barcelona",
+    "hamburg", "monte", "bucharest", "istanbul", "estoril",
+    "lyon", "geneva", "marrakech", "bastad", "umag",
+    "kitzbuhel", "gstaad", "cordoba", "rio", "buenos",
+    "stuttgart", "munich", "belgrade", "athens", "cagliari",
+    "parma", "perugia", "modena", "foggia", "brescia", "cattolica",
+    "poznan", "prostejov", "bratislava", "heilbronn",
+    "royan", "makarska", "asuncion", "tucuman",
+}
+_HARD_KEYWORDS = {
+    "hard", "us open", "australian", "dubai",
+    "doha", "miami", "indian wells", "montreal", "toronto",
+    "cincinnati", "winston", "washington", "tokyo", "beijing",
+    "paris", "vienna", "rotterdam", "brisbane", "auckland",
+    "adelaide", "sydney", "indoor", "astana", "nur-sultan",
+    "riyadh", "dallas", "acapulco", "singapore", "wuhan",
+    "shenzhen", "chengdu", "zhuhai", "tianjin",
+}
+
+# City → surface: circuit Challenger, ITF M15/M25, odd ATP/WTA events
+_CITY_SURFACE: dict = {
+    # Grass
+    "ilkley": "grass", "mallorca": "grass", "surbiton": "grass",
+    "roehampton": "grass", "southsea": "grass", "aldershot": "grass",
+    "devonshire": "grass", "loughborough": "grass",
+    "newport": "grass",   # Newport RI, USA grass Challenger
+    # Clay — Europe
+    "ajaccio": "clay", "alkmaar": "clay", "amstelveen": "clay",
+    "bakio": "clay", "bergamo": "clay", "brussels": "clay",
+    "figueira": "clay", "figueira da foz": "clay",
+    "getxo": "clay", "kamen": "clay", "marburg": "clay",
+    "monastir": "clay", "nivelles": "clay", "porto": "clay",
+    "rabat": "clay", "rzeszow": "clay", "skopje": "clay",
+    "slovenska bistrica": "clay", "store": "clay",
+    "brescia": "clay", "cattolica": "clay", "heilbronn": "clay",
+    "modena": "clay", "foggia": "clay", "perugia": "clay",
+    "poznan": "clay", "prostejov": "clay", "bratislava": "clay",
+    "makarska": "clay", "royan": "clay",
+    "kayseri": "clay", "kursumlijska": "clay", "kursumlijska banja": "clay",
+    "nyiregyhaza": "clay", "rosbach": "clay", "szentendre": "clay",
+    "tsaghkadzor": "clay", "vaasa": "clay", "ljubljana": "clay",
+    "mungia": "clay", "mungia-laukariz": "clay",
+    "messina": "clay", "bistrita": "clay", "caltanissetta": "clay",
+    "ceska lipa": "clay", "kiseljak": "clay", "martos": "clay",
+    "varnamo": "clay", "trieste": "clay", "troyes": "clay",
+    "iasi": "clay", "brasov": "clay", "targu mures": "clay",
+    "braunschweig": "clay", "plovdiv": "clay", "liege": "clay",
+    "bogota": "clay", "piracicaba": "clay", "quito": "clay",
+    "cortina": "clay", "portoroz": "clay", "sao paulo": "clay",
+    # Clay — South America / North Africa
+    "asuncion": "clay", "tucuman": "clay", "san miguel": "clay",
+    "cuiaba": "clay", "brasilia": "clay", "buenos aires": "clay",
+    "curtea de arges": "clay", "curtea": "clay",
+    # Hard — USA
+    "cary": "hard", "lakewood": "hard", "los angeles": "hard",
+    "wichita": "hard", "san diego": "hard", "claremont": "hard",
+    "harmon": "hard", "hillcrest": "hard",
+    # Hard — Asia
+    "luan": "hard", "maanshan": "hard", "shenzhen": "hard",
+    "chengdu": "hard", "beijing": "hard", "tianjin": "hard",
+    "nanjing": "hard", "zhuhai": "hard",
+    # Hard — misc
+    "milan": "hard", "milano": "hard",   # Challenger Milan = indoor hard
+    "dublin": "hard",
+    # London disambiguation (Wimbledon → grass via keyword, Queen's via keyword)
+    # plain "london" in odds-api can be Wimbledon qualifying → grass
+    "london": "grass",
+    # Misc ATP/WTA named by city only
+    "berlin": "clay",      # WTA Berlin (outdoor clay)
+    "stuttgart": "clay",   # ATP Stuttgart (clay)
+    "munich": "clay",      # ATP Munich
+    "lyon": "clay",
+    "geneva": "clay",
+    "parma": "clay",
+    "poznan": "clay",
+    "prostejov": "clay",
+    "bratislava": "clay",
+    "tyler": "hard",       # USA hard
+    "knoxville": "hard",
+    "boca raton": "hard",
+    "budapest": "clay",    # WTA Budapest clay
+    "olomouc": "clay",     # Czech Republic clay
+}
+
+import re as _re_surf
+
+# Pre-compiled word-boundary patterns for keyword sets
+def _build_kw_pattern(kws: set) -> "_re_surf.Pattern":
+    # Sort longest first to avoid short match shadowing longer one
+    alts = "|".join(_re_surf.escape(k) for k in sorted(kws, key=len, reverse=True))
+    return _re_surf.compile(r"\b(?:" + alts + r")\b")
+
+_GRASS_RE = _build_kw_pattern(_GRASS_KEYWORDS)
+_CLAY_RE  = _build_kw_pattern(_CLAY_KEYWORDS)
+_HARD_RE  = _build_kw_pattern(_HARD_KEYWORDS)
+
+
+def _extract_city(ln: str) -> str:
+    """Extrait le nom de ville depuis les formats courants d'odds-api.io / api-tennis."""
+    # "Tennis - ITF Men {City} - {Round}"
+    m = _re_surf.search(r"itf (?:men|women|junior[s]?)\s+(.+?)\s*[-–]", ln)
+    if m:
+        return m.group(1).strip()
+    # "Challenger - {City}, {Country}"  or  "Challenger - {City} N, {Country}"
+    m = _re_surf.search(r"challenger\s*[-–]\s*([^,\d]+?)(?:\s+\d+)?\s*(?:,|$)", ln)
+    if m:
+        return m.group(1).strip()
+    # "M15 {City}" / "M25 {City}"
+    m = _re_surf.match(r"m(?:15|25)\s+(.+?)(?:\s+\d+)?(?:\s*[,(]|$)", ln)
+    if m:
+        return m.group(1).strip()
+    # "ATP - {Tournament}, {City}, {Country}" → take first token after "ATP -"
+    m = _re_surf.search(r"(?:atp|wta)\s*[-–]\s*([^,]+)", ln)
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 def surface_from_league(league_name: str) -> str:
-    """Dérive la surface ('grass'|'clay'|'hard') depuis le nom du tournoi."""
+    """Dérive la surface ('grass'|'clay'|'hard') depuis le nom du tournoi.
+
+    Couches : keywords rapides → dict ville → extraction ville → règle format ITF/M15.
+    """
     ln = (league_name or "").lower()
-    if any(k in ln for k in _GRASS_KEYWORDS):
+    if not ln:
+        return ""
+
+    # 1. Keywords rapides (ATP masters, GS, tournois nommés) — word boundaries
+    if _GRASS_RE.search(ln):
         return "grass"
-    if any(k in ln for k in _CLAY_KEYWORDS):
+    if _CLAY_RE.search(ln):
         return "clay"
-    if any(k in ln for k in _HARD_KEYWORDS):
+    if _HARD_RE.search(ln):
         return "hard"
+
+    # 2. Dict ville direct sur le nom brut
+    for city, surf in _CITY_SURFACE.items():
+        if city in ln:
+            return surf
+
+    # 3. Parser : extraire la ville puis chercher dans le dict
+    city = _extract_city(ln)
+    if city:
+        for key, surf in _CITY_SURFACE.items():
+            if key in city or city in key:
+                return surf
+
+    # 4. Règle format : ITF et M15/M25 hors USA/Asie → clay par défaut
+    is_itf_format = bool(_re_surf.match(r"(?:tennis\s*-\s*itf|m15|m25)\b", ln))
+    if is_itf_format:
+        us_asia = {"usa", " ca", " ks", " tx", " fl", "china", "japan", "korea",
+                   "taiwan", "hong kong", "philippines", "thailand", "vietnam"}
+        if not any(t in ln for t in us_asia):
+            return "clay"
+
     return ""
 
 
