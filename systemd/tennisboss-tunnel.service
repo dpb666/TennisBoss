@@ -1,0 +1,18 @@
+[Unit]
+Description=TennisBoss Cloudflare Tunnel (api.tennisboss.online -> localhost:8000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alchemist
+ExecStart=/usr/local/bin/cloudflared tunnel run 55d2d52b-aed9-4395-97af-9f732a1a82db
+Restart=always
+RestartSec=5s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tennisboss-tunnel
+
+[Install]
+WantedBy=multi-user.target
