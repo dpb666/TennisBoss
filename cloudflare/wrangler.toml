@@ -7,6 +7,6 @@ account_id = "cdbd81bae4e8a81f7c9d9022fb5470c5"
 workers_dev = true
 
 [vars]
-# Remplacer par l'UUID réel après : cloudflared tunnel create tennisboss
-TUNNEL_URL = "https://plausible-matchbox-thrive.ngrok-free.dev"
-API_TOKEN = "MUTaqzFSynnRPbESk47JzSzSRjAOB27JObobQ8Ds2sI"
+# Tunnel cloudflared rapide actif (ré-générer si le tunnel redémarre : voir logs/cloudflared_clean.log)
+TUNNEL_URL = "https://yet-brighton-ultra-revenue.trycloudflare.com"
+# API_TOKEN n'est plus stocké ici (secret exposé en clair dans git) — voir `wrangler secret put API_TOKEN`.

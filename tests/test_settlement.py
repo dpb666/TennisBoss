@@ -83,16 +83,19 @@ class TestCalibrationMetrics(unittest.TestCase):
 
     def test_roi_value_depuis_value_picks(self):
         # Pick outsider B coté 3.0, B gagne -> +2.0 ; pick D coté 2.5, C gagne -> -1.
+        # EV >= 8.0 requis par log_value_pick (filtre de sécurité côté DB).
         db.insert_settled({"event_key": "1", "date": "d", "tour": "atp",
                            "tournament": "T", "player1": "A", "player2": "B",
                            "winner": "B", "final_score": "", "sets": [],
                            "pred_favorite": "A", "pred_prob1": 60.0, "correct": 0})
-        db.log_value_pick("d", "A", "B", "B", 3.0, 5.2)
+        db.log_value_pick("d", "A", "B", "B", 3.0, 12.0)
+        db.settle_value_pick("A", "B", "B")
         db.insert_settled({"event_key": "2", "date": "d", "tour": "atp",
                            "tournament": "T", "player1": "C", "player2": "D",
                            "winner": "C", "final_score": "", "sets": [],
                            "pred_favorite": "C", "pred_prob1": 55.0, "correct": 1})
-        db.log_value_pick("d", "C", "D", "D", 2.5, 3.1)
+        db.log_value_pick("d", "C", "D", "D", 2.5, 8.5)
+        db.settle_value_pick("C", "D", "C")
         m = settlement.calibration_metrics()
         self.assertEqual(m["roi_value_n"], 2)
         self.assertAlmostEqual(m["roi_value"], (2.0 - 1.0) / 2, places=4)

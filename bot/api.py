@@ -47,6 +47,9 @@ _PLATT_A: float = 1.0
 _PLATT_B: float = 0.0
 # Poids modèle dans le blend modèle/marché (0 = marché pur, 1 = modèle pur).
 _MKT_W: float = calibrate.DEFAULT_MARKET_BLEND_W
+# CLV par palier de confiance (2026-07-09, n=53) : >=75% = -6.9% de CLV vs -1.3%
+# en 60-75% -> exige un EV plus élevé sur les picks à confiance élevée.
+HIGH_CONF_MIN_EV = 15.0
 
 
 def _load_state() -> None:
@@ -1466,6 +1469,12 @@ def api_value():
         _intel_blacklist = intelligence.is_blacklisted(best_side)
         _intel_surf_danger = intelligence.is_surface_danger(_surf_pick)
 
+        # CLV par palier de confiance (2026-07-09) : confiance >=75% affiche -6.9%
+        # de CLV vs -1.3% en 60-75% -> le modèle est le plus surconfiant (donc le
+        # moins fiable) précisément sur ses picks les plus sûrs. On exige un EV
+        # plus élevé dans cette zone pour compenser.
+        _high_conf_low_ev = r["confidence"] >= 0.75 and best_ev_pct < HIGH_CONF_MIN_EV
+
         is_value = (best_ev_pct >= min_ev
                     and pick_odds_check <= max_odds
                     and not _dead_zone
@@ -1473,7 +1482,8 @@ def api_value():
                     and not _overconfident
                     and not _learned_danger
                     and not _intel_blacklist
-                    and not _intel_surf_danger)
+                    and not _intel_surf_danger
+                    and not _high_conf_low_ev)
 
         # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
         if is_value:
@@ -2381,8 +2391,10 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 learned_danger = mistake_learner.is_danger_zone(best_ev_pct, pick_odds, _surf or None)
                 intel_blacklist = intelligence.is_blacklisted(best_side)
                 intel_surf_danger = intelligence.is_surface_danger(_surf or None)
+                # Voir HIGH_CONF_MIN_EV plus haut : confiance >=75% = pire CLV mesuré.
+                high_conf_low_ev = r["confidence"] >= 0.75 and best_ev_pct < HIGH_CONF_MIN_EV
 
-                if best_ev_pct < 8.0 or below_floor or above_ceil or overconfident:
+                if best_ev_pct < 8.0 or below_floor or above_ceil or overconfident or high_conf_low_ev:
                     _rej_ev += 1
                     # Near-miss : EV positif mais sous le seuil (2-8%)
                     if 2.0 <= best_ev_pct < 8.0 and not below_floor and not above_ceil and not overconfident:
