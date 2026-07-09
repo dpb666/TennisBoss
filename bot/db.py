@@ -160,6 +160,23 @@ CREATE TABLE IF NOT EXISTS inplay_picks (
     pnl          REAL DEFAULT NULL,
     auto_settled INTEGER DEFAULT 0    -- 1 si réglé automatiquement
 );
+CREATE TABLE IF NOT EXISTS historical_odds (
+    match_id TEXT PRIMARY KEY,   -- même id que matches (source tennisdata)
+    date     TEXT,
+    tour     TEXT,
+    winner   TEXT,
+    loser    TEXT,
+    surface  TEXT,
+    b365w    REAL,   -- Bet365 (soft)
+    b365l    REAL,
+    psw      REAL,   -- Pinnacle (sharp)
+    psl      REAL,
+    maxw     REAL,   -- meilleure cote tous books confondus (tennis-data.co.uk)
+    maxl     REAL,
+    avgw     REAL,   -- moyenne marché tous books
+    avgl     REAL
+);
+CREATE INDEX IF NOT EXISTS idx_hist_odds_date ON historical_odds(date);
 CREATE INDEX IF NOT EXISTS idx_inplay_ts ON inplay_picks(ts);
 CREATE INDEX IF NOT EXISTS idx_clv_date ON clv_log(date);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
@@ -273,6 +290,33 @@ def archive_matches(matches: List[Dict]) -> int:
             rows,
         )
         after = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+    return after - before
+
+
+def archive_historical_odds(rows: List[Dict]) -> int:
+    """Insère les cotes historiques (tennis-data.co.uk) — ignore les doublons.
+
+    Permet de mesurer après coup si le modèle aurait battu le marché sur les
+    grands tournois 2022-2026 (CLV proxy), sans dépendre de la capture live.
+    """
+    tuples = [
+        (
+            r["match_id"], r["date"], r.get("tour", ""), r["winner"], r["loser"],
+            r.get("surface", ""),
+            r.get("b365w"), r.get("b365l"), r.get("psw"), r.get("psl"),
+            r.get("maxw"), r.get("maxl"), r.get("avgw"), r.get("avgl"),
+        )
+        for r in rows
+    ]
+    with connect() as conn:
+        before = conn.execute("SELECT COUNT(*) FROM historical_odds").fetchone()[0]
+        conn.executemany(
+            "INSERT OR IGNORE INTO historical_odds "
+            "(match_id,date,tour,winner,loser,surface,b365w,b365l,psw,psl,maxw,maxl,avgw,avgl) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            tuples,
+        )
+        after = conn.execute("SELECT COUNT(*) FROM historical_odds").fetchone()[0]
     return after - before
 
 

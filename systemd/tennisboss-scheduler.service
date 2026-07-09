@@ -1,13 +1,13 @@
 [Unit]
-Description=TennisBoss Scheduler (learn + ingest + monitor)
-After=tennisboss.service
+Description=TennisBoss Scheduler (ingest tennis-data.co.uk 6h + recalibration surface 1h)
+After=network.target tennisboss-bot.service
 
 [Service]
 Type=simple
-User=tennisboss
-WorkingDirectory=/opt/tennisboss
-Environment="PATH=/opt/tennisboss/.venv/bin"
-ExecStart=/opt/tennisboss/.venv/bin/python3 -c "from bot.scheduler import run_scheduler; run_scheduler()"
+User=alchemist
+WorkingDirectory=/mnt/c/Users/donpa/TennisBoss
+EnvironmentFile=/mnt/c/Users/donpa/TennisBoss/.env
+ExecStart=/usr/bin/python3 -c "from bot.scheduler import run_scheduler; run_scheduler()"
 Restart=always
 RestartSec=10s
 

@@ -89,9 +89,16 @@ def _parse_row(row: Dict, tour: str, year: int) -> Optional[Dict]:
     w_rank = (row.get("WRank") or "").strip().lstrip("'")
     l_rank = (row.get("LRank") or "").strip().lstrip("'")
 
-    # Cotes clôture (B365 = Bet365, PS = Pinnacle) — '-' = non disponible
-    b365w = row.get("B365W", "").strip().replace(",", ".")
-    b365l = row.get("B365L", "").strip().replace(",", ".")
+    # Cotes clôture — '-' = non disponible. B365=Bet365 (soft), PS=Pinnacle (sharp),
+    # Max/Avg = meilleure cote / moyenne tous bookmakers agrégés par tennis-data.co.uk.
+    def _odds(col: str) -> Optional[float]:
+        v = (row.get(col) or "").strip().replace(",", ".")
+        return float(v) if v and v not in ("-", "N/A") else None
+
+    b365w, b365l = _odds("B365W"), _odds("B365L")
+    psw, psl = _odds("PSW"), _odds("PSL")
+    maxw, maxl = _odds("MaxW"), _odds("MaxL")
+    avgw, avgl = _odds("AvgW"), _odds("AvgL")
 
     uid = f"td_{year}_{tour}_{winner}_{loser}_{date_str}"
 
@@ -109,8 +116,10 @@ def _parse_row(row: Dict, tour: str, year: int) -> Optional[Dict]:
         "tour": tour,
         "w_rank": int(w_rank) if w_rank.isdigit() else None,
         "l_rank": int(l_rank) if l_rank and l_rank.isdigit() else None,
-        "b365w": float(b365w) if b365w and b365w not in ("-", "N/A", "") else None,
-        "b365l": float(b365l) if b365l and b365l not in ("-", "N/A", "") else None,
+        "b365w": b365w, "b365l": b365l,
+        "psw": psw, "psl": psl,
+        "maxw": maxw, "maxl": maxl,
+        "avgw": avgw, "avgl": avgl,
         "source": "tennisdata",
     }
 
@@ -204,6 +213,21 @@ def ingest(years: List[int] = None, tours: List[str] = None) -> Dict[str, Any]:
             "margin": None,
         })
     added = db.archive_matches(db_matches)
+
+    # Archiver les cotes historiques (CLV proxy sur grands tournois 2022-2026).
+    odds_rows = [
+        {
+            "match_id": m["id"], "date": m["date"], "tour": m.get("tour", "atp"),
+            "winner": m["winner"], "loser": m["loser"], "surface": m["surface"],
+            "b365w": m.get("b365w"), "b365l": m.get("b365l"),
+            "psw": m.get("psw"), "psl": m.get("psl"),
+            "maxw": m.get("maxw"), "maxl": m.get("maxl"),
+            "avgw": m.get("avgw"), "avgl": m.get("avgl"),
+        }
+        for m in matches
+        if m.get("b365w") or m.get("psw") or m.get("maxw")
+    ]
+    odds_added = db.archive_historical_odds(odds_rows) if odds_rows else 0
     db.sync_from_memory(mem)
 
     # Reconstruire ELO global + surface depuis toute la DB
@@ -218,9 +242,11 @@ def ingest(years: List[int] = None, tours: List[str] = None) -> Dict[str, Any]:
     memory.save(mem)
     new_players = len(new_names)
 
-    log(f"tennisdata ingest: {added} nouveaux matchs, {new_players} nouveaux joueurs")
+    log(f"tennisdata ingest: {added} nouveaux matchs, {odds_added} cotes historiques, "
+        f"{new_players} nouveaux joueurs")
     return {
         "inserted": added,
+        "odds_inserted": odds_added,
         "total_fetched": len(matches),
         "new_players": new_players,
         "players_total": len(mem["players"]),
