@@ -33,7 +33,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.TokenManager
 import com.tennisboss.app.ui.ChatScreen
@@ -70,14 +73,18 @@ class MainActivity : ComponentActivity() {
             requestNotifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        // Worker périodique : poll scanner toutes les 15min
-        val pollRequest = PeriodicWorkRequestBuilder<ScannerPollWorker>(15, TimeUnit.MINUTES)
-            .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            ScannerPollWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            pollRequest,
-        )
+        // Worker périodique : poll scanner toutes les 15min. enqueueUniquePeriodicWork
+        // écrit dans la DB Room de WorkManager (I/O disque) — hors thread principal pour
+        // éviter un ANR au lancement à froid (constaté : "No response to onStartJob").
+        lifecycleScope.launch(Dispatchers.Default) {
+            val pollRequest = PeriodicWorkRequestBuilder<ScannerPollWorker>(15, TimeUnit.MINUTES)
+                .build()
+            WorkManager.getInstance(this@MainActivity).enqueueUniquePeriodicWork(
+                ScannerPollWorker.WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                pollRequest,
+            )
+        }
 
         setContent {
             TennisBossTheme {
