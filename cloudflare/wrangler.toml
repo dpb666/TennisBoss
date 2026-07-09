@@ -7,6 +7,7 @@ account_id = "cdbd81bae4e8a81f7c9d9022fb5470c5"
 workers_dev = true
 
 [vars]
-# Tunnel cloudflared rapide actif (ré-générer si le tunnel redémarre : voir logs/cloudflared_clean.log)
-TUNNEL_URL = "https://yet-brighton-ultra-revenue.trycloudflare.com"
+# Domaine permanent (tennisboss.online, Cloudflare DNS) → tunnel nommé cloudflared
+# "tennisboss" → localhost:8000. Ne dépend plus d'un tunnel rapide éphémère.
+TUNNEL_URL = "https://api.tennisboss.online"
 # API_TOKEN n'est plus stocké ici (secret exposé en clair dans git) — voir `wrangler secret put API_TOKEN`.
