@@ -1,0 +1,19 @@
+[Unit]
+Description=TennisBoss Quant API (FastAPI/uvicorn, port 8001)
+After=network.target
+
+[Service]
+Type=simple
+User=alchemist
+WorkingDirectory=/mnt/c/Users/donpa/TennisBoss
+EnvironmentFile=/mnt/c/Users/donpa/TennisBoss/.env
+ExecStart=/usr/bin/python3 run.py quant
+Restart=always
+RestartSec=5s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tennisboss-quant
+
+[Install]
+WantedBy=multi-user.target

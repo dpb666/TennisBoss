@@ -1,0 +1,19 @@
+[Unit]
+Description=TennisBoss Supervisor (apprentissage continu + self-healing)
+After=network.target tennisboss-bot.service
+
+[Service]
+Type=simple
+User=alchemist
+WorkingDirectory=/mnt/c/Users/donpa/TennisBoss
+EnvironmentFile=/mnt/c/Users/donpa/TennisBoss/.env
+ExecStart=/usr/bin/python3 run.py start
+Restart=always
+RestartSec=10s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tennisboss-supervisor
+
+[Install]
+WantedBy=multi-user.target
