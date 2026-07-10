@@ -42,7 +42,7 @@ class ChatViewModel : ViewModel() {
                 )
                 val reply = response.reply
                 if (!reply.isNullOrBlank()) {
-                    messages.add(ChatMessage("assistant", reply))
+                    messages.add(ChatMessage("assistant", reply, context_used = response.context_used))
                 } else {
                     val err = response.error ?: "Réponse vide"
                     messages.add(ChatMessage("assistant", "⚠️ $err"))

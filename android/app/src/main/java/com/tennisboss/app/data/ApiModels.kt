@@ -72,6 +72,7 @@ data class PlayerDetail(
 data class ChatMessage(
     val role: String,    // "user" ou "assistant"
     val content: String,
+    val context_used: Boolean = false,   // réponse ancrée dans nos données (pas juste le LLM seul)
 )
 
 data class ChatRequest(
@@ -82,6 +83,7 @@ data class ChatRequest(
 data class ChatResponse(
     val reply: String? = null,
     val error: String? = null,
+    val context_used: Boolean = false,
 )
 
 data class FirstSet(
