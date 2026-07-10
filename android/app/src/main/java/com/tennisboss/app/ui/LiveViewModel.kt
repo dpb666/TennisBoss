@@ -124,6 +124,7 @@ class LiveViewModel : ViewModel() {
         oddsHome: Double? = null, oddsAway: Double? = null, oddsBook: String? = null,
         score: String? = null, setsHome: Int? = null, setsAway: Int? = null,
         minute: Int? = null, eventId: Long? = null,
+        player1Resolved: String? = null, player2Resolved: String? = null,
     ) {
         pickDialog = PickDialogState(
             player1 = player1, player2 = player2, league = league,
@@ -132,6 +133,7 @@ class LiveViewModel : ViewModel() {
             oddsHome = oddsHome, oddsAway = oddsAway, oddsBook = oddsBook,
             score = score, setsHome = setsHome, setsAway = setsAway,
             minute = minute, eventId = eventId,
+            player1Resolved = player1Resolved, player2Resolved = player2Resolved,
         )
     }
 
@@ -222,4 +224,6 @@ data class PickDialogState(
     val setsAway: Int? = null,
     val minute: Int? = null,
     val eventId: Long? = null,
+    val player1Resolved: String? = null,
+    val player2Resolved: String? = null,
 )

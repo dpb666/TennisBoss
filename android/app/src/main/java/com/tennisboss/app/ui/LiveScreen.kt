@@ -163,6 +163,8 @@ fun LiveScreen(vm: LiveViewModel = viewModel()) {
                                             score = setScore, setsHome = pick.sets_home,
                                             setsAway = pick.sets_away, minute = pick.minute,
                                             eventId = pick.event_id,
+                                            player1Resolved = pick.player1_resolved,
+                                            player2Resolved = pick.player2_resolved,
                                         )
                                     })
                                 }
@@ -184,6 +186,8 @@ fun LiveScreen(vm: LiveViewModel = viewModel()) {
                                                 score = match.score_display,
                                                 setsHome = match.sets_home, setsAway = match.sets_away,
                                                 minute = match.minute, eventId = match.event_id,
+                                                player1Resolved = match.player1_resolved,
+                                                player2Resolved = match.player2_resolved,
                                             )
                                         })
                                     }
@@ -229,6 +233,8 @@ fun LiveScreen(vm: LiveViewModel = viewModel()) {
                                         score = match2.score_display,
                                         setsHome = match2.sets_home, setsAway = match2.sets_away,
                                         minute = match2.minute, eventId = match2.event_id,
+                                        player1Resolved = match2.player1_resolved,
+                                        player2Resolved = match2.player2_resolved,
                                     )
                                 })
                             }
@@ -501,7 +507,7 @@ private fun PickConfirmDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        "${playerName(dialog.player1)} vs ${playerName(dialog.player2)}",
+                        "${playerName(dialog.player1, dialog.player1Resolved)} vs ${playerName(dialog.player2, dialog.player2Resolved)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
@@ -583,13 +589,13 @@ private fun PickConfirmDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                "${playerName(dialog.player1)} ${"%.2f".format(dialog.oddsHome)}",
+                                "${playerName(dialog.player1, dialog.player1Resolved)} ${"%.2f".format(dialog.oddsHome)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                "${playerName(dialog.player2)} ${"%.2f".format(dialog.oddsAway)}",
+                                "${playerName(dialog.player2, dialog.player2Resolved)} ${"%.2f".format(dialog.oddsAway)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -705,8 +711,8 @@ private fun LiveMatchCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        OddsChip(Modifier.weight(1f), playerName(m.player1), odds.home)
-                        OddsChip(Modifier.weight(1f), playerName(m.player2), odds.away)
+                        OddsChip(Modifier.weight(1f), playerName(m.player1, m.player1_resolved), odds.home)
+                        OddsChip(Modifier.weight(1f), playerName(m.player2, m.player2_resolved), odds.away)
                     }
                     if (odds.books.isNotEmpty()) {
                         Text("via ${odds.books.joinToString(", ")}",
@@ -728,7 +734,7 @@ private fun ScoreBoard(m: LiveMatch) {
         val isAwayServing = m.serve == "away"
 
         PlayerScoreRow(
-            name = playerName(m.player1),
+            name = playerName(m.player1, m.player1_resolved),
             setsWon = m.sets_home,
             setScores = m.set_scores.map { it.h },
             gameScore = m.game_home,
@@ -736,7 +742,7 @@ private fun ScoreBoard(m: LiveMatch) {
             isLeading = m.sets_home > m.sets_away,
         )
         PlayerScoreRow(
-            name = playerName(m.player2),
+            name = playerName(m.player2, m.player2_resolved),
             setsWon = m.sets_away,
             setScores = m.set_scores.map { it.a },
             gameScore = m.game_away,
@@ -881,10 +887,10 @@ private fun PreMatchPredRow(m: LiveMatch, pred: LivePrediction) {
             Text("En direct", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ProbLabel(playerName(m.player1), p1prob, fav == (pred.player1.ifBlank { m.player1 }))
+                ProbLabel(playerName(m.player1, m.player1_resolved), p1prob, fav == (pred.player1.ifBlank { m.player1 }))
                 Text("vs", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                ProbLabel(playerName(m.player2), p2prob, fav == (pred.player2.ifBlank { m.player2 }))
+                ProbLabel(playerName(m.player2, m.player2_resolved), p2prob, fav == (pred.player2.ifBlank { m.player2 }))
             }
             Text(
                 pred.confidence_label.ifBlank { "conf ${(pred.confidence * 100).toInt()}%" },
@@ -893,7 +899,7 @@ private fun PreMatchPredRow(m: LiveMatch, pred: LivePrediction) {
             )
         }
         if (pred.prob_history.size >= 2) {
-            ProbHistorySparkline(pred.prob_history, playerName(m.player1))
+            ProbHistorySparkline(pred.prob_history, playerName(m.player1, m.player1_resolved))
         }
     }
 }
@@ -1042,7 +1048,7 @@ private fun PickCard(
                 }
             } else {
                 Text(
-                    "${mkt.prob.toInt()}% · ${playerName(match.player1)} vs ${playerName(match.player2)}",
+                    "${mkt.prob.toInt()}% · ${playerName(match.player1, match.player1_resolved)} vs ${playerName(match.player2, match.player2_resolved)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                 )
@@ -1123,7 +1129,7 @@ private fun BestPickBanner(pick: InplayBestPick, onTake: () -> Unit = {}) {
     val pred = pick.prediction ?: return
     val fav = pred.favorite ?: return
     val favProb = if (fav == (pick.player1_resolved ?: pick.player1)) pred.prob1 else pred.prob2
-    val favName = playerName(fav)
+    val favName = playerName(fav, fav)
     val edgeText = pick.edge_pct?.let { "+${it.toInt()}% edge" }
     val oddsText = pick.fav_odds?.let { "@${String.format("%.2f", it)}" } ?: ""
     val setScore = if (pick.sets_home > 0 || pick.sets_away > 0)
@@ -1243,12 +1249,36 @@ private fun mktExplain(type: String, label: String): String = when (type) {
     else           -> ""
 }
 
-private fun playerName(raw: String): String {
+private fun formatFirstLast(first: String, last: String): String {
+    val initial = first.trim().firstOrNull()?.let { "$it." } ?: ""
+    return "$initial $last".trim()
+}
+
+/**
+ * Nom court affiché ("N. Djokovic"). Préfère le nom canonique résolu côté
+ * backend (`player1_resolved`/`player2_resolved`, matché contre notre base
+ * joueurs) au lieu de deviner depuis le nom brut odds-api — plus fiable sur
+ * les accents/formats variables. Ignoré pour le double ("/" dans le nom brut) :
+ * la résolution backend n'est pas fiable sur les paires.
+ */
+private fun playerName(raw: String, resolved: String? = null): String {
+    if (!resolved.isNullOrBlank() && !raw.contains("/")) {
+        val parts = resolved.trim().split(" ")
+        return if (parts.size >= 2) {
+            formatFirstLast(parts.dropLast(1).joinToString(" "), parts.last())
+        } else {
+            resolved
+        }
+    }
+    if (raw.contains("/")) {
+        // Double : "Kuwata H / Ngounoue C" -> "Kuwata/Ngounoue" (surnames only).
+        return raw.split("/").joinToString("/") { side ->
+            side.trim().split(" ").firstOrNull() ?: side.trim()
+        }
+    }
     val parts = raw.split(",").map { it.trim() }
     return if (parts.size == 2) {
-        val last = parts[0]
-        val first = parts[1].firstOrNull()?.let { "$it." } ?: ""
-        "$first $last".trim()
+        formatFirstLast(parts[1], parts[0])
     } else {
         raw.split(" ").lastOrNull() ?: raw
     }
