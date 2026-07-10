@@ -144,6 +144,7 @@ data class PredictResponse(
     val explain: Explain? = null,
     val h2h: H2H? = null,
     val bet_builder: BetBuilder? = null,
+    val weather_analysis: WeatherAnalysis? = null,
 )
 
 data class Prediction(

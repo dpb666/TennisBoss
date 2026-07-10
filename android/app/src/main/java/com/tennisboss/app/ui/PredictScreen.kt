@@ -125,6 +125,11 @@ private fun ResultCard(d: PredictResponse) {
                 H2HView(h2h = h)
             }
 
+            d.weather_analysis?.let { wa ->
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                WeatherAnalysisCard(wa, d.player1.name, d.player2.name)
+            }
+
             d.bet_builder?.let { bb ->
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 BetBuilderView(
