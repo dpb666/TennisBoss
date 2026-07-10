@@ -185,7 +185,10 @@ Voir section 2 — Tout public attendu.
   dans le set par défaut (elle prouve la transparence annoncée dans la description) —
   à vous de décider si vous la mettez en position 5-7 (après avoir capté l'intérêt)
   plutôt qu'en position 1-2.
-- **Feature graphic** (1024x500) — bannière promotionnelle, pas encore créée
+- **Feature graphic** ✅ créée : `store_assets/feature_graphic.png` (1024x500, PNG
+  24-bit sans alpha). Thème néon cohérent avec l'app, tagline honnête
+  ("L'analyse tennis honnête, par IA" / "pas un prédicteur miracle"), aperçu
+  prédiction Djokovic vs Alcaraz. Source HTML éditable : `feature_graphic_source.html`.
 - Pas de vidéo promo nécessaire (optionnelle)
 
 ---
@@ -199,7 +202,7 @@ Voir section 2 — Tout public attendu.
 | Classification contenu (réponses) | ✅ Brouillon prêt ci-dessus |
 | Texte fiche store | ✅ Rédigé ci-dessus |
 | Screenshots | ✅ 7 générées (`store_assets/screenshots/`) |
-| Feature graphic (bannière 1024x500) | ⏳ À créer |
+| Feature graphic (bannière 1024x500) | ✅ Faite (`store_assets/feature_graphic.png`) |
 | Keystore de signature | ⏳ À votre charge (Android Studio) |
 | Compte développeur Google Play (25$ unique) | ⏳ À votre charge |
 | Nom/email dans PRIVACY_POLICY.md | ⏳ 2 placeholders à remplir |

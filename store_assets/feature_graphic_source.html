@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>TennisBoss AI — Feature Graphic</title>
+<meta name="hz:slide-selector" content=".banner" />
+<meta name="hz:canvas-width" content="1024" />
+<meta name="hz:canvas-height" content="500" />
+<link rel="stylesheet" href="https://use.typekit.net/iis4uwc.css">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    display:flex; justify-content:center; align-items:center;
+    background:#05070b;
+  }
+
+  .banner {
+    position:relative;
+    width:1024px; height:500px;
+    background:
+      radial-gradient(circle at 78% 22%, rgba(0,229,160,0.16), transparent 42%),
+      radial-gradient(circle at 88% 78%, rgba(79,140,255,0.14), transparent 45%),
+      linear-gradient(135deg, #0A0E14 0%, #0D131C 55%, #0A0E14 100%);
+    overflow:hidden;
+  }
+
+  /* faint court-line grid */
+  .grid {
+    position:absolute; inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(0,0,0,0.2));
+            mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(0,0,0,0.2));
+  }
+
+  .content {
+    position:absolute; left:56px; top:0; bottom:0;
+    width:560px;
+    display:flex; flex-direction:column; justify-content:center;
+  }
+
+  .logo-row {
+    display:flex; align-items:center; gap:14px; margin-bottom:18px;
+  }
+  .logo-badge {
+    width:52px; height:52px; border-radius:14px;
+    background:linear-gradient(135deg,#00E5A0,#00b782);
+    display:flex; align-items:center; justify-content:center;
+    font-size:28px;
+    box-shadow:0 6px 18px rgba(0,229,160,0.35);
+  }
+  .brand {
+    font-family:"work-sans", sans-serif; font-weight:700;
+    font-size:34px; color:#F5F7FA; letter-spacing:0.2px;
+  }
+  .brand span { color:#00E5A0; }
+
+  .headline {
+    font-family:"work-sans", sans-serif; font-weight:600;
+    font-size:40px; line-height:1.15; color:#F5F7FA;
+    margin-bottom:16px;
+  }
+  .headline em {
+    font-style:normal; color:#00E5A0;
+  }
+
+  .sub {
+    font-family:"roboto", sans-serif; font-weight:400;
+    font-size:18px; line-height:1.5; color:#9AA5B4;
+    max-width:480px; margin-bottom:24px;
+  }
+
+  .chips { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip {
+    font-family:"roboto", sans-serif; font-weight:500; font-size:14px;
+    color:#C9D2DD; background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.12);
+    padding:8px 14px; border-radius:999px;
+  }
+  .chip b { color:#00E5A0; font-weight:700; }
+  .chip.blue b { color:#4F8CFF; }
+
+  /* Right-side visual: probability panel */
+  .panel {
+    position:absolute; right:54px; top:70px; width:340px; height:360px;
+    background:rgba(16,21,29,0.85);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:20px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.45);
+    padding:26px 26px;
+  }
+  .panel-title {
+    font-family:"roboto", sans-serif; font-weight:500; font-size:13px;
+    color:#7C8798; text-transform:uppercase; letter-spacing:1.2px;
+    margin-bottom:18px;
+  }
+  .versus {
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:22px;
+  }
+  .player {
+    font-family:"work-sans", sans-serif; font-weight:600; font-size:16px; color:#EDEFF3;
+  }
+  .vs {
+    font-family:"roboto", sans-serif; font-size:12px; color:#5C6675;
+  }
+  .bar-row { margin-bottom:18px; }
+  .bar-label {
+    display:flex; justify-content:space-between;
+    font-family:"roboto", sans-serif; font-size:13px; color:#AEB7C4; margin-bottom:6px;
+  }
+  .bar-label b { color:#F5F7FA; font-weight:700; }
+  .bar-track {
+    width:100%; height:10px; border-radius:6px;
+    background:rgba(255,255,255,0.08); overflow:hidden;
+  }
+  .bar-fill { height:100%; border-radius:6px; }
+  .fill-green { background:linear-gradient(90deg,#00E5A0,#00b782); }
+  .fill-blue  { background:linear-gradient(90deg,#4F8CFF,#3567c9); }
+
+  .verdict {
+    margin-top:10px; padding:12px 14px; border-radius:12px;
+    background:rgba(0,229,160,0.08); border:1px solid rgba(0,229,160,0.28);
+    font-family:"roboto", sans-serif; font-size:13px; color:#8FF0CE;
+    display:flex; align-items:center; gap:8px;
+  }
+
+  .footer-tag {
+    position:absolute; left:56px; bottom:34px;
+    font-family:"roboto", sans-serif; font-weight:400; font-size:14px; color:#5C6675;
+  }
+</style>
+</head>
+<body>
+  <div class="banner" data-canvas-width="1024" data-canvas-height="500">
+    <div class="grid"></div>
+
+    <div class="content">
+      <div class="logo-row">
+        <div class="logo-badge">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="#0A0E14"/>
+            <path d="M12 2C9.5 4.5 8 8 8 12s1.5 7.5 4 10" stroke="#F5F7FA" stroke-width="1.6" fill="none"/>
+            <path d="M12 2c2.5 2.5 4 6 4 10s-1.5 7.5-4 10" stroke="#F5F7FA" stroke-width="1.6" fill="none"/>
+          </svg>
+        </div>
+        <div class="brand">Tennis<span>Boss</span> AI</div>
+      </div>
+
+      <div class="headline">L'analyse tennis<br/><em>honnête</em>, par IA.</div>
+
+      <div class="sub">
+        Prédictions expliquées, value bets, Closing Line Value —
+        un outil d'aide à la décision, pas un prédicteur miracle.
+      </div>
+
+      <div class="chips">
+        <div class="chip"><b>ELO</b> &nbsp;+ surface</div>
+        <div class="chip blue"><b>CLV</b> &nbsp;transparent</div>
+        <div class="chip">Chat IA</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Prédiction du 1er set</div>
+      <div class="versus">
+        <div class="player">Djokovic</div>
+        <div class="vs">VS</div>
+        <div class="player">Alcaraz</div>
+      </div>
+
+      <div class="bar-row">
+        <div class="bar-label"><span>Djokovic</span><b>39%</b></div>
+        <div class="bar-track"><div class="bar-fill fill-blue" style="width:39%;"></div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label"><span>Alcaraz</span><b>61%</b></div>
+        <div class="bar-track"><div class="bar-fill fill-green" style="width:61%;"></div></div>
+      </div>
+
+      <div class="verdict">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2l2.6 5.6 6.1.6-4.6 4.1 1.3 6-5.4-3.1-5.4 3.1 1.3-6-4.6-4.1 6.1-.6L12 2z" fill="#00E5A0"/>
+        </svg>
+        Alcaraz favori — forme récente
+      </div>
+    </div>
+
+    <div class="footer-tag">tennisboss.online</div>
+  </div>
+</body>
+</html>
