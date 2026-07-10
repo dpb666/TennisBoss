@@ -19,23 +19,15 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Radar
-import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Diamond
 import androidx.compose.material.icons.outlined.Insights
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Radar
-import androidx.compose.material.icons.outlined.Sensors
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -62,20 +54,16 @@ import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.TokenManager
 import com.tennisboss.app.ui.ChatScreen
 import com.tennisboss.app.ui.ChatViewModel
-import com.tennisboss.app.ui.EdgeScreen
-import com.tennisboss.app.ui.LiveScreen
 import com.tennisboss.app.ui.LiveViewModel
-import com.tennisboss.app.ui.PerformanceScreen
+import com.tennisboss.app.ui.MatchesGroupScreen
+import com.tennisboss.app.ui.PerfGroupScreen
 import com.tennisboss.app.ui.PlayerCompareViewModel
-import com.tennisboss.app.ui.PlayersScreen
-import com.tennisboss.app.ui.PredictScreen
+import com.tennisboss.app.ui.PredictGroupScreen
 import com.tennisboss.app.ui.PredictViewModel
+import com.tennisboss.app.ui.ValueGroupScreen
 import com.tennisboss.app.notifications.PickNotificationHelper
 import com.tennisboss.app.notifications.LiveProbPollWorker
 import com.tennisboss.app.notifications.ScannerPollWorker
-import com.tennisboss.app.ui.ScannerScreen
-import com.tennisboss.app.ui.UpcomingScreen
-import com.tennisboss.app.ui.ValueScreen
 import com.tennisboss.app.ui.theme.TennisBossTheme
 
 class MainActivity : ComponentActivity() {
@@ -146,13 +134,9 @@ fun AppRoot() {
                 val tabs = listOf(
                     NavTab(0, "Prédire", Icons.Filled.Insights, Icons.Outlined.Insights),
                     NavTab(1, "Matchs", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-                    NavTab(2, "Joueurs", Icons.Filled.Person, Icons.Outlined.Person),
-                    NavTab(3, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond),
-                    NavTab(4, "Perf", Icons.Filled.BarChart, Icons.Outlined.BarChart),
-                    NavTab(5, "Live", Icons.Filled.Sensors, Icons.Outlined.Sensors),
-                    NavTab(6, "Edge", Icons.Filled.AccountBalanceWallet, Icons.Outlined.AccountBalanceWallet),
-                    NavTab(7, "Scan", Icons.Filled.Radar, Icons.Outlined.Radar),
-                    NavTab(8, "Chat", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
+                    NavTab(2, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond),
+                    NavTab(3, "Perf", Icons.Filled.BarChart, Icons.Outlined.BarChart),
+                    NavTab(4, "Chat", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
                 )
                 tabs.forEach { t ->
                     val selected = tab == t.index
@@ -186,22 +170,10 @@ fun AppRoot() {
                 label = "tabs",
             ) { current ->
                 when (current) {
-                    0 -> PredictScreen(predictVM)
-                    1 -> UpcomingScreen()
-                    2 -> PlayersScreen(
-                        selectedP1 = predictVM.player1,
-                        selectedP2 = predictVM.player2,
-                        onPlayerClick = { name ->
-                            val pairComplete = predictVM.pick(name)
-                            if (pairComplete) tab = 0
-                        },
-                        vm = compareVM,
-                    )
-                    3 -> ValueScreen()
-                    4 -> PerformanceScreen()
-                    5 -> LiveScreen(liveVM)
-                    6 -> EdgeScreen()
-                    7 -> ScannerScreen()
+                    0 -> PredictGroupScreen(predictVM, compareVM)
+                    1 -> MatchesGroupScreen(liveVM)
+                    2 -> ValueGroupScreen()
+                    3 -> PerfGroupScreen()
                     else -> ChatScreen(chatVM)
                 }
             }
