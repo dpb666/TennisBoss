@@ -127,6 +127,20 @@ def _calib_k(mem: Dict[str, Any]) -> float:
         return 1.0
 
 
+def _surface_elo_line(mem: Dict[str, Any], names: List[str]) -> str:
+    """Ligne 'ELO par surface' pour 1-2 joueurs, depuis mem['elo_surface']
+    (déjà calculé/maintenu par predictor.elo_logit — juste pas encore
+    exposé au chat)."""
+    surf_map = mem.get("elo_surface") or {}
+    parts = []
+    for surface in ("hard", "clay", "grass"):
+        ratings = surf_map.get(surface) or {}
+        vals = [f"{n}={ratings[n]:.0f}" for n in names if n in ratings]
+        if vals:
+            parts.append(f"{surface}: " + " ".join(vals))
+    return " | ".join(parts)
+
+
 def build_match_context(message: str, mem: Dict[str, Any]) -> str:
     """Contexte prédiction/joueur CALIBRÉ pour le chat (sans appel réseau).
 
@@ -158,15 +172,19 @@ def build_match_context(message: str, mem: Dict[str, Any]) -> str:
             w2 = sum(1 for row in h2h if row["winner"] == n2)
             elo = mem.get("elo") or {}
             surf = r.get("surface") or "?"
-            return (
-                f"Match {n1} vs {n2}\n"
-                f"Surface : {surf}\n"
-                f"Proba match (calibrée) : {n1} {pm1*100:.0f}% | {n2} {(1-pm1)*100:.0f}%\n"
-                f"Favori : {r['favorite'] or 'très serré'}\n"
-                f"Confiance : {r.get('confidence_label','?')} ({r.get('confidence',0):.0%})\n"
-                f"H2H : {n1} {w1}-{w2} {n2} ({w1+w2} matchs)\n"
-                f"ELO : {n1}={elo.get(n1,1500):.0f} {n2}={elo.get(n2,1500):.0f}"
-            )
+            surf_elo = _surface_elo_line(mem, [n1, n2])
+            lines = [
+                f"Match {n1} vs {n2}",
+                f"Surface : {surf}",
+                f"Proba match (calibrée) : {n1} {pm1*100:.0f}% | {n2} {(1-pm1)*100:.0f}%",
+                f"Favori : {r['favorite'] or 'très serré'}",
+                f"Confiance : {r.get('confidence_label','?')} ({r.get('confidence',0):.0%})",
+                f"H2H : {n1} {w1}-{w2} {n2} ({w1+w2} matchs)",
+                f"ELO : {n1}={elo.get(n1,1500):.0f} {n2}={elo.get(n2,1500):.0f}",
+            ]
+            if surf_elo:
+                lines.append(f"ELO par surface : {surf_elo}")
+            return "\n".join(lines)
         n = names[0]
         prof = features.get_profile(mem, n)
         feat = features.feature_vector(prof)
@@ -174,12 +192,16 @@ def build_match_context(message: str, mem: Dict[str, Any]) -> str:
         elo = (mem.get("elo") or {}).get(n, 1500)
         total = rec["wins"] + rec["losses"]
         wr = rec["wins"] / total * 100 if total else 0.0
-        return (
-            f"Joueur {n}\n"
-            f"ELO : {elo:.0f} | Record : {rec['wins']}V-{rec['losses']}D ({wr:.0f}%)\n"
+        lines = [
+            f"Joueur {n}",
+            f"ELO : {elo:.0f} | Record : {rec['wins']}V-{rec['losses']}D ({wr:.0f}%)",
             f"Serve {feat['serve']:.2f} Retour {feat['return1']:.2f}/{feat['return2']:.2f} "
-            f"Forme {feat['recent']:.2f}"
-        )
+            f"Forme {feat['recent']:.2f}",
+        ]
+        surf_elo = _surface_elo_line(mem, [n])
+        if surf_elo:
+            lines.append(f"ELO par surface : {surf_elo}")
+        return "\n".join(lines)
     except Exception as exc:
         log(f"build_match_context: {exc}", "WARN")
         return ""
@@ -242,9 +264,16 @@ def chat(
     web_instr = " Use the web results above to answer — do not say you lack real-time data." if web_context else ""
     extra_instr = " Base your answer strictly on the TennisBoss data provided." if extra_context else ""
     extra_block = f"\n\nTennisBoss data:\n{extra_context}" if extra_context else ""
+    # Positionnement honnête (décision utilisateur) : jamais de promesse de gain,
+    # même si on demande explicitement "je vais gagner ?" / "combien parier ?".
+    honesty_instr = (
+        " You are a decision-support tool, not a betting system with a proven edge "
+        "— never promise a win or guarantee profit, even if asked directly; state "
+        "probabilities as estimates, not certainties."
+    )
     system = (
         f"TennisBoss AI. Global ELO: {context}{player_context}"
-        f"{extra_block}{web_context} {reply_instr}{web_instr}{extra_instr}"
+        f"{extra_block}{web_context} {reply_instr}{web_instr}{extra_instr}{honesty_instr}"
     )
 
     messages = [{"role": "system", "content": system}]

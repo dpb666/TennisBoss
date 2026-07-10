@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from bot.chat import _detect_players, _player_snapshot, build_context
+from bot.chat import _detect_players, _player_snapshot, build_context, _surface_elo_line
 
 
 def _fake_mem():
@@ -81,6 +81,39 @@ def test_chat_calls_lm_studio():
     body = mock_post.call_args[1]["json"]
     assert body["messages"][-1]["role"] == "user"
     assert "Qui est le meilleur" in body["messages"][-1]["content"]
+
+
+def test_surface_elo_line_two_players():
+    """L'ELO par surface (déjà calculé dans mem['elo_surface']) doit être
+    formaté pour les 2 joueurs, sur les surfaces où ils ont une valeur."""
+    line = _surface_elo_line(_fake_mem(), ["Jannik Sinner", "Carlos Alcaraz"])
+    assert "hard:" in line
+    assert "clay:" in line
+    assert "Jannik Sinner=2130" in line
+    assert "Carlos Alcaraz=2120" in line
+
+
+def test_surface_elo_line_missing_player():
+    """Un joueur sans ELO de surface connu ne casse pas le formatage."""
+    line = _surface_elo_line(_fake_mem(), ["Novak Djokovic"])
+    assert line == ""
+
+
+def test_chat_system_prompt_has_honesty_clause():
+    """Le system prompt doit toujours porter la clause anti-promesse-de-gain,
+    même sur une question du type 'je vais gagner ?' — positionnement
+    décision utilisateur : outil d'aide à la décision, pas prédicteur miracle."""
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.json.return_value = {
+        "choices": [{"message": {"content": "Réponse test."}}]
+    }
+    with patch("bot.chat.requests.post", return_value=fake_response) as mock_post:
+        from bot.chat import chat
+        chat("Je vais gagner mon pari sur Sinner ?", [], _fake_mem(), "http://fake:1234/v1/chat/completions")
+    system_msg = mock_post.call_args[1]["json"]["messages"][0]["content"]
+    assert "not a betting system with a proven edge" in system_msg
+    assert "never promise a win" in system_msg
 
 
 def test_chat_injects_player_context():
