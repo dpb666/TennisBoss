@@ -293,6 +293,9 @@ private fun InplayROIBanner(pr: InplayPicksResponse) {
             StatBlock("Picks", "${stats.total}")
             StatBlock("W/L", "${stats.wins}/${stats.losses}")
             StatBlock("P&L", "${if (stats.pnl >= 0) "+" else ""}${"%.1f".format(stats.pnl)}u")
+            if (stats.avg_odds > 0.0) {
+                StatBlock("Cote moy.", "%.2f".format(stats.avg_odds))
+            }
             if (stats.pending > 0) {
                 Box(
                     modifier = Modifier

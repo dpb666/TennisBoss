@@ -251,6 +251,13 @@ private fun RecentRow(r: ClvRecent) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
+                r.pnl_flat?.let { pnl ->
+                    Text(
+                        "${if (pnl >= 0) "+" else ""}${"%.1f".format(pnl)}u",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (pnl >= 0) GoodColor else BadColor,
+                    )
+                }
             }
         }
     }
