@@ -26,12 +26,18 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-
-        buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"$apiToken\"")
     }
 
     buildTypes {
+        // Debug uniquement : le vrai appareil (DEFAULT_BASE_URL) passe par le
+        // Worker Cloudflare qui injecte le token côté serveur, donc release ne
+        // doit JAMAIS embarquer le secret — même si TENNISBOSS_API_TOKEN traîne
+        // dans l'environnement local au moment du build.
+        debug {
+            buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"$apiToken\"")
+        }
         release {
+            buildConfigField("String", "TENNISBOSS_API_TOKEN", "\"\"")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
