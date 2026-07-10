@@ -42,6 +42,14 @@ data class FormMatch(
     val result: String = "",   // "W" ou "L"
 )
 
+/** Score ELO d'un joueur (signal le plus fort du modèle) + rang dans son tour. */
+data class PlayerElo(
+    val rating: Double = 0.0,
+    val rank: Int? = null,
+    val n_ranked: Int? = null,
+    val by_surface: Map<String, Double> = emptyMap(),
+)
+
 /** Fiche détaillée renvoyée par /api/player (force + bilan + forme). */
 data class PlayerDetail(
     val name: String,
@@ -57,6 +65,7 @@ data class PlayerDetail(
     val win_prob: Double = 0.0,
     val record: Record? = null,
     val form: List<FormMatch> = emptyList(),
+    val elo: PlayerElo? = null,
 )
 
 /** Message dans l'historique du chat. */

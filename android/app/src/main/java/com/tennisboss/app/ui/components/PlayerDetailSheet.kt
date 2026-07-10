@@ -136,6 +136,36 @@ private fun DetailContent(d: PlayerDetail) {
         }
     }
 
+    // ELO : signal le plus fort du modèle, avec rang parmi les joueurs du même tour.
+    d.elo?.let { elo ->
+        SectionTitle("ELO")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(elo.rating.toInt().toString(), style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold, color = BarColor)
+            if (elo.rank != null && elo.n_ranked != null) {
+                Text("#${elo.rank} sur ${elo.n_ranked} (${d.tour.uppercase()})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.outline)
+            }
+        }
+        if (elo.by_surface.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                elo.by_surface.forEach { (surf, rating) ->
+                    Text("$surf : ${rating.toInt()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        }
+    }
+
     // Forces du modèle.
     SectionTitle("Forces")
     StatBar("Service", d.serve)

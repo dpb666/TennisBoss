@@ -180,8 +180,8 @@ private fun CompareView(p1: PlayerDetail, p2: PlayerDetail?, h2h: H2H?) {
                         suffix = "%", higherIsBetter = true)
                     StatBar("Forme récente", p1.recent * 100, p2.recent * 100, P1Color, P2Color,
                         suffix = "%", higherIsBetter = true)
-                    StatBar("Rating ELO", p1.rating, p2.rating, P1Color, P2Color,
-                        digits = 1, higherIsBetter = true)
+                    StatBar("Rating ELO", p1.elo?.rating ?: 1500.0, p2.elo?.rating ?: 1500.0,
+                        P1Color, P2Color, digits = 0, higherIsBetter = true)
                     StatBar("Win % vs moy.", p1.win_prob_vs_avg * 100, p2.win_prob_vs_avg * 100,
                         P1Color, P2Color, suffix = "%", higherIsBetter = true)
                 }
@@ -325,7 +325,14 @@ private fun SingleProfile(p: PlayerDetail, color: Color) {
             StatRow("Retour 1re balle", p.return1 * 100, color, "%")
             StatRow("Retour 2e balle", p.return2 * 100, color, "%")
             StatRow("Forme récente", p.recent * 100, color, "%")
-            StatRow("Rating ELO", p.rating, color, "", digits = 1)
+            StatRow("Rating ELO", p.elo?.rating ?: 1500.0, color, "", digits = 0)
+            p.elo?.let { elo ->
+                if (elo.rank != null && elo.n_ranked != null) {
+                    Text("#${elo.rank} sur ${elo.n_ranked} (${p.tour.uppercase()})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline)
+                }
+            }
             StatRow("Win % vs moy.", p.win_prob_vs_avg * 100, color, "%")
             p.record?.let { rec ->
                 HorizontalDivider(thickness = 0.5.dp,

@@ -459,6 +459,23 @@ def api_player():
         payload["rating"] = round(float(prow["rating"]), 4)
         payload["win_prob"] = round(float(prow["win_prob"]), 4)
 
+    # ELO (signal le plus fort du modèle) + rang parmi les joueurs connus.
+    elo_ratings = _MEM.get("elo") or {}
+    if resolved in elo_ratings:
+        r_elo = elo_ratings[resolved]
+        same_tour = [v for n, v in elo_ratings.items()
+                     if (_MEM.get("players") or {}).get(n, {}).get("tour") == payload.get("tour")]
+        rank = sum(1 for v in same_tour if v > r_elo) + 1 if same_tour else None
+        payload["elo"] = {
+            "rating": round(r_elo, 1),
+            "rank": rank,
+            "n_ranked": len(same_tour) if same_tour else None,
+        }
+        surf_elo = _MEM.get("elo_surface") or {}
+        by_surface = {s: round(d[resolved], 1) for s, d in surf_elo.items() if resolved in d}
+        if by_surface:
+            payload["elo"]["by_surface"] = by_surface
+
     return jsonify(payload)
 
 
