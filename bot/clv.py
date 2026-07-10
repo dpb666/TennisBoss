@@ -41,12 +41,13 @@ CLOSING_WINDOW_MIN = 120
 
 
 def seed_pick(event_key: str, date: str, p1: str, p2: str, side: str,
-              pick_odds: float, pick_prob: float, confidence: float) -> None:
+              pick_odds: float, pick_prob: float, confidence: float,
+              honeypot: Optional[Dict[str, Any]] = None) -> None:
     """Logue un pick à l'instant de la décision (idempotent sur event_key)."""
     if not event_key or not pick_odds or pick_odds <= 1.0:
         return
     db.log_clv_pick(event_key, date, p1, p2, side, float(pick_odds),
-                    float(pick_prob), float(confidence))
+                    float(pick_prob), float(confidence), honeypot=honeypot)
 
 
 def refresh_closing(event_key: str, side: str,

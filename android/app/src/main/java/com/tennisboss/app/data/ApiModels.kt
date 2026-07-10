@@ -327,6 +327,7 @@ data class ValueComparison(
     val source: String = "",
     val surface: String? = null,
     val filter_reason: String? = null,
+    val honeypot: HoneypotSignal? = null,
 )
 
 data class ValueResponse(
@@ -629,6 +630,7 @@ data class ClvRecent(
     val beat_closing: Int? = null,
     val result: Int? = null,
     val pnl_flat: Double? = null,
+    val honeypot: HoneypotSignal? = null,
 )
 
 data class ClvResponse(

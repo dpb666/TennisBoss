@@ -652,7 +652,7 @@ private fun ProbBar(
 }
 
 @Composable
-private fun SignalChip(text: String, color: Color, bold: Boolean = false) {
+fun SignalChip(text: String, color: Color, bold: Boolean = false) {
     Surface(color = color.copy(alpha = 0.12f), shape = RoundedCornerShape(16.dp)) {
         Text(text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),

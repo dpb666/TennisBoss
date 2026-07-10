@@ -1485,6 +1485,19 @@ def api_value():
                     and not _intel_surf_danger
                     and not _high_conf_low_ev)
 
+        # Honeypot : conditions + surface + foule alignées (pas de fetch météo
+        # ici, juste surface/style — un appel HTTP par pick serait trop coûteux
+        # dans cette boucle). Affiché même hors value, comme sur /api/predict.
+        _honeypot = None
+        try:
+            from . import weather_profile as _wp
+            _wa = _wp.analyze(_MEM, n1, features.get_profile(_MEM, n1),
+                              n2, features.get_profile(_MEM, n2),
+                              None, _leag_name, _ev_surf or "hard")
+            _honeypot = _wa.get("honeypot")
+        except Exception:  # noqa: BLE001
+            pass
+
         # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
         if is_value:
             pick_odds = ho if best_side == n1 else ao
@@ -1507,7 +1520,8 @@ def api_value():
                 ekey = str(e.get("id") or "")
                 pick_prob = pb1 if best_side == n1 else pb2
                 clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
-                              pick_odds, pick_prob, r["confidence"])
+                              pick_odds, pick_prob, r["confidence"],
+                              honeypot=_honeypot)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1535,6 +1549,7 @@ def api_value():
             "confidence_label": r["confidence_label"],
             "kelly_u": _kelly_u,
             "terrain_favorable": _terrain_ok,
+            "honeypot": _honeypot,
             "model_first_set_prob1": r["prob1"],
             "model_match_prob1": round(pm1 * 100, 1),
             "model_match_prob2": round(pm2 * 100, 1),
@@ -1888,6 +1903,10 @@ def api_clv():
         "closing_odds": r["closing_odds"], "closing_src": r["closing_src"],
         "clv_pct": r["clv_pct"], "beat_closing": r["beat_closing"],
         "result": r["result"], "pnl_flat": r["pnl_flat"],
+        "honeypot": ({
+            "flag": True, "beneficiary": r["honeypot_beneficiary"],
+            "player": r["honeypot_player"], "edge_pct": r["honeypot_edge_pct"],
+        } if r["honeypot_flag"] else None),
     } for r in db.list_clv(limit=30)]
     return jsonify({**stats, "recent": recent})
 
@@ -2418,13 +2437,24 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 # Log en DB (idempotent : log_value_pick garde le premier pick)
                 _b = pick_odds - 1.0
                 _kelly = round(max(0.0, (pb_pick * _b - (1.0 - pb_pick)) / _b * 0.25 * 100), 1) if _b > 0 else 0.0
+                _sc_honeypot = None
+                try:
+                    from . import weather_profile as _wp_sc
+                    _sc_honeypot = _wp_sc.analyze(
+                        _MEM, n1, features.get_profile(_MEM, n1),
+                        n2, features.get_profile(_MEM, n2),
+                        None, _lg_name, _surf or "hard",
+                    ).get("honeypot")
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     db.log_value_pick(e.get("date", ""), n1, n2, best_side,
                                       pick_odds, best_ev_pct, league=_lg_name,
                                       surface=_surf, kelly_u=_kelly)
                     ekey = str(eid)
                     clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
-                                  pick_odds, pb_pick, r["confidence"])
+                                  pick_odds, pb_pick, r["confidence"],
+                                  honeypot=_sc_honeypot)
                 except Exception:
                     pass
 

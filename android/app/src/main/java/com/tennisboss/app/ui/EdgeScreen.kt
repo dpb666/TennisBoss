@@ -235,6 +235,13 @@ private fun RecentRow(r: ClvRecent) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                r.honeypot?.let { hp ->
+                    if (hp.flag) {
+                        val b = hp.player.substringAfterLast(" ")
+                        SignalChip("⚠️ HONEYPOT $b +${String.format("%.1f", hp.edge_pct)}%",
+                            Color(0xFFFFD600), bold = true)
+                    }
+                }
             }
             Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
                 Text(signedPct(r.clv_pct), fontWeight = FontWeight.Bold,

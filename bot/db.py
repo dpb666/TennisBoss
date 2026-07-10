@@ -134,7 +134,11 @@ CREATE TABLE IF NOT EXISTS clv_log (
     beat_closing   INTEGER,            -- 1 si pick_odds > closing_odds
     pnl_flat       REAL,               -- mise 1u
     pnl_kelly      REAL,               -- fraction de bankroll (Kelly 0.25)
-    settled_ts     TEXT
+    settled_ts     TEXT,
+    honeypot_flag        INTEGER,      -- 1 si conditions+surface+foule alignées (weather_profile)
+    honeypot_beneficiary TEXT,         -- 'p1' ou 'p2'
+    honeypot_player      TEXT,
+    honeypot_edge_pct    REAL
 );
 CREATE TABLE IF NOT EXISTS inplay_picks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -228,6 +232,10 @@ def init() -> None:
             ("league",  "ALTER TABLE value_picks ADD COLUMN league TEXT"),
             ("surface", "ALTER TABLE value_picks ADD COLUMN surface TEXT"),
             ("kelly_u", "ALTER TABLE value_picks ADD COLUMN kelly_u REAL"),
+            ("honeypot_flag", "ALTER TABLE clv_log ADD COLUMN honeypot_flag INTEGER"),
+            ("honeypot_beneficiary", "ALTER TABLE clv_log ADD COLUMN honeypot_beneficiary TEXT"),
+            ("honeypot_player", "ALTER TABLE clv_log ADD COLUMN honeypot_player TEXT"),
+            ("honeypot_edge_pct", "ALTER TABLE clv_log ADD COLUMN honeypot_edge_pct REAL"),
         ):
             try:
                 conn.execute(ddl)
@@ -788,20 +796,28 @@ def value_picks_stats() -> dict:
 
 # --- CLV : closing line value (preuve d'edge) ------------------------------
 def log_clv_pick(event_key: str, date: str, p1: str, p2: str, side: str,
-                 pick_odds: float, pick_prob: float, confidence: float) -> None:
+                 pick_odds: float, pick_prob: float, confidence: float,
+                 honeypot: Optional[Dict[str, Any]] = None) -> None:
     """Sème un pick dans le journal CLV (closing_odds rempli plus tard).
 
     INSERT OR IGNORE : on garde la PREMIÈRE cote vue (la décision d'entrée),
     on ne l'écrase pas si le pick réapparaît avec une cote qui a bougé.
+    `honeypot` : signal weather_profile.analyze() au moment du pick (fige la
+    condition constatée ce jour-là — ne pas le recalculer après coup, l'état
+    des profils joueurs change avec le temps).
     """
     import datetime as _dt
+    hp = honeypot or {}
     with connect() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO clv_log "
             "(event_key,date,player1,player2,pick_side,pick_odds,pick_prob,"
-            " confidence,pick_ts) VALUES (?,?,?,?,?,?,?,?,?)",
+            " confidence,pick_ts,honeypot_flag,honeypot_beneficiary,"
+            " honeypot_player,honeypot_edge_pct) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (event_key, date, p1, p2, side, pick_odds, pick_prob, confidence,
-             _dt.datetime.now().isoformat(timespec="seconds")),
+             _dt.datetime.now().isoformat(timespec="seconds"),
+             1 if hp.get("flag") else 0, hp.get("beneficiary"),
+             hp.get("player"), hp.get("edge_pct")),
         )
 
 

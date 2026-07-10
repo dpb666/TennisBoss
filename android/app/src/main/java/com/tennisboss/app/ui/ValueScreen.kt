@@ -371,6 +371,18 @@ private fun ValueCard(c: ValueComparison) {
                     highlight = c.best_side == c.player2)
             }
 
+            c.honeypot?.let { hp ->
+                if (hp.flag) {
+                    val b = when (hp.beneficiary) {
+                        "p1" -> c.player1
+                        "p2" -> c.player2
+                        else -> hp.player
+                    }.substringAfterLast(" ")
+                    SignalChip("⚠️ HONEYPOT $b +${String.format("%.1f", hp.edge_pct)}%",
+                        Color(0xFFFFD600), bold = true)
+                }
+            }
+
             if (c.value && c.best_side != null) {
                 val odd = if (c.best_side == c.player1) c.odds.home else c.odds.away
                 val book = c.best_book?.takeIf { it.isNotBlank() }
