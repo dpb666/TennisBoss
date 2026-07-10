@@ -27,6 +27,7 @@ sealed interface LiveUiState {
         val markets: InplayMarketsResponse? = null,
         val picksResp: InplayPicksResponse? = null,
         val refreshIn: Int = 30,
+        val swungEventIds: Set<Long> = emptySet(),
     ) : LiveUiState
     data class Error(val message: String) : LiveUiState
 }
@@ -91,7 +92,22 @@ class LiveViewModel : ViewModel() {
             val marketsResp = marketsDeferred.await()
             val picksResp = picksDeferred.await()
             val bestPick = bestResp?.best?.firstOrNull()
-            state = LiveUiState.Success(liveResp, bestPick, marketsResp, picksResp, refreshIn = 30)
+
+            // Bascule de favori détectée sur le refresh in-app (30s, plus fin
+            // que le worker en tâche de fond limité à 15min par WorkManager).
+            val prevFavorites = (state as? LiveUiState.Success)?.data?.matches
+                ?.associate { it.event_id to it.prediction?.favorite }
+                ?: emptyMap()
+            val swung = liveResp.matches
+                .filter { m ->
+                    val prevFav = prevFavorites[m.event_id]
+                    val newFav = m.prediction?.favorite
+                    prevFav != null && newFav != null && prevFav != newFav
+                }
+                .map { it.event_id }
+                .toSet()
+
+            state = LiveUiState.Success(liveResp, bestPick, marketsResp, picksResp, refreshIn = 30, swungEventIds = swung)
         } catch (e: Exception) {
             if (state !is LiveUiState.Success) {
                 state = LiveUiState.Error(e.message ?: "Erreur réseau")

@@ -50,6 +50,7 @@ import com.tennisboss.app.ui.PlayersScreen
 import com.tennisboss.app.ui.PredictScreen
 import com.tennisboss.app.ui.PredictViewModel
 import com.tennisboss.app.notifications.PickNotificationHelper
+import com.tennisboss.app.notifications.LiveProbPollWorker
 import com.tennisboss.app.notifications.ScannerPollWorker
 import com.tennisboss.app.ui.ScannerScreen
 import com.tennisboss.app.ui.UpcomingScreen
@@ -83,6 +84,13 @@ class MainActivity : ComponentActivity() {
                 ScannerPollWorker.WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,
                 pollRequest,
+            )
+            val liveProbRequest = PeriodicWorkRequestBuilder<LiveProbPollWorker>(15, TimeUnit.MINUTES)
+                .build()
+            WorkManager.getInstance(this@MainActivity).enqueueUniquePeriodicWork(
+                LiveProbPollWorker.WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                liveProbRequest,
             )
         }
 

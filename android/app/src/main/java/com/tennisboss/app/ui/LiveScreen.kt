@@ -217,7 +217,7 @@ fun LiveScreen(vm: LiveViewModel = viewModel()) {
                                 }
                             }
                             items(s.data.matches, key = { it.event_id }) { match ->
-                                LiveMatchCard(match, s.markets, onTakePick = { match2, mkt ->
+                                LiveMatchCard(match, s.markets, swung = match.event_id in s.swungEventIds, onTakePick = { match2, mkt ->
                                     vm.openPickDialog(
                                         player1 = match2.player1, player2 = match2.player2,
                                         league = match2.league, marketType = mkt.type,
@@ -631,11 +631,18 @@ private fun PickConfirmDialog(
 private fun LiveMatchCard(
     m: LiveMatch,
     allMarkets: InplayMarketsResponse? = null,
+    swung: Boolean = false,
     onTakePick: (InplayMatchMarkets, InplayMarket) -> Unit,
 ) {
     val matchMarkets = allMarkets?.matches?.find { it.event_id == m.event_id }
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = if (swung) {
+            Modifier
+                .fillMaxWidth()
+                .border(2.dp, GreenEV, RoundedCornerShape(12.dp))
+        } else {
+            Modifier.fillMaxWidth()
+        },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
@@ -656,6 +663,11 @@ private fun LiveMatchCard(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
                 )
+                if (swung) {
+                    Text("🔄 Bascule", style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold, color = GreenEV,
+                        modifier = Modifier.padding(end = 6.dp))
+                }
                 if (m.status_detail.isNotBlank()) {
                     StatusChip(m.status_detail, m.minute)
                 }
