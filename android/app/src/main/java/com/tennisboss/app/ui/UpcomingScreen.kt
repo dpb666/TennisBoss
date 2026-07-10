@@ -756,6 +756,14 @@ fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
             HorizontalDivider(thickness = 0.5.dp,
                 color = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.padding(vertical = 2.dp))
+            // Résumé chiffré (net_edge déjà formaté côté backend) — jamais affiché
+            // jusqu'ici, seuls les facteurs bruts ci-dessous l'étaient.
+            if (wi.beneficiary != "neutre" && wi.label.isNotBlank()) {
+                Text("🌡 ${wi.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF80CBC4))
+            }
             wi.factors.forEach { f ->
                 val side = when (f.side) { "p1" -> p1Short; "p2" -> p2Short; else -> "" }
                 val fColor = when (wi.impact_level) {
