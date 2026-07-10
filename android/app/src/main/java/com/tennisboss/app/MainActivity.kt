@@ -18,12 +18,33 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Diamond
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Diamond
+import androidx.compose.material.icons.outlined.Insights
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Radar
+import androidx.compose.material.icons.outlined.Sensors
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -121,23 +142,30 @@ fun AppRoot() {
     Scaffold(
         bottomBar = {
             NavigationBar {
+                data class NavTab(val index: Int, val label: String, val filled: ImageVector, val outlined: ImageVector)
                 val tabs = listOf(
-                    Triple(0, "🎯", "Prédire"),
-                    Triple(1, "📅", "Matchs"),
-                    Triple(2, "👤", "Joueurs"),
-                    Triple(3, "💎", "Value"),
-                    Triple(4, "📊", "Perf"),
-                    Triple(5, "🔴", "Live"),
-                    Triple(6, "💰", "Edge"),
-                    Triple(7, "🔍", "Scan"),
-                    Triple(8, "🤖", "Chat"),
+                    NavTab(0, "Prédire", Icons.Filled.Insights, Icons.Outlined.Insights),
+                    NavTab(1, "Matchs", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
+                    NavTab(2, "Joueurs", Icons.Filled.Person, Icons.Outlined.Person),
+                    NavTab(3, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond),
+                    NavTab(4, "Perf", Icons.Filled.BarChart, Icons.Outlined.BarChart),
+                    NavTab(5, "Live", Icons.Filled.Sensors, Icons.Outlined.Sensors),
+                    NavTab(6, "Edge", Icons.Filled.AccountBalanceWallet, Icons.Outlined.AccountBalanceWallet),
+                    NavTab(7, "Scan", Icons.Filled.Radar, Icons.Outlined.Radar),
+                    NavTab(8, "Chat", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
                 )
-                tabs.forEach { (idx, icon, label) ->
+                tabs.forEach { t ->
+                    val selected = tab == t.index
                     NavigationBarItem(
-                        selected = tab == idx,
-                        onClick = { tab = idx },
-                        icon = { Text(icon, fontSize = 16.sp) },
-                        label = { Text(label, fontSize = 9.sp, maxLines = 1) },
+                        selected = selected,
+                        onClick = { tab = t.index },
+                        icon = {
+                            Icon(
+                                imageVector = if (selected) t.filled else t.outlined,
+                                contentDescription = t.label,
+                            )
+                        },
+                        label = { Text(t.label, fontSize = 9.sp, maxLines = 1) },
                     )
                 }
             }
