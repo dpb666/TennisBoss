@@ -706,13 +706,15 @@ fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
             val icon1 = if (s1.contains("Serveur")) "🎯" else if (s1.contains("Baseliner")) "🔄" else "⚡"
             val icon2 = if (s2.contains("Serveur")) "🎯" else if (s2.contains("Baseliner")) "🔄" else "⚡"
 
-            // En-tête styles
+            // En-tête styles (n_matches = échantillon derrière le style — jamais
+            // montré jusqu'ici, alors que la fiche joueur affiche déjà ce genre
+            // de transparence ailleurs, ex. "matchs vus : N").
             Row(modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("$icon1 $p1Short · $s1",
+                Text("$icon1 $p1Short · $s1 (n=${pr1.n_matches})",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("$p2Short · $s2 $icon2",
+                Text("$p2Short · $s2 $icon2 (n=${pr2.n_matches})",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
