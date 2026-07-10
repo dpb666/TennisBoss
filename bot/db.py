@@ -140,6 +140,15 @@ CREATE TABLE IF NOT EXISTS clv_log (
     honeypot_player      TEXT,
     honeypot_edge_pct    REAL
 );
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key  TEXT,            -- id événement odds-api (regroupe les snapshots d'un même match)
+    ts         TEXT,            -- horodatage ISO de la capture
+    player1    TEXT, player2 TEXT,
+    odds_home  REAL, odds_away REAL,   -- cote de référence (sharp book / consensus, cf. fetch_match_winner)
+    hours_ahead REAL            -- heures avant le coup d'envoi au moment de la capture
+);
+CREATE INDEX IF NOT EXISTS idx_snap_event ON market_snapshots(event_key, ts);
 CREATE TABLE IF NOT EXISTS inplay_picks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
@@ -884,6 +893,54 @@ def list_clv(limit: int = 100000, since: str = "") -> List[sqlite3.Row]:
         return conn.execute(
             "SELECT * FROM clv_log ORDER BY date DESC, pick_ts DESC LIMIT ?",
             (limit,)).fetchall()
+
+
+# --- Market snapshots (mouvement de ligne / sharp money) --------------------
+def record_market_snapshot(event_key: str, p1: str, p2: str,
+                           odds_home: float, odds_away: float,
+                           hours_ahead: Optional[float] = None) -> None:
+    """Capture une cote datée pour reconstruire le mouvement de ligne d'un match.
+
+    Pas de dédup : le scanner n'appelle ceci que quand il refetch réellement
+    les cotes (déjà throttlé ~10min/match par _value_scanner_loop), donc la
+    fréquence des lignes reflète directement la fréquence de refresh voulue.
+    """
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO market_snapshots "
+            "(event_key,ts,player1,player2,odds_home,odds_away,hours_ahead) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (event_key, _dt.datetime.now().isoformat(timespec="seconds"),
+             p1, p2, odds_home, odds_away, hours_ahead),
+        )
+
+
+def line_movement(event_key: str) -> Optional[Dict[str, Any]]:
+    """Mouvement de ligne (ouverture -> dernière cote captée) pour un match.
+
+    Renvoie None si < 2 snapshots (pas encore de mouvement mesurable).
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT ts,odds_home,odds_away,hours_ahead FROM market_snapshots "
+            "WHERE event_key=? ORDER BY ts ASC", (event_key,)).fetchall()
+    if len(rows) < 2:
+        return None
+    opening, closing = rows[0], rows[-1]
+
+    def _pct(a: float, b: float) -> float:
+        return round((b - a) / a * 100, 2) if a else 0.0
+
+    return {
+        "event_key": event_key,
+        "n_snapshots": len(rows),
+        "opening_ts": opening["ts"], "closing_ts": closing["ts"],
+        "opening_odds_home": opening["odds_home"], "closing_odds_home": closing["odds_home"],
+        "opening_odds_away": opening["odds_away"], "closing_odds_away": closing["odds_away"],
+        "move_home_pct": _pct(opening["odds_home"], closing["odds_home"]),
+        "move_away_pct": _pct(opening["odds_away"], closing["odds_away"]),
+    }
 
 
 # --- Historique des prédictions --------------------------------------------

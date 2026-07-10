@@ -1911,6 +1911,24 @@ def api_clv():
     return jsonify({**stats, "recent": recent})
 
 
+@app.get("/api/line-movement")
+def api_line_movement():
+    """Diagnostic : mouvement de ligne capté par le scanner pour un match.
+
+    `event_id` = id odds-api du match (visible dans /api/value). Sans
+    paramètre, renvoie le nombre total de snapshots captés à ce jour.
+    """
+    eid = request.args.get("event_id", "")
+    if eid:
+        mv = db.line_movement(eid)
+        return jsonify(mv or {"error": "moins de 2 snapshots pour ce match"})
+    with db.connect() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0]
+        distinct = conn.execute("SELECT COUNT(DISTINCT event_key) FROM market_snapshots").fetchone()[0]
+    return jsonify({"total_snapshots": total, "matchs_distincts": distinct,
+                    "note": "passer ?event_id=XXX pour le détail d'un match"})
+
+
 @app.get("/api/intelligence/stats")
 def api_intelligence_stats():
     """Auto-diagnostic: drift, surfaces en danger, blacklist joueurs."""
@@ -2352,6 +2370,15 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 n2 = _resolve(e.get("away", "")) or e.get("away", "").strip()
                 if not n1 or not n2:
                     continue
+
+                # Sharp money / mouvement de ligne : capture la cote à chaque
+                # refresh réel (déjà throttlé ~10min/match ci-dessus) pour
+                # reconstruire l'historique de ligne, indépendamment de is_value.
+                try:
+                    db.record_market_snapshot(eid, n1, n2, mw["home_odds"], mw["away_odds"],
+                                              hours_ahead=round(hours_ahead, 2) if hours_ahead is not None else None)
+                except Exception:  # noqa: BLE001
+                    pass
 
                 # Guard cross-genre
                 t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
