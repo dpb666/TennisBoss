@@ -166,10 +166,25 @@ Voir section 2 — Tout public attendu.
 `https://tennisboss.online`), politique de confidentialité
 (`https://api.tennisboss.online/privacy`, déjà en ligne).
 
-### Éléments graphiques à préparer (pas encore faits)
+### Éléments graphiques à préparer
 - Icône déjà prête (icône adaptative néon, cf. mémoire projet)
-- **Screenshots** (2 min, 8 max, par type d'appareil) — je peux les générer
-  depuis l'émulateur maintenant si vous voulez
+- **Screenshots** ✅ générés depuis l'émulateur, dans `store_assets/screenshots/`
+  (7 images, 1080x2400, PNG 24-bit sans alpha — conforme aux specs Play) :
+  1. `01_predict.png` — Prédiction + explicabilité (Djokovic vs Alcaraz)
+  2. `02_predict_h2h_betbuilder.png` — Face-à-face + Bet Builder IA
+  3. `03_value.png` — Value bets avec EV, honeypot, cotes marché vs modèle
+  4. `04_live.png` — Live : ROI inplay, meilleur pick, picks récents réglés
+  5. `05_edge_clv.png` — Edge/CLV : verdict honnête (montre le CLV négatif actuel,
+     à évaluer si on la garde en 1ère position ou en dernière — voir note ci-dessous)
+  6. `06_players_compare.png` — Comparaison joueurs (Djokovic vs Alcaraz, H2H complet)
+  7. `07_chat.png` — Chat IA avec badge "Basé sur nos données (ELO, forme, H2H)"
+
+  ⚠️ Point d'attention sur `05_edge_clv.png` : elle montre le CLV actuellement négatif
+  (-3.9%, -9.8% ROI) en rouge. C'est cohérent avec le positionnement honnête, mais
+  un visiteur qui *scanne* les screenshots sans lire peut mal l'interpréter. Gardée
+  dans le set par défaut (elle prouve la transparence annoncée dans la description) —
+  à vous de décider si vous la mettez en position 5-7 (après avoir capté l'intérêt)
+  plutôt qu'en position 1-2.
 - **Feature graphic** (1024x500) — bannière promotionnelle, pas encore créée
 - Pas de vidéo promo nécessaire (optionnelle)
 
@@ -183,7 +198,7 @@ Voir section 2 — Tout public attendu.
 | Data safety (contenu du formulaire) | ✅ Brouillon prêt ci-dessus |
 | Classification contenu (réponses) | ✅ Brouillon prêt ci-dessus |
 | Texte fiche store | ✅ Rédigé ci-dessus |
-| Screenshots | ⏳ Puis-je les générer maintenant ? |
+| Screenshots | ✅ 7 générées (`store_assets/screenshots/`) |
 | Feature graphic (bannière 1024x500) | ⏳ À créer |
 | Keystore de signature | ⏳ À votre charge (Android Studio) |
 | Compte développeur Google Play (25$ unique) | ⏳ À votre charge |
