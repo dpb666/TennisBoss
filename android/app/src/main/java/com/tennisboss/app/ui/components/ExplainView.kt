@@ -70,9 +70,17 @@ fun ExplainView(
             }
         }
 
+        // Impact relatif de chaque facteur = |contribution| / somme des |contribution|.
+        // `contribution` (poids appris × écart des joueurs) est calculé côté modèle
+        // mais n'était affiché nulle part — seuls les écarts bruts (value1/value2)
+        // l'étaient, sans dire lequel pesait vraiment sur la décision.
+        val totalAbsContribution = explain.factors.sumOf { kotlin.math.abs(it.contribution) }
+            .takeIf { it > 0.0 } ?: 1.0
+
         // Une ligne par facteur du modèle.
         explain.factors.forEach { f ->
-            FactorRow(f, isDecisive = f.key == explain.decisive)
+            FactorRow(f, isDecisive = f.key == explain.decisive,
+                impactPct = kotlin.math.abs(f.contribution) / totalAbsContribution * 100)
         }
 
         Spacer(Modifier.height(2.dp))
@@ -100,7 +108,7 @@ private fun LegendDot(name: String, color: Color) {
 }
 
 @Composable
-private fun FactorRow(f: ExplainFactor, isDecisive: Boolean) {
+private fun FactorRow(f: ExplainFactor, isDecisive: Boolean, impactPct: Double) {
     val v1 = f.value1.toFloat().coerceIn(0f, 1f)
     val v2 = f.value2.toFloat().coerceIn(0f, 1f)
     val anim1 by animateFloatAsState(v1, tween(600), label = "v1")
@@ -126,8 +134,16 @@ private fun FactorRow(f: ExplainFactor, isDecisive: Boolean) {
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isDecisive) FontWeight.Bold else FontWeight.Medium,
             )
-            if (isDecisive) {
-                Text("★ décisif", style = MaterialTheme.typography.labelSmall, color = P1Color)
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "impact ${String.format("%.0f", impactPct)}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                if (isDecisive) {
+                    Text("★ décisif", style = MaterialTheme.typography.labelSmall, color = P1Color)
+                }
             }
         }
 
