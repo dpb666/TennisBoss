@@ -287,6 +287,7 @@ data class UpcomingMatch(
     val live: Boolean,
     val tour: String,
     val predictable: Boolean,
+    val prediction_skip: String? = null,
     val prediction: Prediction? = null,
     val odds: Odds? = null,
     val result: MatchResult? = null,

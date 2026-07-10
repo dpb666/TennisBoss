@@ -385,7 +385,15 @@ private fun MatchCard(m: UpcomingMatch) {
                     )
                 }
             } else {
-                Text("Joueur non analysé — données insuffisantes.",
+                // "cross-gender" = garde-fou interne (résolution de nom qui a
+                // apparié un joueur ATP à une joueuse WTA, ELO non comparables) —
+                // à distinguer d'un simple manque de données sur un joueur obscur,
+                // sinon le message trompe sur la vraie cause.
+                val msg = if (m.prediction_skip == "cross-gender")
+                    "Analyse ignorée — appariement joueurs incohérent (ATP/WTA)."
+                else
+                    "Joueur non analysé — données insuffisantes."
+                Text(msg,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline)
             }
