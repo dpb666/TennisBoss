@@ -192,10 +192,13 @@ def stats() -> Dict[str, Any]:
         return [r for r in pool if r["confidence"] is not None
                 and lo <= r["confidence"] < hi]
 
+    # Post-filtre uniquement (comme "scanner") : les anciens picks (avant le
+    # durcissement du 2026-07-03) faussent la comparaison par confiance —
+    # voir [[tennisboss-clv-edge]].
     by_conf = {
-        "high":   _agg(tier(rows, 0.75, 1.01)),
-        "medium": _agg(tier(rows, 0.60, 0.75)),
-        "low":    _agg(tier(rows, 0.0, 0.60)),
+        "high":   _agg(tier(scanner_rows, 0.75, 1.01)),
+        "medium": _agg(tier(scanner_rows, 0.60, 0.75)),
+        "low":    _agg(tier(scanner_rows, 0.0, 0.60)),
     }
 
     # Verdict basé sur le scanner (post-filtre) si assez de data, sinon global
