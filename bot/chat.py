@@ -127,6 +127,17 @@ def _calib_k(mem: Dict[str, Any]) -> float:
         return 1.0
 
 
+def _platt_ab(mem: Dict[str, Any]) -> tuple:
+    """(a, b) Platt appris (mémoire d'abord, sinon DB). (1.0, 0.0) = non fitté."""
+    try:
+        from . import db
+        a = float(mem.get("platt_a") if mem.get("platt_a") is not None else (db.get_meta("platt_a") or 1.0))
+        b = float(mem.get("platt_b") if mem.get("platt_b") is not None else (db.get_meta("platt_b") or 0.0))
+        return a, b
+    except Exception:
+        return 1.0, 0.0
+
+
 def _surface_elo_line(mem: Dict[str, Any], names: List[str]) -> str:
     """Ligne 'ELO par surface' pour 1-2 joueurs, depuis mem['elo_surface']
     (déjà calculé/maintenu par predictor.elo_logit — juste pas encore
@@ -160,13 +171,14 @@ def build_match_context(message: str, mem: Dict[str, Any]) -> str:
         return ""
 
     k = _calib_k(mem)
+    platt_ab = _platt_ab(mem)
     try:
         if len(names) >= 2:
             n1, n2 = names[0], names[1]
             f1 = features.feature_vector(features.get_profile(mem, n1))
             f2 = features.feature_vector(features.get_profile(mem, n2))
             r = predictor.predict(mem, n1, f1, n2, f2)
-            pm1 = _calibrated(predictor.set_to_match_prob(r["prob1"] / 100.0), k)
+            pm1 = _calibrated(predictor.set_to_match_prob(r["prob1"] / 100.0), k, platt_ab)
             h2h = db.head_to_head(n1, n2)
             w1 = sum(1 for row in h2h if row["winner"] == n1)
             w2 = sum(1 for row in h2h if row["winner"] == n2)
@@ -207,8 +219,16 @@ def build_match_context(message: str, mem: Dict[str, Any]) -> str:
         return ""
 
 
-def _calibrated(p: float, k: float) -> float:
+def _calibrated(p: float, k: float, platt_ab: tuple = (1.0, 0.0)) -> float:
+    """Platt scaling en priorité (le reste de l'app — /api/value, /api/live —
+    l'utilise dès qu'il est fitté), sinon repli sur la température k. Avant ce
+    fix, le chat n'utilisait QUE k et ignorait Platt même quand celui-ci est
+    actif partout ailleurs : réponses du chat moins bien calibrées que le
+    reste de l'app pour la même prédiction."""
     from . import calibrate
+    a, b = platt_ab
+    if a != 1.0 or b != 0.0:
+        return calibrate.calibrated_prob_platt(p, a, b)
     return calibrate.calibrated_prob(p, k)
 
 

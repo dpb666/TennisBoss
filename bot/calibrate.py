@@ -15,10 +15,40 @@ on ne change pas QUI est favori, seulement le niveau de confiance.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import math
 from typing import Any, Dict, List, Tuple
 
 _EPS = 1e-6
+
+# Demi-vie par défaut du poids de récence — même convention que l'ELO "forme
+# récente" déjà auto-appris ailleurs (mem['elo_recent'], fenêtre 180j).
+DEFAULT_HALF_LIFE_DAYS = 180.0
+
+
+def _recency_weight(date_str: Any, half_life_days: float) -> float:
+    """Poids exponentiel décroissant : 1.0 pour un match d'aujourd'hui, 0.5 après
+    `half_life_days`. Le modèle évolue en continu (ELO auto-appris, features EMA)
+    donc un match réglé il y a plusieurs mois reflète un modèle plus ancien —
+    sans ce poids, il pèse autant qu'un match d'hier dans le calib_k appris.
+    Renvoie 1.0 (pas de pondération) si la date est manquante/illisible.
+    """
+    if not date_str or half_life_days <= 0:
+        return 1.0
+    try:
+        d = _dt.date.fromisoformat(str(date_str)[:10])
+    except (ValueError, TypeError):
+        return 1.0
+    days_ago = max(0, (_dt.date.today() - d).days)
+    return 0.5 ** (days_ago / half_life_days)
+
+
+def _row_date(r: Any) -> Any:
+    """Date d'une ligne settled_matches, tolérant les lignes de test sans colonne 'date'."""
+    try:
+        return r["date"] if "date" in r.keys() else None
+    except (KeyError, AttributeError, TypeError):
+        return None
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -116,12 +146,14 @@ def tune_blend(samples: List[Tuple[float, float, float]],
             "logloss_no_elo": round(ll(0.0), 4), "logloss_best": round(ll(best), 4)}
 
 
-def _logloss(data: List[Tuple[float, float]], k: float) -> float:
+def _logloss(data: List[Tuple[float, float, float]], k: float) -> float:
     tot = 0.0
-    for z, y in data:
+    total_w = 0.0
+    for z, y, w in data:
         p = _clamp(_sigmoid(k * z), _EPS, 1 - _EPS)
-        tot += -(y * math.log(p) + (1 - y) * math.log(1 - p))
-    return tot / len(data)
+        tot += w * -(y * math.log(p) + (1 - y) * math.log(1 - p))
+        total_w += w
+    return tot / (total_w or 1.0)
 
 
 def calibrated_prob_platt(p: float, a: float, b: float) -> float:
@@ -133,24 +165,32 @@ def calibrated_prob_platt(p: float, a: float, b: float) -> float:
 
 
 def fit_platt(rows: List[Any], iters: int = 1000, lr: float = 0.05,
-              min_n: int = 30) -> Dict[str, Any]:
-    """Ajuste (a, b) par descente de gradient (log-loss) sur les matchs réglés.
+              min_n: int = 30, half_life_days: float = DEFAULT_HALF_LIFE_DAYS) -> Dict[str, Any]:
+    """Ajuste (a, b) par descente de gradient (log-loss PONDÉRÉE par récence)
+    sur les matchs réglés.
 
     p_calibré = sigmoid(a · logit(pred_prob1) + b)
-    pred_prob1 est en %, issue = 1 si winner == player1.
+    pred_prob1 est en %, issue = 1 si winner == player1. Chaque match pèse
+    `_recency_weight(date, half_life_days)` — un match d'il y a plusieurs mois
+    compte moins qu'un match récent, car le modèle sous-jacent a changé entre
+    temps (ELO auto-appris, features EMA). half_life_days=0 désactive la
+    pondération (poids uniforme, comportement d'origine).
     """
-    data: List[Tuple[float, float]] = []
+    data: List[Tuple[float, float, float]] = []  # (z, y, weight)
     for r in rows:
         pp = r["pred_prob1"]
         if pp is None:
             continue
         z = _logit(pp / 100.0)
         y = 1.0 if r["winner"] == r["player1"] else 0.0
-        data.append((z, y))
+        w = _recency_weight(_row_date(r), half_life_days)
+        data.append((z, y, w))
 
     if len(data) < min_n:
         return {"a": 1.0, "b": 0.0, "n": len(data), "fitted": False,
                 "note": f"Pas assez de données (min {min_n})."}
+
+    total_w = sum(w for _, _, w in data) or float(len(data))
 
     # Adam optimizer pour convergence stable
     a, b = 1.0, 0.0
@@ -159,21 +199,21 @@ def fit_platt(rows: List[Any], iters: int = 1000, lr: float = 0.05,
 
     def logloss(a_: float, b_: float) -> float:
         tot = sum(
-            -(y * math.log(_clamp(_sigmoid(a_ * z + b_), _EPS, 1 - _EPS))
-              + (1 - y) * math.log(_clamp(1 - _sigmoid(a_ * z + b_), _EPS, 1 - _EPS)))
-            for z, y in data
+            w * -(y * math.log(_clamp(_sigmoid(a_ * z + b_), _EPS, 1 - _EPS))
+                  + (1 - y) * math.log(_clamp(1 - _sigmoid(a_ * z + b_), _EPS, 1 - _EPS)))
+            for z, y, w in data
         )
-        return tot / len(data)
+        return tot / total_w
 
     for t in range(1, iters + 1):
         g_a = g_b = 0.0
-        for z, y in data:
+        for z, y, w in data:
             p_hat = _clamp(_sigmoid(a * z + b), _EPS, 1 - _EPS)
-            err = p_hat - y
+            err = w * (p_hat - y)
             g_a += err * z
             g_b += err
-        g_a /= len(data)
-        g_b /= len(data)
+        g_a /= total_w
+        g_b /= total_w
 
         # Adam
         m_a = beta1 * m_a + (1 - beta1) * g_a
@@ -206,27 +246,34 @@ def fit_platt(rows: List[Any], iters: int = 1000, lr: float = 0.05,
 
 
 def fit_temperature(rows: List[Any], iters: int = 600, lr: float = 0.2,
-                    min_n: int = 10) -> Dict[str, Any]:
+                    min_n: int = 10, half_life_days: float = DEFAULT_HALF_LIFE_DAYS) -> Dict[str, Any]:
     """Ajuste k sur les matchs réglés. `rows` : lignes settled_matches.
 
     pred_prob1 = proba (en %) que player1 gagne ; issue = 1 si winner == player1.
+    Log-loss PONDÉRÉE par récence (`_recency_weight`, demi-vie `half_life_days`) :
+    un match réglé il y a plusieurs mois pèse moins qu'un match récent, car le
+    modèle a continué d'apprendre entre temps (ELO auto-appris, features EMA) —
+    sans ça, le calib_k appris reste ancré sur un historique qui ne reflète plus
+    le modèle actuel. half_life_days=0 désactive la pondération (poids uniforme).
     """
-    data: List[Tuple[float, float]] = []
+    data: List[Tuple[float, float, float]] = []  # (z, y, weight)
     for r in rows:
         pp = r["pred_prob1"]
         if pp is None:
             continue
         z = _logit(pp / 100.0)
         y = 1.0 if r["winner"] == r["player1"] else 0.0
-        data.append((z, y))
+        w = _recency_weight(_row_date(r), half_life_days)
+        data.append((z, y, w))
 
     if len(data) < min_n:
         return {"k": 1.0, "n": len(data), "fitted": False,
                 "note": f"Pas assez de matchs réglés pour calibrer (min {min_n})."}
 
+    total_w = sum(w for _, _, w in data) or float(len(data))
     k = 1.0
     for _ in range(iters):
-        grad = sum((_sigmoid(k * z) - y) * z for z, y in data) / len(data)
+        grad = sum(w * (_sigmoid(k * z) - y) * z for z, y, w in data) / total_w
         k = _clamp(k - lr * grad, 0.1, 3.0)
 
     return {

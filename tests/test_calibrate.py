@@ -1,4 +1,5 @@
 """Tests de l'auto-calibration (temperature scaling)."""
+import datetime as _dt
 import unittest
 
 from bot import calibrate
@@ -8,8 +9,8 @@ class Row(dict):
     """Imite une ligne sqlite (accès par clé)."""
 
 
-def _row(pred_prob1, winner, player1="A"):
-    return Row(pred_prob1=pred_prob1, winner=winner, player1=player1)
+def _row(pred_prob1, winner, player1="A", date=None):
+    return Row(pred_prob1=pred_prob1, winner=winner, player1=player1, date=date)
 
 
 class TestCalibratedProb(unittest.TestCase):
@@ -49,6 +50,50 @@ class TestFitTemperature(unittest.TestCase):
         fit = calibrate.fit_temperature(rows)
         self.assertTrue(fit["fitted"])
         self.assertTrue(0.8 <= fit["k"] <= 1.2)
+
+
+class TestRecencyWeight(unittest.TestCase):
+    def test_no_date_gives_full_weight(self):
+        self.assertEqual(calibrate._recency_weight(None, 180.0), 1.0)
+
+    def test_today_gives_full_weight(self):
+        today = _dt.date.today().isoformat()
+        self.assertAlmostEqual(calibrate._recency_weight(today, 180.0), 1.0, places=6)
+
+    def test_half_life_gives_half_weight(self):
+        d = (_dt.date.today() - _dt.timedelta(days=180)).isoformat()
+        self.assertAlmostEqual(calibrate._recency_weight(d, 180.0), 0.5, places=3)
+
+    def test_zero_half_life_disables_weighting(self):
+        old = (_dt.date.today() - _dt.timedelta(days=3650)).isoformat()
+        self.assertEqual(calibrate._recency_weight(old, 0.0), 1.0)
+
+    def test_bad_date_string_falls_back_to_1(self):
+        self.assertEqual(calibrate._recency_weight("pas-une-date", 180.0), 1.0)
+
+
+class TestFitTemperatureRecency(unittest.TestCase):
+    def test_old_surconfident_batch_outweighed_by_recent_calibrated_batch(self):
+        """Un vieux lot très sur-confiant (mal calibré) doit peser moins qu'un
+        lot récent bien calibré du même volume — sinon k resterait tiré vers
+        le bas par un historique qui ne reflète plus le modèle actuel."""
+        today = _dt.date.today().isoformat()
+        old_date = (_dt.date.today() - _dt.timedelta(days=720)).isoformat()  # 4 demi-vies
+
+        old_rows = [_row(95.0, "A", date=old_date) for _ in range(60)] + \
+                   [_row(95.0, "B", date=old_date) for _ in range(60)]  # 50% réel vs 95% prédit
+        recent_rows = [_row(70.0, "A", date=today) for _ in range(70)] + \
+                      [_row(70.0, "B", date=today) for _ in range(30)]  # bien calibré
+
+        fit_weighted = calibrate.fit_temperature(old_rows + recent_rows, half_life_days=180.0)
+        fit_unweighted = calibrate.fit_temperature(old_rows + recent_rows, half_life_days=0.0)
+
+        self.assertTrue(fit_weighted["fitted"])
+        # Pondéré : k doit rester nettement moins tiré vers le bas que sans
+        # pondération (0.545 vs 0.1 mesuré) — le vieux lot pèse moins mais
+        # n'est pas totalement ignoré (poids résiduel après 4 demi-vies).
+        self.assertGreater(fit_weighted["k"], fit_unweighted["k"])
+        self.assertGreaterEqual(fit_weighted["k"], 0.4)
 
 
 class TestTuneBlend(unittest.TestCase):

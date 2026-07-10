@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from bot.chat import _detect_players, _player_snapshot, build_context, _surface_elo_line
+from bot.chat import _detect_players, _player_snapshot, build_context, _surface_elo_line, _calibrated
 
 
 def _fake_mem():
@@ -97,6 +97,27 @@ def test_surface_elo_line_missing_player():
     """Un joueur sans ELO de surface connu ne casse pas le formatage."""
     line = _surface_elo_line(_fake_mem(), ["Novak Djokovic"])
     assert line == ""
+
+
+def test_calibrated_prefers_platt_when_fitted():
+    """Avant ce fix, le chat n'utilisait QUE la température k, jamais Platt —
+    incohérent avec /api/value et /api/live qui préfèrent Platt dès qu'il est
+    fitté. _calibrated doit désormais donner le même résultat que Platt seul
+    quand (a,b) != (1.0, 0.0), peu importe k."""
+    from bot import calibrate
+    p = 0.8
+    platt_ab = (0.5, 0.1)
+    expected = calibrate.calibrated_prob_platt(p, *platt_ab)
+    result = _calibrated(p, k=2.5, platt_ab=platt_ab)  # k très différent, doit être ignoré
+    assert abs(result - expected) < 1e-9
+
+
+def test_calibrated_falls_back_to_temperature_when_platt_not_fitted():
+    from bot import calibrate
+    p = 0.8
+    expected = calibrate.calibrated_prob(p, 0.6)
+    result = _calibrated(p, k=0.6, platt_ab=(1.0, 0.0))
+    assert abs(result - expected) < 1e-9
 
 
 def test_chat_system_prompt_has_honesty_clause():
