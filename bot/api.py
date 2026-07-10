@@ -580,6 +580,17 @@ def _set_to_match_prob(p_set: float) -> float:
     return predictor.set_to_match_prob(p_set)
 
 
+_SLAMS = {"australian open", "roland garros", "french open", "wimbledon", "us open"}
+
+
+def _best_of_for(tour: str, league_name: str) -> int:
+    """Best-of-3 (défaut) ou best-of-5 (Grand Chelem messieurs uniquement)."""
+    if (tour or "").lower() != "atp":
+        return 3
+    label = (league_name or "").lower()
+    return 5 if any(s in label for s in _SLAMS) else 3
+
+
 def _bet_builder(p1_set: float, n1: str, n2: str) -> Dict[str, Any]:
     """Dérive plusieurs marchés à partir de la proba du 1er set (best-of-3).
 
@@ -991,12 +1002,19 @@ def api_live():
                 f1 = features.feature_vector(features.get_profile(_MEM, n1))
                 f2 = features.feature_vector(features.get_profile(_MEM, n2))
                 r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_live_surf)
-                pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+                pm1_prematch = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+                # In-play : ré-ajuste au score en cours (sets gagnés/perdus),
+                # pas juste la proba pré-match figée. Voir predictor.inplay_match_prob.
+                _p_set_calib = predictor.invert_set_to_match_prob(pm1_prematch)
+                _bo = _best_of_for(e.get("tour") or _live_league, _live_league)
+                pm1 = predictor.inplay_match_prob(_p_set_calib, sets_home, sets_away, best_of=_bo)
                 prediction = {
                     "player1": n1, "player2": n2,
                     "prob1": round(pm1 * 100, 1),
                     "prob2": round((1 - pm1) * 100, 1),
-                    "favorite": r["favorite"],
+                    # Favori recalculé sur la proba in-play (pas la pré-match r["favorite"]) —
+                    # sinon il peut contredire prob1/prob2 une fois le score pris en compte.
+                    "favorite": n1 if pm1 >= 0.5 else n2,
                     "confidence": r["confidence"],
                     "confidence_label": r["confidence_label"],
                 }
@@ -1079,7 +1097,15 @@ def api_inplay_best():
         if conf < 0.20:
             continue
 
-        pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+        scores = e.get("scores") or {}
+        _ip_sets_home = int(scores.get("home") or 0)
+        _ip_sets_away = int(scores.get("away") or 0)
+
+        pm1_prematch = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+        # In-play : ré-ajuste au score en cours plutôt que la proba pré-match figée.
+        _p_set_calib = predictor.invert_set_to_match_prob(pm1_prematch)
+        _ip_bo = _best_of_for(e.get("tour") or _ip_league, _ip_league)
+        pm1 = predictor.inplay_match_prob(_p_set_calib, _ip_sets_home, _ip_sets_away, best_of=_ip_bo)
         pm2 = 1.0 - pm1
 
         # Cotes live (1 req par match, on limite à 20 matchs)
@@ -1104,7 +1130,6 @@ def api_inplay_best():
         else:
             score = conf * 0.5
 
-        scores = e.get("scores") or {}
         periods = scores.get("periods") or {}
         set_scores = []
         for i in range(1, 8):
@@ -1130,7 +1155,7 @@ def api_inplay_best():
                 "player1": n1, "player2": n2,
                 "prob1": round(pm1 * 100, 1),
                 "prob2": round(pm2 * 100, 1),
-                "favorite": r.get("favorite"),
+                "favorite": n1 if pm1 >= pm2 else n2,
                 "confidence": round(conf, 3),
                 "confidence_label": r.get("confidence_label", ""),
             },

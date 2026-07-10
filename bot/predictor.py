@@ -25,6 +25,53 @@ def set_to_match_prob(p_set: float) -> float:
     return p * p * (3 - 2 * p)
 
 
+def invert_set_to_match_prob(p_match: float, iters: int = 40) -> float:
+    """Inverse de set_to_match_prob : retrouve la proba par set p telle que
+    p²(3-2p) == p_match (bissection, la fonction est monotone sur [0,1]).
+
+    Sert à récupérer une proba par set CALIBRÉE à partir d'une proba match
+    déjà calibrée (le pipeline de calibration existant travaille au niveau
+    match) — nécessaire pour ré-ajuster ensuite au score en cours (in-play).
+    """
+    target = max(0.0, min(1.0, p_match))
+    lo, hi = 0.0, 1.0
+    for _ in range(iters):
+        mid = (lo + hi) / 2
+        if set_to_match_prob(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def inplay_match_prob(p_set: float, sets_won: int, sets_lost: int,
+                      best_of: int = 3) -> float:
+    """Proba de gagner le MATCH depuis un score en cours (in-play).
+
+    `p_set` : proba de gagner UN set (même approximation i.i.d. que
+    set_to_match_prob — cohérent avec le reste du modèle, cf. bet_builder).
+    `sets_won`/`sets_lost` : sets déjà gagnés/perdus par le joueur.
+    `best_of` : 3 (standard) ou 5 (Grand Chelem messieurs).
+
+    Formule "race to N" : le joueur doit gagner `na` sets de plus avant que
+    l'adversaire n'en gagne `nb` de plus (sets restants indépendants, proba p).
+    P = Σ_{k=0}^{nb-1} C(na-1+k, k) · p^na · (1-p)^k
+    """
+    target = (best_of + 1) // 2  # 2 pour bo3, 3 pour bo5
+    na = target - sets_won
+    nb = target - sets_lost
+    if na <= 0:
+        return 1.0  # a déjà gagné le match
+    if nb <= 0:
+        return 0.0  # a déjà perdu le match
+    p = max(0.0, min(1.0, p_set))
+    from math import comb
+    return sum(
+        comb(na - 1 + k, k) * (p ** na) * ((1 - p) ** k)
+        for k in range(nb)
+    )
+
+
 def _sigmoid(z: float) -> float:
     if z < -60:
         return 0.0
