@@ -134,12 +134,15 @@ pensé pour comprendre un match en profondeur — pas pour promettre de gagner.
   permet PAS de parier ni de transférer de l'argent)
 • Chat IA : posez vos questions tennis en langage naturel, réponses ancrées
   dans les vraies statistiques quand c'est pertinent
-• Suivi de performance transparent : précision réelle du modèle, indicateur
-  de sur-confiance, historique des matchs réglés — rien n'est caché
+• Suivi de performance transparent : précision réelle du modèle, Closing Line
+  Value (indicateur avancé d'edge utilisé par les parieurs professionnels),
+  historique des matchs réglés — rien n'est caché, même quand c'est négatif
 
 🤖 HONNÊTETÉ AVANT TOUT
-Aucun modèle ne gagne à tous les coups. TennisBoss AI affiche ses vraies
-statistiques de performance, y compris quand elles ne sont pas favorables.
+Aucun modèle ne gagne à tous les coups. Contrairement à beaucoup de services
+d'analyse sportive qui affichent des taux de réussite invérifiables, TennisBoss
+AI mesure et montre sa performance réelle avec une méthode reconnue du monde
+du pari (la Closing Line Value), y compris quand elle n'est pas favorable.
 C'est un outil d'aide à la décision et d'analyse — pas un système de paris,
 pas une promesse de profit.
 
