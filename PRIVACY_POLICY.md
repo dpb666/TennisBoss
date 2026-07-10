@@ -9,8 +9,8 @@ de paris**, elle ne traite ni ne facilite aucune transaction financière.
 
 ## 1. Qui nous sommes
 
-TennisBoss AI est développée et exploitée par [NOM / RAISON SOCIALE À COMPLÉTER].
-Pour toute question sur cette politique, contactez : [EMAIL DE CONTACT À COMPLÉTER].
+TennisBoss AI est développée et exploitée par Walid Zahir.
+Pour toute question sur cette politique, contactez : walid.zahir89@gmail.com.
 
 ## 2. Aucun compte utilisateur
 
@@ -84,7 +84,7 @@ durée limitée puis supprimés.
 
 Si vous résidez dans une juridiction accordant des droits d'accès, de
 rectification ou de suppression de données personnelles (ex. RGPD en Europe),
-vous pouvez nous contacter à [EMAIL DE CONTACT] — bien que, l'App ne collectant
+vous pouvez nous contacter à walid.zahir89@gmail.com — bien que, l'App ne collectant
 pas de données identifiantes liées à un compte, il n'existe généralement aucune
 donnée personnelle stockée à supprimer de notre côté.
 
@@ -103,4 +103,4 @@ dans une nouvelle version publiée à la même adresse.
 ## 12. Contact
 
 Pour toute question concernant cette politique de confidentialité :
-[EMAIL DE CONTACT À COMPLÉTER]
+walid.zahir89@gmail.com
