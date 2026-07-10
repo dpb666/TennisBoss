@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tennisboss.app.data.LastPick
 import com.tennisboss.app.data.NearMiss
 import com.tennisboss.app.data.ScannerStatus
 import com.tennisboss.app.ui.components.SkeletonList
@@ -85,6 +86,11 @@ private fun ScannerContent(data: ScannerStatus, secondsToNext: Int?) {
 
         // ── Status + Countdown ──────────────────────────────────────────
         item { StatusCard(data, secondsToNext) }
+
+        // ── Dernier pick détecté ────────────────────────────────────────
+        data.last_pick?.let { p ->
+            item { LastPickCard(p, data.last_pick_ts) }
+        }
 
         // ── Couverture cycle ────────────────────────────────────────────
         item { CoverageCard(data) }
@@ -169,6 +175,37 @@ private fun StatusCard(data: ScannerStatus, secondsToNext: Int?) {
                         fontWeight = FontWeight.SemiBold, color = GreenColor)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LastPickCard(p: LastPick, ts: String?) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("🎯 Dernier pick détecté", fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall)
+                ts?.let {
+                    Text(it.take(16).replace("T", " ") + " UTC",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text(p.side, fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium, color = GreenColor)
+            Text(
+                buildString {
+                    append("EV +${"%.1f".format(p.ev)}% · cote ${p.odds}")
+                    if (p.league.isNotBlank()) append(" · ${p.league}")
+                    p.hours?.let { append(" · ${"%.1f".format(it)}h avant match") }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
