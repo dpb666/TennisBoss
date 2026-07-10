@@ -375,6 +375,10 @@ private fun PendingPickRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                     )
+                    if (p.market_label.isNotBlank()) {
+                        Text(p.market_label, style = MaterialTheme.typography.labelSmall,
+                            color = color, maxLines = 1)
+                    }
                     Text(p.pick, style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold, color = color)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -448,6 +452,10 @@ private fun SettledPickRow(p: InplayPickItem, onDelete: (Int) -> Unit = {}) {
                 Text("${playerName(p.player1)} vs ${playerName(p.player2)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                if (p.market_label.isNotBlank()) {
+                    Text(p.market_label, style = MaterialTheme.typography.labelSmall,
+                        color = color, maxLines = 1)
+                }
                 Text(p.pick, style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold, color = color)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

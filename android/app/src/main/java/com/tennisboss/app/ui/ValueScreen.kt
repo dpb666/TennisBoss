@@ -356,9 +356,14 @@ private fun ValueCard(c: ValueComparison) {
 
             Text("${c.player1}  vs  ${c.player2}", fontWeight = FontWeight.SemiBold)
 
-            // Modèle vs marché (proba match), par joueur.
-            ProbCompareRow(c.player1, c.model_match_prob1, c.market_match_prob1, P1Color)
-            ProbCompareRow(c.player2, c.model_match_prob2, c.market_match_prob2, P2Color)
+            // Estimé (mixé modèle/marché) vs marché seul, par joueur. On affiche
+            // blend_match_prob (pas model_match_prob) car c'est CETTE proba qui
+            // calcule l'EV/value ci-dessous (bot/api.py : ev1 = pb1·cote−1, pb1 =
+            // blend_probs(...)) — avant ce fix, l'écran montrait l'écart modèle
+            // brut vs marché (souvent 3x plus large), sans rapport avec l'edge
+            // réel qui détermine si c'est marqué "value".
+            ProbCompareRow(c.player1, c.blend_match_prob1, c.market_match_prob1, P1Color)
+            ProbCompareRow(c.player2, c.blend_match_prob2, c.market_match_prob2, P2Color)
 
             // Cotes + EV par côté.
             Row(
@@ -464,7 +469,7 @@ private fun ProbCompareRow(name: String, model: Double, market: Double, color: C
         Text(name, style = MaterialTheme.typography.bodySmall, color = color,
             fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         Text(
-            "modèle ${fmt(model)} · marché ${fmt(market)}",
+            "estimé ${fmt(model)} · marché ${fmt(market)}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
