@@ -387,6 +387,13 @@ data class LiveOdds(
     val books: List<String> = emptyList(),
 )
 
+data class LiveProbPoint(
+    val ts: String = "",
+    val prob1: Double = 0.0,
+    val minute: Int = 0,
+    val sets: String = "",
+)
+
 data class LivePrediction(
     val player1: String = "",
     val player2: String = "",
@@ -395,6 +402,7 @@ data class LivePrediction(
     val favorite: String? = null,
     val confidence: Double = 0.0,
     val confidence_label: String = "",
+    val prob_history: List<LiveProbPoint> = emptyList(),
 )
 
 data class LiveMatch(

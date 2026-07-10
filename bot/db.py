@@ -149,6 +149,15 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     hours_ahead REAL            -- heures avant le coup d'envoi au moment de la capture
 );
 CREATE INDEX IF NOT EXISTS idx_snap_event ON market_snapshots(event_key, ts);
+CREATE TABLE IF NOT EXISTS live_prob_snapshots (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key  TEXT,            -- id événement live (regroupe les points d'un même match)
+    ts         TEXT,            -- horodatage ISO de la capture
+    prob1      REAL,            -- proba in-play du joueur 1 à cet instant
+    sets_home  INTEGER, sets_away INTEGER,
+    minute     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_liveprob_event ON live_prob_snapshots(event_key, ts);
 CREATE TABLE IF NOT EXISTS inplay_picks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
@@ -941,6 +950,32 @@ def line_movement(event_key: str) -> Optional[Dict[str, Any]]:
         "move_home_pct": _pct(opening["odds_home"], closing["odds_home"]),
         "move_away_pct": _pct(opening["odds_away"], closing["odds_away"]),
     }
+
+
+def record_live_prob(event_key: str, prob1: float, sets_home: int, sets_away: int,
+                     minute: int = 0) -> None:
+    """Capture un point de la proba in-play pour reconstruire son évolution.
+
+    Pas de dédup : appelé à chaque cycle /api/live où ce match est vu, la
+    fréquence des points reflète directement la fréquence de refresh de l'app.
+    """
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO live_prob_snapshots (event_key,ts,prob1,sets_home,sets_away,minute) "
+            "VALUES (?,?,?,?,?,?)",
+            (event_key, _dt.datetime.now().isoformat(timespec="seconds"),
+             prob1, sets_home, sets_away, minute),
+        )
+
+
+def live_prob_history(event_key: str, limit: int = 50) -> List[sqlite3.Row]:
+    """Points récents de la proba in-play pour un match, ordre chronologique."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT ts,prob1,sets_home,sets_away,minute FROM live_prob_snapshots "
+            "WHERE event_key=? ORDER BY ts DESC LIMIT ?", (event_key, limit)).fetchall()
+    return list(reversed(rows))
 
 
 # --- Historique des prédictions --------------------------------------------

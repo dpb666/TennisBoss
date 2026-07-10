@@ -1018,6 +1018,18 @@ def api_live():
                     "confidence": r["confidence"],
                     "confidence_label": r["confidence_label"],
                 }
+                # Historique pour le graphique d'évolution (écran Live).
+                try:
+                    db.record_live_prob(str(e["id"]), round(pm1 * 100, 1),
+                                       sets_home, sets_away, minute)
+                    hist = db.live_prob_history(str(e["id"]))
+                    prediction["prob_history"] = [
+                        {"ts": h["ts"], "prob1": h["prob1"], "minute": h["minute"],
+                         "sets": f"{h['sets_home']}-{h['sets_away']}"}
+                        for h in hist
+                    ]
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception:  # noqa: BLE001
                 pass
 

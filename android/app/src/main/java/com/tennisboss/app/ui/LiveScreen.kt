@@ -853,25 +853,65 @@ private fun PreMatchPredRow(m: LiveMatch, pred: LivePrediction) {
     val fav = pred.favorite
     val p1prob = pred.prob1
     val p2prob = pred.prob2
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("Pré-match", style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ProbLabel(playerName(m.player1), p1prob, fav == (pred.player1.ifBlank { m.player1 }))
-            Text("vs", style = MaterialTheme.typography.labelSmall,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("En direct", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ProbLabel(playerName(m.player2), p2prob, fav == (pred.player2.ifBlank { m.player2 }))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ProbLabel(playerName(m.player1), p1prob, fav == (pred.player1.ifBlank { m.player1 }))
+                Text("vs", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ProbLabel(playerName(m.player2), p2prob, fav == (pred.player2.ifBlank { m.player2 }))
+            }
+            Text(
+                pred.confidence_label.ifBlank { "conf ${(pred.confidence * 100).toInt()}%" },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (pred.prob_history.size >= 2) {
+            ProbHistorySparkline(pred.prob_history, playerName(m.player1))
+        }
+    }
+}
+
+@Composable
+private fun ProbHistorySparkline(history: List<com.tennisboss.app.data.LiveProbPoint>, p1Name: String) {
+    val lineColor = GreenEV
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        androidx.compose.foundation.Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp),
+        ) {
+            val w = size.width
+            val h = size.height
+            drawLine(trackColor, start = androidx.compose.ui.geometry.Offset(0f, h / 2),
+                end = androidx.compose.ui.geometry.Offset(w, h / 2), strokeWidth = 1f)
+            val n = history.size
+            val stepX = if (n > 1) w / (n - 1) else w
+            val path = androidx.compose.ui.graphics.Path()
+            history.forEachIndexed { i, pt ->
+                val x = i * stepX
+                val y = h - (pt.prob1 / 100.0 * h).toFloat()
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color = lineColor, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
         }
         Text(
-            pred.confidence_label.ifBlank { "conf ${(pred.confidence * 100).toInt()}%" },
+            "$p1Name — ${history.first().prob1.toInt()}% → ${history.last().prob1.toInt()}%",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
