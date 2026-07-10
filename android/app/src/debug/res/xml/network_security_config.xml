@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug uniquement (app/src/debug) : exceptions cleartext pour le dev local
+     (émulateur + téléphone sur le LAN). Ne fait PAS partie du build release. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- Émulateur Android : adb reverse → localhost:8000 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+    <!-- Dev local via IP réseau (téléphone réel sur le même Wi-Fi) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.0.94</domain>
+    </domain-config>
+</network-security-config>

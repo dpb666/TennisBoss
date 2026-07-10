@@ -17,7 +17,11 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
     // localhost:8000 fonctionne sur émulateur via `adb reverse tcp:8000 tcp:8000`
     const val EMULATOR_BASE_URL = "http://localhost:8000/"
-    const val DEFAULT_BASE_URL = "https://plausible-matchbox-thrive.ngrok-free.dev/"
+    // Worker Cloudflare (pas api.tennisboss.online directement) : le Worker injecte
+    // X-API-Token côté serveur, donc les vrais appareils n'ont jamais besoin de connaître
+    // le secret. Un token compilé dans BuildConfig serait extractible de l'APK public
+    // (décompilation triviale) — voir TokenManager, gardé pour les tests locaux uniquement.
+    const val DEFAULT_BASE_URL = "https://tennisboss-api.walid-zahir89.workers.dev/"
 
     private fun defaultUrl(): String {
         val fp = android.os.Build.FINGERPRINT
