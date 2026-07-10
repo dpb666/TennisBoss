@@ -682,7 +682,10 @@ private fun LiveMatchCard(
             ScoreBoard(m)
 
             if (matchMarkets != null && matchMarkets.markets.isNotEmpty()) {
-                val reliableMarkets = matchMarkets.markets.filter { (it.confidence.toDoubleOrNull() ?: 0.0) >= 0.4 }
+                // Le backend renvoie une confiance CATÉGORIELLE ("Forte"/"Moyenne"/"Faible"),
+                // pas un nombre — un filtre `.toDoubleOrNull() >= 0.4` échoue donc toujours
+                // et cachait silencieusement TOUS les marchés depuis le début.
+                val reliableMarkets = matchMarkets.markets.filter { it.confidence != "Faible" }
                 val hiddenMkts = matchMarkets.markets.size - reliableMarkets.size
                 if (reliableMarkets.isNotEmpty()) {
                     Row(
@@ -698,7 +701,7 @@ private fun LiveMatchCard(
                 }
                 if (hiddenMkts > 0) {
                     Text(
-                        "$hiddenMkts marché${if (hiddenMkts > 1) "s" else ""} masqué${if (hiddenMkts > 1) "s" else ""} (confiance < 40%)",
+                        "$hiddenMkts marché${if (hiddenMkts > 1) "s" else ""} masqué${if (hiddenMkts > 1) "s" else ""} (confiance faible)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -970,7 +973,7 @@ private fun InplayPicksSection(
 ) {
     val topPicks: List<Pair<InplayMatchMarkets, InplayMarket>> = mkts.matches
         .flatMap { match -> match.markets.map { mkt -> match to mkt } }
-        .filter { (_, mkt) -> (mkt.confidence.toDoubleOrNull() ?: 0.0) >= 0.4 }
+        .filter { (_, mkt) -> mkt.confidence != "Faible" }
         .sortedByDescending { (_, mkt) -> mkt.prob }
         .take(5)
 
@@ -1212,6 +1215,7 @@ private fun BestPickBanner(pick: InplayBestPick, onTake: () -> Unit = {}) {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 private fun mktColor(type: String): Color = when (type) {
+    "match_winner"  -> Color(0xFFFFD700)
     "set_winner"    -> GreenEV
     "next_set"      -> TealMkt
     "total_games"   -> AmberMkt
@@ -1223,6 +1227,7 @@ private fun mktColor(type: String): Color = when (type) {
 }
 
 private fun mktIcon(type: String): String = when (type) {
+    "match_winner"  -> "🥇"
     "set_winner"    -> "🏆"
     "next_set"      -> "🎯"
     "total_games"   -> "🎮"
@@ -1235,6 +1240,7 @@ private fun mktIcon(type: String): String = when (type) {
 
 // Explication courte en français clair pour non-connaisseurs
 private fun mktExplain(type: String, label: String): String = when (type) {
+    "match_winner" -> "Qui remporte le match entier ? (modèle calibré, pas une heuristique)"
     "set_winner"   -> "Qui remporte ce set ? (premier à 6 jeux)"
     "next_set"     -> "Qui gagne le prochain set ?"
     "total_games"  -> {

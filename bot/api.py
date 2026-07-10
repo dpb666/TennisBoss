@@ -1246,6 +1246,40 @@ def api_inplay_markets():
 
         markets = []
 
+        # ── Market 0 : Vainqueur du match (modèle calibré, pas une heuristique
+        # comme les marchés ci-dessous) — même pipeline que /api/live et
+        # /api/inplay/best, jamais exposé jusqu'ici dans la liste de marchés.
+        try:
+            _mw_f1 = features.feature_vector(p1)
+            _mw_f2 = features.feature_vector(p2)
+            _mw_surf = e.get("surface") or config.surface_from_league(league) or None
+            _mw_r = predictor.predict(_MEM, n1, _mw_f1, n2, _mw_f2, surface=_mw_surf)
+            _mw_pm1_prematch = _calib(_set_to_match_prob(_mw_r["prob1"] / 100.0))
+            _mw_p_set_calib = predictor.invert_set_to_match_prob(_mw_pm1_prematch)
+            _mw_bo = _best_of_for(e.get("tour") or league, league)
+            _mw_pm1 = predictor.inplay_match_prob(_mw_p_set_calib, sets_home, sets_away, best_of=_mw_bo)
+            if _mw_pm1 >= 0.5:
+                mw_name, mw_prob = n1, _mw_pm1
+            else:
+                mw_name, mw_prob = n2, 1.0 - _mw_pm1
+            mw_conf = "Forte" if mw_prob > 0.70 else "Moyenne" if mw_prob > 0.57 else "Faible"
+            live_mw = odds_api.fetch_match_winner(event_id) if event_id else None
+            mw_odds = None
+            if live_mw and live_mw.get("home_odds") and live_mw.get("away_odds"):
+                mw_odds = live_mw["home_odds"] if mw_name == n1 else live_mw["away_odds"]
+            markets.append({
+                "type": "match_winner",
+                "label": "Vainqueur du match",
+                "pick": mw_name,
+                "prob": round(mw_prob * 100, 1),
+                "confidence": mw_conf,
+                "rationale": f"Modèle calibré · sets {sets_home}-{sets_away} · bo{_mw_bo}",
+                "odds": mw_odds,
+                "has_real_odds": mw_odds is not None,
+            })
+        except Exception:
+            pass
+
         # ── Market 1 : Gagnant set actuel ──────────────────────────────────────
         lead = games_h - games_a
         # serve élevée → le leader tient plus facilement → probabilité +robuste
