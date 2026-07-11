@@ -126,7 +126,7 @@ machine change — actuellement `User=alchemist`,
 | `tennisboss-bot` | API Flask (port 8000, backend Android) | réseau |
 | `tennisboss-supervisor` | apprentissage continu / self-healing (`run.py start`) | bot |
 | `tennisboss-tunnel` | `cloudflared tunnel run` (expose bot en public) | réseau |
-| `tennisboss-scheduler` | tâches planifiées (`bot.scheduler`) | réseau |
+| `tennisboss-scheduler` | tâches planifiées (`bot.scheduler`) : learn 1h, ingest 6h, monitor 5m, **backup DB 6h** | réseau |
 
 `tennisboss-quant` (port 8001, `app/`) existe toujours dans `systemd/` mais est
 **stoppé et désactivé** (`systemctl disable`) — voir note en haut de ce document.
@@ -152,6 +152,19 @@ Chaque unit a `Restart=always` — un crash relance le process sans intervention
 `EnvironmentFile=/mnt/c/Users/donpa/TennisBoss/.env` charge les clés API (remplace
 le `source .env` de `scripts/start_servers.sh`, qui reste utilisable pour un
 lancement ponctuel manuel mais n'est plus nécessaire au quotidien).
+
+### 4.1 Sauvegarde de la base (`bot/backup.py`)
+
+Ajoutée après un incident réel : la DB de production est passée de 91 946 à 0
+matchs pendant une manipulation manuelle de `state/` alors que le service
+tournait, récupérée uniquement par chance (copie de secours accidentelle).
+
+- `tennisboss-scheduler` sauvegarde `state/tennisboss.db` toutes les 6h (+ une
+  sauvegarde immédiate à chaque démarrage du service) dans `state/backups/`,
+  via l'API de sauvegarde native de sqlite3 (snapshot cohérent même base
+  ouverte en écriture WAL — pas une simple copie de fichier).
+- Rétention : 28 sauvegardes (~7 jours à 1/6h).
+- Sauvegarde manuelle avant une manipulation risquée : `python3 run.py backup`.
 
 ## 5. Démarrage automatique de WSL au boot Windows
 

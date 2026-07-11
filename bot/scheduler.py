@@ -10,7 +10,7 @@ import schedule
 import time
 from datetime import datetime
 
-from . import auto_learner, monitor, tennisdata_feeder
+from . import auto_learner, backup, monitor, tennisdata_feeder
 from .log import log
 
 
@@ -54,12 +54,26 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"Monitor job failed: {e}", "ERROR")
 
+    def job_backup(self):
+        """Sauvegarde cohérente de state/tennisboss.db (voir bot/backup.py)."""
+        log("=== SCHEDULER: DB backup ===", "INFO")
+        try:
+            path = backup.backup_now()
+            if path:
+                self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"Backup job failed: {e}", "ERROR")
+
     def setup_jobs(self):
         """Configure job schedule."""
         schedule.every(1).hours.do(self.job_learn)
         schedule.every(6).hours.do(self.job_ingest)
         schedule.every(5).minutes.do(self.job_monitor)
-        log("Scheduler: 3 jobs configured (learn 1h, ingest 6h, monitor 5m)", "INFO")
+        schedule.every(6).hours.do(self.job_backup)
+        log("Scheduler: 4 jobs configured (learn 1h, ingest 6h, monitor 5m, backup 6h)", "INFO")
+        # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
+        # du service pour avoir une première sauvegarde fraîche.
+        self.job_backup()
 
     def run_loop(self):
         """Run scheduler loop forever."""

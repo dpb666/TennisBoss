@@ -18,8 +18,8 @@ import csv as _csv
 import os
 import sys
 
-from bot import (backtest as bt, config, datasource, db, features, learner,
-                 live_api, memory, namematch, odds_api, predictor)
+from bot import (backtest as bt, backup as backup_mod, config, datasource, db, features,
+                 learner, live_api, memory, namematch, odds_api, predictor)
 from bot.bootstrap import bootstrap
 from bot.log import log
 
@@ -372,6 +372,17 @@ def cmd_reset(args) -> None:
     log("État effacé" + (" (modèle + base)." if args.all else " (modèle ; base conservée)."))
 
 
+def cmd_backup(_args) -> None:
+    """Sauvegarde immédiate de state/tennisboss.db (utile avant une manip manuelle risquée)."""
+    path = backup_mod.backup_now()
+    if path:
+        print(f"Sauvegarde créée : {path}")
+    else:
+        print("Rien à sauvegarder (base introuvable).")
+    existing = backup_mod.list_backups()
+    print(f"{len(existing)} sauvegarde(s) conservée(s) dans {backup_mod.BACKUP_DIR}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="tennisboss", description="Bot tennis autonome")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -434,6 +445,8 @@ def main() -> None:
     p_reset = sub.add_parser("reset", help="Effacer l'état appris")
     p_reset.add_argument("--all", action="store_true", help="Effacer aussi la base SQLite")
     p_reset.set_defaults(func=cmd_reset)
+
+    sub.add_parser("backup", help="Sauvegarde immédiate de la base SQLite").set_defaults(func=cmd_backup)
 
     args = parser.parse_args()
     args.func(args)
