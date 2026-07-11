@@ -1,6 +1,6 @@
 """Tests HTTP pour les endpoints qui touchent la DB directement (SQL brut,
 pas de fonction mockable proprement) : /api/value/open, /api/value/history,
-/api/history, /api/inplay/picks (CRUD).
+/api/history, /api/inplay/picks (CRUD), /api/recommendations.
 
 Utilise une DB SQLite temporaire (même pattern que
 tests/test_settlement.py::TestCalibrationMetrics) plutôt que des mocks,
@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from bot import api, config, db
 
@@ -144,6 +145,34 @@ class TestDeviceTokens(ApiDbTestCase):
         db.register_device_token("tok1")
         db.delete_device_token("tok1")
         self.assertEqual(list(db.list_device_tokens()), [])
+
+
+class TestRecommendations(ApiDbTestCase):
+    def test_scores_matches_using_real_history(self):
+        for _ in range(3):
+            db.log_prediction("Sinner", "Nobody", 0.6, "Sinner")
+
+        with api.app.app_context():
+            fake_upcoming = api.jsonify({"count": 2, "matches": [
+                {"prediction": {"player1": "Random1", "player2": "Random2"}},
+                {"prediction": {"player1": "Sinner", "player2": "Alcaraz"}},
+            ]})
+        with patch.object(api, "api_upcoming", return_value=fake_upcoming):
+            resp = self.client.get("/api/recommendations")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn("Sinner", data["favorite_players"])
+        self.assertEqual(len(data["matches"]), 1)
+        self.assertEqual(data["matches"][0]["prediction"]["player1"], "Sinner")
+
+    def test_empty_matches_when_no_upcoming_fixtures(self):
+        with api.app.app_context():
+            fake_upcoming = api.jsonify({"count": 0, "matches": []})
+        with patch.object(api, "api_upcoming", return_value=fake_upcoming):
+            resp = self.client.get("/api/recommendations")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["matches"], [])
 
 
 if __name__ == "__main__":

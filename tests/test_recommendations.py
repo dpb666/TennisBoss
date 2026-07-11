@@ -1,0 +1,116 @@
+"""Tests pour bot/recommendations.py — personnalisation basée sur l'usage
+du compte actuel (pas de comptes multi-utilisateurs, voir note en tête du
+module : décision produit explicite de ne pas refondre l'authentification).
+"""
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+
+from bot import config, db, recommendations as reco
+
+
+class RecoTestCase(unittest.TestCase):
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        self._save = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+
+    def tearDown(self):
+        config.DB_FILE = self._save
+        os.close(self._fd)
+        os.remove(self._path)
+
+
+class TestFavoritePlayers(RecoTestCase):
+    def test_empty_without_history(self):
+        self.assertEqual(reco.favorite_players(), [])
+
+    def test_counts_queries_across_both_slots(self):
+        for _ in range(3):
+            db.log_prediction("Sinner", "Alcaraz", 0.6, "Sinner")
+        db.log_prediction("Djokovic", "Sinner", 0.5, "Djokovic")
+        favs = {f["player"]: f["queries"] for f in reco.favorite_players()}
+        self.assertEqual(favs["Sinner"], 4)
+        self.assertEqual(favs["Alcaraz"], 3)
+
+    def test_respects_min_queries_threshold(self):
+        db.log_prediction("A", "B", 0.5, "A")  # 1 requête chacun -> sous le seuil par défaut (2)
+        self.assertEqual(reco.favorite_players(min_queries=2), [])
+
+
+class TestRiskProfile(RecoTestCase):
+    def test_insufficient_with_few_picks(self):
+        db.log_value_pick("2026-07-01", "A", "B", "A", 2.0, 12.0)
+        result = reco.risk_profile()
+        self.assertEqual(result["profile"], "insuffisant")
+
+    def test_classifies_prudent(self):
+        for i in range(6):
+            db.log_value_pick(f"2026-07-0{i+1}", f"A{i}", f"B{i}", f"A{i}", 1.5, 12.0)
+        result = reco.risk_profile()
+        self.assertEqual(result["profile"], "prudent")
+
+    def test_classifies_agressif(self):
+        for i in range(6):
+            db.log_value_pick(f"2026-07-0{i+1}", f"A{i}", f"B{i}", f"A{i}", 4.5, 12.0)
+        result = reco.risk_profile()
+        self.assertEqual(result["profile"], "agressif")
+
+
+class TestPreferredSurfaces(RecoTestCase):
+    def test_ranks_by_frequency(self):
+        db.log_value_pick("2026-07-01", "A", "B", "A", 2.0, 12.0, surface="clay")
+        db.log_value_pick("2026-07-02", "C", "D", "C", 2.0, 12.0, surface="clay")
+        db.log_value_pick("2026-07-03", "E", "F", "E", 2.0, 12.0, surface="hard")
+        surfs = reco.preferred_surfaces()
+        self.assertEqual(surfs[0]["surface"], "clay")
+        self.assertEqual(surfs[0]["n"], 2)
+
+
+class TestScoreUpcomingMatch(unittest.TestCase):
+    def test_favorite_player_boosts_score(self):
+        # player1_raw/player2_raw (bruts) sont ignorés à dessein : seuls les
+        # noms résolus sous "prediction" doivent matcher favorite_players().
+        match = {"player1_raw": "Sinner, Jannik", "player2_raw": "Nobody",
+                 "prediction": {"player1": "Sinner", "player2": "Nobody"}}
+        result = reco.score_upcoming_match(match, {"Sinner"}, "équilibré", set())
+        self.assertGreater(result["score"], 0)
+        self.assertIn("Tu suis Sinner", result["reasons"][0])
+
+    def test_raw_names_alone_never_match_favorites(self):
+        """Bug réel corrigé : player1_raw/player2_raw ("Sinner, Jannik") ne
+        matchent jamais favorite_players() (noms résolus "Jannik Sinner")."""
+        match = {"player1_raw": "Sinner, Jannik", "player2_raw": "Nobody"}
+        result = reco.score_upcoming_match(match, {"Sinner"}, "équilibré", set())
+        self.assertEqual(result["score"], 0)
+
+    def test_no_match_gives_zero_score(self):
+        match = {"prediction": {"player1": "X", "player2": "Y", "surface": "grass"}}
+        result = reco.score_upcoming_match(match, {"Sinner"}, "insuffisant", {"clay"})
+        self.assertEqual(result["score"], 0)
+
+    def test_prudent_profile_boosts_high_confidence(self):
+        match = {"prediction": {"player1": "X", "player2": "Y", "confidence": 0.8}}
+        result = reco.score_upcoming_match(match, set(), "prudent", set())
+        self.assertGreater(result["score"], 0)
+
+
+class TestBuildRecommendations(RecoTestCase):
+    def test_filters_out_zero_score_matches_and_sorts(self):
+        for _ in range(3):
+            db.log_prediction("Sinner", "Nobody", 0.6, "Sinner")
+        matches = [
+            {"prediction": {"player1": "Random1", "player2": "Random2"}},
+            {"prediction": {"player1": "Sinner", "player2": "Alcaraz"}},
+        ]
+        result = reco.build_recommendations(matches)
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["prediction"]["player1"], "Sinner")
+        self.assertIn("Sinner", result["favorite_players"])
+
+
+if __name__ == "__main__":
+    unittest.main()

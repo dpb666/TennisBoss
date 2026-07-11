@@ -22,6 +22,7 @@ import com.tennisboss.app.data.LiveResponse
 import com.tennisboss.app.data.PlayerDetail
 import com.tennisboss.app.data.PlayersResponse
 import com.tennisboss.app.data.PredictResponse
+import com.tennisboss.app.data.RecommendationsResponse
 import com.tennisboss.app.data.ScannerStatus
 import com.tennisboss.app.data.TennisBossApi
 import com.tennisboss.app.data.UpcomingResponse
@@ -72,6 +73,9 @@ class FakeApi(
     override suspend fun calibration(): CalibrationResponse = throw NotImplementedError("non utilisé")
 
     override suspend fun registerDevice(request: DeviceRegisterRequest): DeviceRegisterResponse =
+        throw NotImplementedError("non utilisé")
+
+    override suspend fun recommendations(limit: Int): RecommendationsResponse =
         throw NotImplementedError("non utilisé")
 
     override suspend fun insight(p1: String, p2: String, surface: String?, eventId: String?): InsightResponse =

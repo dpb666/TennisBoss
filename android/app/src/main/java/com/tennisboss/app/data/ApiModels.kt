@@ -383,6 +383,33 @@ data class UpcomingResponse(
     val matches: List<UpcomingMatch>,
 )
 
+/** Profil de risque déduit des cotes des picks réellement pris (pas suggérés). */
+data class RiskProfile(
+    val n_picks: Int = 0,
+    val profile: String = "",       // "prudent" | "équilibré" | "agressif" | "insuffisant"
+    val avg_odds: Double? = null,
+)
+
+/** Match "à venir" scoré par /api/recommendations — sous-ensemble d'UpcomingMatch
+ * + le score/les raisons de personnalisation (voir bot/recommendations.py). */
+data class RecommendedMatch(
+    val date: String = "",
+    val time: String = "",
+    val tournament: String = "",
+    val tour: String = "",
+    val prediction: Prediction? = null,
+    val recommendation_score: Double = 0.0,
+    val recommendation_reasons: List<String> = emptyList(),
+)
+
+/** Réponse de /api/recommendations — personnalisation basée sur l'usage du compte actuel. */
+data class RecommendationsResponse(
+    val favorite_players: List<String> = emptyList(),
+    val risk_profile: RiskProfile = RiskProfile(),
+    val preferred_surfaces: List<String> = emptyList(),
+    val matches: List<RecommendedMatch> = emptyList(),
+)
+
 /** Cotes marché (décimales) pour un match. */
 data class ValueOdds(
     val home: Double = 0.0,

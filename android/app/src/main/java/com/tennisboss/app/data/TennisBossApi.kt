@@ -60,6 +60,9 @@ interface TennisBossApi {
     @POST("api/device/register")
     suspend fun registerDevice(@Body request: DeviceRegisterRequest): DeviceRegisterResponse
 
+    @GET("api/recommendations")
+    suspend fun recommendations(@Query("limit") limit: Int = 10): RecommendationsResponse
+
     @GET("api/insight")
     suspend fun insight(
         @Query("p1") p1: String,

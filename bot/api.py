@@ -26,7 +26,8 @@ from flask import Flask, jsonify, request
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, intelligence, intelligence_layer, live_api, memory,
-               mistake_learner, namematch, odds_api, predictor, sackmann_feeder, settlement, weather)
+               mistake_learner, namematch, odds_api, predictor, recommendations, sackmann_feeder,
+               settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -964,6 +965,21 @@ def api_upcoming():
     _upcoming_cache[cache_key] = result
     _upcoming_cache_ts = _t.time()
     return jsonify(result)
+
+
+@app.get("/api/recommendations")
+def api_recommendations():
+    """Recommandations personnalisées : matchs à venir triés selon l'usage du
+    compte (joueurs consultés, picks pris, surfaces préférées).
+
+    Réutilise /api/upcoming tel quel (même pipeline multi-source, même cache)
+    en appelant directement la vue Flask plutôt que de dupliquer la logique
+    de fetch — pas de round-trip HTTP, même contexte de requête.
+    """
+    limit = min(int(request.args.get("limit", 10)), 30)
+    upcoming_data = api_upcoming().get_json()
+    matches = upcoming_data.get("matches", []) if upcoming_data else []
+    return jsonify(recommendations.build_recommendations(matches, limit=limit))
 
 
 @app.get("/api/live")

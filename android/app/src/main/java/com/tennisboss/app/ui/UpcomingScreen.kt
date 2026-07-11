@@ -48,8 +48,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.H2HSummary
 import com.tennisboss.app.data.Prediction
+import com.tennisboss.app.data.RecommendedMatch
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.WeatherAnalysis
 import com.tennisboss.app.ui.components.BetBuilderView
@@ -97,6 +99,8 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
                 }
             }
         }
+
+        RecommendationsSection()
 
         PullToRefreshBox(isRefreshing = vm.state is UpcomingUiState.Loading,
             onRefresh = { vm.load() }, modifier = Modifier.fillMaxSize()) {
@@ -156,6 +160,69 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
                     }
                 }
                 else -> {}
+            }
+        }
+    }
+}
+
+/**
+ * Section "Recommandé pour toi" — /api/recommendations (personnalisation basée
+ * sur l'usage du compte actuel : joueurs consultés, picks pris, surfaces
+ * préférées — voir bot/recommendations.py). Chargement paresseux et
+ * silencieux en cas d'échec/absence de recommandations : ne doit jamais
+ * perturber l'écran "À venir" qui fonctionne déjà sans elle.
+ */
+@Composable
+private fun RecommendationsSection() {
+    var matches by remember { mutableStateOf<List<RecommendedMatch>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        try {
+            matches = ApiClient.create().recommendations(limit = 8).matches
+        } catch (_: Exception) {
+            // Silencieux : section optionnelle, l'écran "À venir" reste utilisable sans elle.
+        }
+    }
+
+    if (matches.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "✨ Recommandé pour toi",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            matches.forEach { m -> RecommendedMatchCard(m) }
+        }
+    }
+}
+
+@Composable
+private fun RecommendedMatchCard(m: RecommendedMatch) {
+    val pred = m.prediction
+    Card(modifier = Modifier.width(220.dp)) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                "${pred?.player1 ?: "?"} vs ${pred?.player2 ?: "?"}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+            )
+            m.recommendation_reasons.forEach { r ->
+                Text(
+                    "• $r",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
