@@ -35,13 +35,17 @@ import okhttp3.RequestBody
 class FakeApi(
     private val upcomingResponse: UpcomingResponse? = null,
     private val valueResponse: ValueResponse? = null,
+    private val predictResponse: PredictResponse? = null,
+    private val liveResponse: LiveResponse? = null,
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
     override suspend fun health(): Health = Health("ok", "test", "1.0", 0)
 
-    override suspend fun predict(p1: String, p2: String): PredictResponse =
-        throw NotImplementedError("non utilisé")
+    override suspend fun predict(p1: String, p2: String): PredictResponse {
+        throwError?.let { throw it }
+        return predictResponse ?: throw NotImplementedError("predictResponse non fourni")
+    }
 
     override suspend fun players(q: String, tour: String?, limit: Int): PlayersResponse =
         throw NotImplementedError("non utilisé")
@@ -63,10 +67,18 @@ class FakeApi(
     }
 
     override suspend fun calibration(): CalibrationResponse = throw NotImplementedError("non utilisé")
-    override suspend fun live(): LiveResponse = throw NotImplementedError("non utilisé")
-    override suspend fun inplayBest(): InplayBestResponse = throw NotImplementedError("non utilisé")
-    override suspend fun inplayMarkets(): InplayMarketsResponse = throw NotImplementedError("non utilisé")
-    override suspend fun inplayPicks(): InplayPicksResponse = throw NotImplementedError("non utilisé")
+
+    override suspend fun live(): LiveResponse {
+        throwError?.let { throw it }
+        return liveResponse ?: throw NotImplementedError("liveResponse non fourni")
+    }
+    // RuntimeException (pas NotImplementedError, qui hérite de Error) : ces 3
+    // endpoints sont volontairement "best-effort" côté LiveViewModel (catch
+    // (e: Exception) { null } — une Error ne serait pas rattrapée et ferait
+    // planter la coroutine avant même d'atteindre l'état Success).
+    override suspend fun inplayBest(): InplayBestResponse = throw RuntimeException("non utilisé")
+    override suspend fun inplayMarkets(): InplayMarketsResponse = throw RuntimeException("non utilisé")
+    override suspend fun inplayPicks(): InplayPicksResponse = throw RuntimeException("non utilisé")
     override suspend fun logInplayPick(request: InplayPickRequest): InplayPickLogResponse =
         throw NotImplementedError("non utilisé")
     override suspend fun settleInplayPick(id: Int, body: Map<String, String>): InplayPickLogResponse =

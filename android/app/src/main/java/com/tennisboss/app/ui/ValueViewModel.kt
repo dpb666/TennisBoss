@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.ValueComparison
 import com.tennisboss.app.data.ValueHistoryResponse
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -46,6 +47,10 @@ class ValueViewModel : ViewModel() {
 
     var highConfidenceOnly by mutableStateOf(true)
 
+    // Dispatcher IO injectable (pour des tests déterministes) — même pattern
+    // que UpcomingViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
+
     private var autoRefreshJob: kotlinx.coroutines.Job? = null
 
     fun startAutoRefresh() {
@@ -75,7 +80,7 @@ class ValueViewModel : ViewModel() {
         state = ValueUiState.Loading
         viewModelScope.launch {
             state = try {
-                val resp = withContext(Dispatchers.IO) {
+                val resp = withContext(io) {
                     ApiClient.create().value(limit = 20)
                 }
                 ValueUiState.Success(
@@ -101,7 +106,7 @@ class ValueViewModel : ViewModel() {
         historyState = ValueHistoryUiState.Loading
         viewModelScope.launch {
             historyState = try {
-                val resp = withContext(Dispatchers.IO) {
+                val resp = withContext(io) {
                     ApiClient.create().valueHistory(limit = 50)
                 }
                 ValueHistoryUiState.Success(resp)

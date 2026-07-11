@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.PredictResponse
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,6 +28,10 @@ class PredictViewModel : ViewModel() {
 
     var state by mutableStateOf<PredictUiState>(PredictUiState.Idle)
         private set
+
+    // Dispatcher IO injectable (pour des tests déterministes) — même pattern
+    // que UpcomingViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
 
     // Quel emplacement remplir au prochain tap depuis la recherche (0 = J1, 1 = J2).
     private var pickNext = 0
@@ -52,7 +57,7 @@ class PredictViewModel : ViewModel() {
         state = PredictUiState.Loading
         viewModelScope.launch {
             state = try {
-                val response = withContext(Dispatchers.IO) {
+                val response = withContext(io) {
                     ApiClient.create().predict(player1.trim(), player2.trim())
                 }
                 PredictUiState.Success(response)
