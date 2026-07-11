@@ -25,8 +25,8 @@ from typing import Any, Dict, Optional
 from flask import Flask, jsonify, request
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
-               db, elo, espn_api, features, intelligence, live_api, memory, mistake_learner,
-               namematch, odds_api, predictor, sackmann_feeder, settlement, weather)
+               db, elo, espn_api, features, intelligence, intelligence_layer, live_api, memory,
+               mistake_learner, namematch, odds_api, predictor, sackmann_feeder, settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -692,6 +692,41 @@ def api_predict():
         pass
 
     return jsonify(payload)
+
+
+@app.get("/api/insight")
+def api_insight():
+    """Sport Intelligence Layer (Phase 1) : "pourquoi ce pick ?" en un seul appel.
+
+    Façade sur des calculs déjà faits ailleurs (voir bot/intelligence_layer.py) :
+    décomposition exacte du logit (comme /api/predict), H2H, santé du modèle
+    (drift/blacklist/surface, comme /api/intelligence/stats) et mouvement de
+    cotes (comme /api/line-movement) — pour éviter à l'app de faire 3 appels
+    et de recomposer elle-même l'explication.
+
+    `event_id` (optionnel) = id odds-api du match (voir /api/live, /api/value),
+    utilisé uniquement pour joindre le mouvement de ligne s'il existe.
+    """
+    p1, p2 = request.args.get("p1"), request.args.get("p2")
+    if not p1 or not p2:
+        return jsonify({"error": "paramètres requis: p1, p2"}), 400
+    n1 = _resolve(p1) or p1.strip()
+    n2 = _resolve(p2) or p2.strip()
+
+    surface = request.args.get("surface") or None
+    event_id = request.args.get("event_id") or None
+
+    f1 = features.feature_vector(features.get_profile(_MEM, n1))
+    f2 = features.feature_vector(features.get_profile(_MEM, n2))
+    r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
+    explain = _explain(n1, f1, n2, f2)
+
+    insight = intelligence_layer.build_insight(
+        n1, n2, explain,
+        confidence=r["confidence"], confidence_label=r["confidence_label"],
+        surface=surface, event_id=event_id,
+    )
+    return jsonify(insight)
 
 
 _upcoming_cache: Dict[str, Any] = {}

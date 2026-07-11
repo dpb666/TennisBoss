@@ -1,0 +1,87 @@
+"""Tests HTTP pour /api/insight (Sport Intelligence Layer, Phase 1).
+
+Premier test au niveau app.test_client() du projet (jusqu'ici, les 147 tests
+existants ne testaient que les modules sous-jacents, jamais le routing Flask
+lui-même — voir audit Étape 3). On ne fait pas tourner _load_state() (accès
+réseau/DB réels) : on peuple directement bot.api._MEM avec un fixture, comme
+le fait déjà tests/test_chat.py pour bot/chat.py.
+"""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from bot import api
+
+
+def _fake_mem():
+    return {
+        "players": {
+            "Jannik Sinner": {"serve": 0.72, "return1": 0.55, "return2": 0.58, "recent": 1.0, "n": 321},
+            "Carlos Alcaraz": {"serve": 0.70, "return1": 0.53, "return2": 0.56, "recent": 0.95, "n": 280},
+        },
+        "elo": {"Jannik Sinner": 2112.0, "Carlos Alcaraz": 2085.0},
+        "weights": {"serve": 1.2, "return1": 0.8, "return2": 0.6, "recent": 0.5},
+        "bias": 0.0,
+        "metrics": {"accuracy": 0.644},
+    }
+
+
+def _client():
+    api._MEM = _fake_mem()
+    api.app.testing = True
+    return api.app.test_client()
+
+
+def test_insight_requires_both_players():
+    resp = _client().get("/api/insight?p1=Jannik+Sinner")
+    assert resp.status_code == 400
+
+
+def test_insight_returns_factors_and_health():
+    with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.intelligence, "stats", return_value={
+             "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
+         }), \
+         patch.object(api.db, "line_movement", return_value=None):
+        resp = _client().get("/api/insight?p1=Jannik+Sinner&p2=Carlos+Alcaraz")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["player1"] == "Jannik Sinner"
+    assert data["player2"] == "Carlos Alcaraz"
+    assert data["confidence_label"]
+    assert data["decisive_factor"]
+    assert any(f["label"] == "Niveau ELO (historique)" for f in data["factors"])
+    assert data["market"] is None
+    assert data["model_health"] == {
+        "player1_blacklisted": False,
+        "player2_blacklisted": False,
+        "surface_danger": False,
+        "accuracy_drift_pts": 0.0,
+    }
+
+
+def test_insight_flags_blacklisted_player():
+    with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.intelligence, "stats", return_value={
+             "blacklist": ["Carlos Alcaraz"], "surface_danger": ["clay"], "accuracy_drift_pts": -6.0,
+         }), \
+         patch.object(api.db, "line_movement", return_value=None):
+        resp = _client().get(
+            "/api/insight?p1=Jannik+Sinner&p2=Carlos+Alcaraz&surface=clay&event_id=42"
+        )
+    data = resp.get_json()
+    assert data["model_health"]["player2_blacklisted"] is True
+    assert data["model_health"]["surface_danger"] is True
+    assert data["model_health"]["accuracy_drift_pts"] == -6.0
+
+
+def test_insight_includes_market_movement_when_available():
+    fake_move = {"event_key": "42", "n_snapshots": 3, "move_home_pct": -12.5, "move_away_pct": 8.0}
+    with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.intelligence, "stats", return_value={
+             "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
+         }), \
+         patch.object(api.db, "line_movement", return_value=fake_move) as mocked:
+        resp = _client().get("/api/insight?p1=Jannik+Sinner&p2=Carlos+Alcaraz&event_id=42")
+    mocked.assert_called_once_with("42")
+    assert resp.get_json()["market"] == fake_move
