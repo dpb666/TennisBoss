@@ -88,6 +88,14 @@ def form_signals(mem: Dict[str, Any], n1: str, n2: str) -> List[Dict[str, Any]]:
 def steam_move_signal(event_id: Optional[Any]) -> Optional[Dict[str, Any]]:
     """Mouvement de cote anormal capté par le scanner, si suivi pour ce match.
 
+    Un "steam move" (terme du milieu du paris) désigne une cote qui RACCOURCIT
+    (move_pct négatif : closing < opening — plus de monde parie dessus), pas
+    juste "la plus grosse variation en valeur absolue" : un allongement de
+    cote (moins de monde dessus) est l'exact opposé et ne doit pas être
+    labellisé comme un steam move sur ce côté. Bug trouvé et corrigé via
+    bot/signal_backtest.py::backtest_steam_move (même erreur reproduite dans
+    le backtest avant d'être repérée par le résultat aberrant qu'elle produisait).
+
     Purement diagnostique : n'affecte ni le calcul d'EV ni le filtre
     `is_value` de /api/value (voir note Phase 2 en tête de fichier).
     """
@@ -97,11 +105,14 @@ def steam_move_signal(event_id: Optional[Any]) -> Optional[Dict[str, Any]]:
     if not mv or mv.get("n_snapshots", 0) < 2:
         return None
     move_home, move_away = mv["move_home_pct"], mv["move_away_pct"]
-    biggest = move_home if abs(move_home) >= abs(move_away) else move_away
-    if abs(biggest) < STEAM_MOVE_THRESHOLD_PCT:
+    if move_home <= -STEAM_MOVE_THRESHOLD_PCT and move_home <= move_away:
+        side, biggest = "home", move_home
+    elif move_away <= -STEAM_MOVE_THRESHOLD_PCT and move_away <= move_home:
+        side, biggest = "away", move_away
+    else:
         return None
     return {
-        "side": "home" if biggest == move_home else "away",
+        "side": side,
         "move_pct": biggest,
         "n_snapshots": mv["n_snapshots"],
     }

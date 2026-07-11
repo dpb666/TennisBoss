@@ -19,7 +19,7 @@ import os
 import sys
 
 from bot import (backtest as bt, backup as backup_mod, config, datasource, db, features,
-                 learner, live_api, memory, namematch, odds_api, predictor)
+                 learner, live_api, memory, namematch, odds_api, predictor, signal_backtest)
 from bot.bootstrap import bootstrap
 from bot.log import log
 
@@ -383,6 +383,40 @@ def cmd_backup(_args) -> None:
     print(f"{len(existing)} sauvegarde(s) conservée(s) dans {backup_mod.BACKUP_DIR}")
 
 
+def cmd_signals(_args) -> None:
+    """Backtest walk-forward des signaux Sport Intelligence Layer (voir bot/signal_backtest.py)."""
+    report = signal_backtest.run_all()
+    print("\n--- CALIBRATION (calib_k / Platt) ---")
+    c = report["calibration"]
+    if not c.get("fitted"):
+        print(c.get("note"))
+    else:
+        print(f"Train: {c['n_train']} ({c['span_train']}) | Test: {c['n_test']} ({c['span_test']})")
+        print(f"Log-loss  brut={c['logloss_raw']}  température(k={c['fitted_k']})={c['logloss_temperature']}  "
+              f"Platt(a={c['fitted_platt_a']},b={c['fitted_platt_b']})={c['logloss_platt']}")
+        print(c["verdict"])
+
+    print("\n--- FORM_SIGNAL ---")
+    f = report["form_signal"]
+    print(f"{f['n_matches_replayed']} matchs rejoués | seuil={f['threshold_pts']}pts, min={f['min_matches']} matchs")
+    print(f"Surperformance : {f['surperformance']['wins']}/{f['surperformance']['total']} "
+          f"({f['surperformance_win_rate']})")
+    print(f"Méforme        : {f['méforme']['wins']}/{f['méforme']['total']} ({f['méforme_win_rate']})")
+    print(f"Baseline       : {f['aucun_signal']['wins']}/{f['aucun_signal']['total']} ({f['baseline_win_rate']})")
+    print(f"Limite : {f['caveat']}")
+    print(f['verdict'])
+
+    print("\n--- STEAM_MOVE ---")
+    s = report["steam_move"]
+    if s.get("n_with_move", 0) == 0:
+        print(s.get("note"))
+    else:
+        print(f"n={s['n_with_move']} | taux de victoire réel={s['actual_win_rate_moved_side']} "
+              f"vs implicite ouverture={s['avg_opening_implied_prob']} (edge {s['edge_vs_opening_line']:+})")
+        print(s["verdict"])
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="tennisboss", description="Bot tennis autonome")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -447,6 +481,7 @@ def main() -> None:
     p_reset.set_defaults(func=cmd_reset)
 
     sub.add_parser("backup", help="Sauvegarde immédiate de la base SQLite").set_defaults(func=cmd_backup)
+    sub.add_parser("signals", help="Backtest calib_k/form_signal/steam_move").set_defaults(func=cmd_signals)
 
     args = parser.parse_args()
     args.func(args)
