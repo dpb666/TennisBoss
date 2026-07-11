@@ -1,8 +1,29 @@
 """Tests for the real-time settlement engine."""
 import asyncio
+import os
+import tempfile
+
 import pytest
-from bot import realtime, db, memory
+from bot import config, realtime, db, memory
 from bot.realtime import RealtimeSettlementEngine
+
+
+@pytest.fixture(autouse=True)
+def temp_db(monkeypatch):
+    """Isole chaque test sur une DB SQLite temporaire.
+
+    Sans ceci, test_roi_calculation écrivait un faux pari ("Player A" vs
+    "Player B") directement dans le bet_log de PRODUCTION (state/tennisboss.db)
+    à chaque exécution — et le test plantait sur un checkout propre (pas de
+    state/ local, donc "no such table: bet_log"). Même pattern que
+    test_settlement.py::TestCalibrationMetrics.
+    """
+    fd, path = tempfile.mkstemp(suffix=".db")
+    monkeypatch.setattr(config, "DB_FILE", path)
+    db.init()
+    yield
+    os.close(fd)
+    os.remove(path)
 
 
 @pytest.fixture
