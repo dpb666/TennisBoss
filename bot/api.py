@@ -706,6 +706,9 @@ def api_insight():
 
     `event_id` (optionnel) = id odds-api du match (voir /api/live, /api/value),
     utilisé uniquement pour joindre le mouvement de ligne s'il existe.
+    `sentiment=true` (optionnel, défaut false) : ajoute le sentiment
+    actualités (NewsAPI.org). Opt-in volontaire — quota NewsAPI gratuit très
+    serré (100 req/jour), voir bot/sentiment.py.
     """
     p1, p2 = request.args.get("p1"), request.args.get("p2")
     if not p1 or not p2:
@@ -715,6 +718,7 @@ def api_insight():
 
     surface = request.args.get("surface") or None
     event_id = request.args.get("event_id") or None
+    include_sentiment = request.args.get("sentiment", "false").lower() == "true"
 
     f1 = features.feature_vector(features.get_profile(_MEM, n1))
     f2 = features.feature_vector(features.get_profile(_MEM, n2))
@@ -724,7 +728,7 @@ def api_insight():
     insight = intelligence_layer.build_insight(
         _MEM, n1, n2, explain,
         confidence=r["confidence"], confidence_label=r["confidence_label"],
-        surface=surface, event_id=event_id,
+        surface=surface, event_id=event_id, include_sentiment=include_sentiment,
     )
     return jsonify(insight)
 

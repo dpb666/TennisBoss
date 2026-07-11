@@ -61,6 +61,7 @@ def test_insight_returns_factors_and_health():
     assert data["decisive_factor"]
     assert any(f["label"] == "Niveau ELO (historique)" for f in data["factors"])
     assert data["form_signals"] == []
+    assert data["sentiment_signals"] == []
     assert data["market"] is None
     assert data["model_health"] == {
         "player1_blacklisted": False,
@@ -116,3 +117,37 @@ def test_insight_flags_form_swing():
     assert len(signals) == 1
     assert signals[0]["player"] == "Carlos Alcaraz"
     assert signals[0]["direction"] == "surperformance"
+
+
+def test_insight_sentiment_is_opt_in():
+    # Sans ?sentiment=true, aucun appel réseau/quota consommé (voir note
+    # Phase 3 dans intelligence_layer.py : quota NewsAPI très serré).
+    with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
+         patch.object(api.intelligence, "stats", return_value={
+             "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
+         }), \
+         patch.object(api.db, "line_movement", return_value=None), \
+         patch.object(api.intelligence_layer.sentiment, "is_enabled", return_value=True), \
+         patch.object(api.intelligence_layer.sentiment, "player_sentiment") as mocked:
+        resp = _client().get("/api/insight?p1=Jannik+Sinner&p2=Carlos+Alcaraz")
+    mocked.assert_not_called()
+    assert resp.get_json()["sentiment_signals"] == []
+
+
+def test_insight_sentiment_included_when_requested():
+    fake_sentiment = {"player": "Jannik Sinner", "n_articles": 3, "score": 0.5,
+                      "label": "positif", "headlines": ["Sinner wins"]}
+    with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
+         patch.object(api.intelligence, "stats", return_value={
+             "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
+         }), \
+         patch.object(api.db, "line_movement", return_value=None), \
+         patch.object(api.intelligence_layer.sentiment, "is_enabled", return_value=True), \
+         patch.object(api.intelligence_layer.sentiment, "player_sentiment",
+                      side_effect=lambda n: fake_sentiment if n == "Jannik Sinner" else None):
+        resp = _client().get("/api/insight?p1=Jannik+Sinner&p2=Carlos+Alcaraz&sentiment=true")
+    signals = resp.get_json()["sentiment_signals"]
+    assert len(signals) == 1
+    assert signals[0]["player"] == "Jannik Sinner"

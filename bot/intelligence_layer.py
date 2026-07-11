@@ -1,4 +1,4 @@
-"""Sport Intelligence Layer — façade Phase 1 + Pattern Detection Phase 2.
+"""Sport Intelligence Layer — façade Phase 1 + Pattern Detection Phase 2 + Phase 3.
 
 Ne calcule rien de nouveau pour la partie Phase 1 : regroupe en un seul
 objet ce que `intelligence.py` (drift/blacklist/surfaces), `db.line_movement`
@@ -21,12 +21,20 @@ figé à 1.0 faute de recul) — un signal non backtesté qui influencerait une
 probabilité répéterait cette erreur. Une fois assez de picks avec/sans ces
 signaux réglés (voir bot/clv.py), un backtest décidera s'ils méritent de
 peser sur le modèle.
+
+Phase 3 ajoute le sentiment/actualités (bot/sentiment.py, NewsAPI.org) —
+même prudence : informatif uniquement. Contrainte supplémentaire propre à
+cette source : le plan gratuit NewsAPI est à 100 requêtes/jour (bien plus
+serré que le pool ODDS_API). Le signal est donc désactivé par défaut dans
+/api/insight (paramètre `sentiment=true` explicite) plutôt qu'appelé à
+chaque ouverture de "Pourquoi ce pick ?" côté app — un signal qui grille le
+quota en quelques minutes d'usage normal serait pire qu'utile.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import db, intelligence
+from . import db, intelligence, sentiment
 
 # Écart (points de %) entre forme récente (EMA) et bilan carrière pour
 # déclencher un signal de bascule de forme. En dessous, c'est du bruit normal
@@ -99,6 +107,22 @@ def steam_move_signal(event_id: Optional[Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def sentiment_signals(n1: str, n2: str) -> List[Dict[str, Any]]:
+    """Sentiment récent (NewsAPI) pour les 2 joueurs, si NEWSAPI_KEY configurée.
+
+    Appelant responsable d'activer ceci explicitement (voir note Phase 3 en
+    tête de fichier) — pas de coût caché.
+    """
+    if not sentiment.is_enabled():
+        return []
+    out = []
+    for name in (n1, n2):
+        sig = sentiment.player_sentiment(name)
+        if sig:
+            out.append(sig)
+    return out
+
+
 def _h2h_factor(n1: str, n2: str) -> Optional[Dict[str, Any]]:
     h2h = db.head_to_head(n1, n2)
     w1 = sum(1 for row in h2h if row["winner"] == n1)
@@ -133,6 +157,7 @@ def build_insight(
     confidence_label: str = "?",
     surface: Optional[str] = None,
     event_id: Optional[str] = None,
+    include_sentiment: bool = False,
 ) -> Dict[str, Any]:
     """Agrège facteurs de décision + santé du modèle + mouvement de marché.
 
@@ -141,6 +166,7 @@ def build_insight(
     `confidence`/`confidence_label` viennent du même résultat de prédiction
     déjà calculé par l'appelant. `mem` sert uniquement à lire les profils
     joueurs pour `form_signals` (EMA déjà en mémoire, pas de recalcul).
+    `include_sentiment` : opt-in explicite (voir note Phase 3, quota NewsAPI).
     """
     factors: List[Dict[str, Any]] = list(explain.get("factors") or [])
     h2h = _h2h_factor(n1, n2)
@@ -155,6 +181,7 @@ def build_insight(
         "decisive_factor": explain.get("decisive"),
         "factors": factors,
         "form_signals": form_signals(mem, n1, n2),
+        "sentiment_signals": sentiment_signals(n1, n2) if include_sentiment else [],
         "market": market,
         "model_health": _model_health(n1, n2, surface),
     }
