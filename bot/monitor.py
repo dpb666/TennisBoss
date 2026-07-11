@@ -8,11 +8,12 @@ Runs continuously to:
 """
 
 import json
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Any
 
-from . import db, live_api, memory, odds_api, predictor, settlement
+from . import db, intelligence, live_api, memory, odds_api, predictor, settlement
 from .log import log
 
 
@@ -44,7 +45,17 @@ class SystemMonitor:
             return {"status": "error", "error": str(e)}
 
     def check_api_endpoints(self) -> Dict[str, Any]:
-        """Test critical API endpoints."""
+        """Test critical API endpoints.
+
+        Envoie X-API-Token si TENNISBOSS_API_TOKEN est définie : sans ça,
+        /api/status, /api/value, /api/upcoming renvoient systématiquement 401
+        dès que le token est actif (voir bot/api.py::_auth), et CE check lui-même
+        générait une fausse alerte à chaque cycle (5 min) depuis l'activation du
+        token — le monitor était aveugle à ses propres échecs par un bug, pas
+        par un vrai problème de disponibilité.
+        """
+        import urllib.request
+
         endpoints = {
             "health": "/health",
             "status": "/api/status",
@@ -52,13 +63,18 @@ class SystemMonitor:
             "upcoming": "/api/upcoming?days=1&limit=1",
         }
         results = {}
+        token = os.environ.get("TENNISBOSS_API_TOKEN", "").strip()
 
         for name, path in endpoints.items():
             try:
-                # Simulate local API call
-                import urllib.request
                 url = f"http://localhost:8000{path}"
-                response = urllib.request.urlopen(url, timeout=5)
+                req = urllib.request.Request(url)
+                if token:
+                    req.add_header("X-API-Token", token)
+                # /api/value fait plusieurs appels odds-api.io séquentiels par
+                # requête (voir bot/api.py::api_value) — 5s était trop court et
+                # produisait de faux timeouts sans rapport avec une vraie panne.
+                response = urllib.request.urlopen(req, timeout=15)
                 status = response.status
                 results[name] = {"status": "ok", "code": status}
             except Exception as e:  # noqa: BLE001
@@ -84,7 +100,17 @@ class SystemMonitor:
         }
 
     def check_model_drift(self) -> Dict[str, Any]:
-        """Detect model degradation over time."""
+        """Detect model degradation over time.
+
+        Délègue à bot.intelligence.stats() (fenêtre glissante de
+        DRIFT_WINDOW=50 picks vs précision all-time, alerte si écart >
+        DRIFT_ALERT_PCT) plutôt que de comparer la précision all-time à une
+        constante codée en dur (0.62) : cette dernière approche ne peut
+        jamais détecter une vraie dérive RÉCENTE — une précision all-time
+        est diluée par tout l'historique, une dégradation des 50 derniers
+        picks y est noyée. bot/intelligence.py fait déjà ce calcul
+        correctement (fenêtre glissante) ; ne pas le dupliquer en moins bien.
+        """
         metrics = settlement.calibration_metrics()
         n_settled = metrics.get("n", 0)
 
@@ -94,16 +120,21 @@ class SystemMonitor:
         accuracy = metrics.get("accuracy", 0.0)
         roi = metrics.get("roi", 0.0)
 
-        # Alert if accuracy drops >5% from baseline
-        baseline_acc = 0.62  # Historical baseline from logs
-        if accuracy < baseline_acc - 0.05:
-            self.alerts.append(f"Model accuracy degraded: {accuracy:.4f} (baseline {baseline_acc:.4f})")
+        intel_stats = intelligence.stats()
+        drift_pts = intel_stats.get("accuracy_drift_pts", 0.0)
+        drift_threshold = intel_stats.get("thresholds", {}).get("drift_alert_pts", 5.0)
+        if drift_pts <= -drift_threshold:
+            self.alerts.append(
+                f"Model accuracy drift detected: {drift_pts:.1f}pts vs all-time "
+                f"(50 derniers picks, seuil {drift_threshold}pts)"
+            )
 
         return {
             "status": "ok",
             "accuracy": accuracy,
             "roi_pct": roi * 100,
             "n_settled": n_settled,
+            "accuracy_drift_pts": drift_pts,
         }
 
     def run_full_check(self) -> Dict[str, Any]:
