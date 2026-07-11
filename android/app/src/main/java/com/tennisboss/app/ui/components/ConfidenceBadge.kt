@@ -19,6 +19,7 @@ fun ConfidenceBadge(label: String, confidence: Double = 0.0) {
         "élevée"  -> Color(0xFF00E5A0) to Color(0xFF00251A)
         "bonne"   -> Color(0xFF4F8CFF) to Color(0xFFFFFFFF)
         "modérée" -> Color(0xFFFFB800) to Color(0xFF2A1F00)
+        "faible"  -> Color(0xFFFF5252) to Color(0xFF2A0000)
         else      -> Color(0xFF444444) to Color(0xFFCCCCCC)
     }
     Box(
