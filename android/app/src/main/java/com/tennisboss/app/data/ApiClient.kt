@@ -35,11 +35,20 @@ object ApiClient {
         return if (isEmulator) EMULATOR_BASE_URL else DEFAULT_BASE_URL
     }
 
+    // Calculé à la PREMIÈRE LECTURE, pas au chargement de la classe : un `object`
+    // Kotlin exécute tous ses initialisateurs de champs dès qu'un membre est
+    // touché (ex. ApiClient.apiOverride = ...), donc un `= defaultUrl()` ici
+    // forcerait android.os.Build.* à chaque fois — y compris dans les tests
+    // unitaires JVM (sans device ni Robolectric), où Build.FINGERPRINT est
+    // null → NullPointerException avant même que le test n'ait pu s'exécuter.
     @Volatile
-    var baseUrl: String = defaultUrl()
+    private var _baseUrl: String? = null
+
+    var baseUrl: String
+        get() = _baseUrl ?: defaultUrl().also { _baseUrl = it }
         set(value) {
-            if (field != value) {
-                field = value
+            if (_baseUrl != value) {
+                _baseUrl = value
                 _cached = null  // invalide le cache si l'URL change
             }
         }
