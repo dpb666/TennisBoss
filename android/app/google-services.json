@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "967332900624",
+    "project_id": "tennisboss-de863",
+    "storage_bucket": "tennisboss-de863.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967332900624:android:493ca9d074516281813f95",
+        "android_client_info": {
+          "package_name": "com.tennisboss.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbBPoUBPm_wGIOo0y-SFXk95LDp01flxw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

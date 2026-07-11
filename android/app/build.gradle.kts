@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 // Token API — priorité : local.properties > variable d'env > gradle property.
@@ -91,6 +92,10 @@ dependencies {
 
     // Background polling + notifications push locales
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Notifications push serveur (Firebase Cloud Messaging)
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     // Tests unitaires (JVM)
     testImplementation("junit:junit:4.13.2")

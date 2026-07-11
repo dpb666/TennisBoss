@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Set
 
 import requests
 
+from . import push_notifications
 from .log import log
 
 _ALERTED_LOCK = threading.Lock()
@@ -143,6 +144,11 @@ def on_value_pick(pick: Dict[str, Any]) -> None:
 
     _send(msg)
 
+    if push_notifications.is_enabled():
+        push_title = "🎾 Scanner pick" if is_scanner else "💎 Value pick"
+        push_body = f"{p1} vs {p2} — {side} @ {odds_s.strip('`')} (EV +{ev:.0f}%)"
+        push_notifications.broadcast(push_title, push_body, data={"type": "value_pick", "player1": p1, "player2": p2})
+
 
 def on_odds_move(p1: str, p2: str, side: str,
                  pick_odds: float, current_odds: float) -> None:
@@ -171,6 +177,11 @@ def on_odds_move(p1: str, p2: str, side: str,
     if move_pct < 0:
         msg += "\n_⚠️ Marché contre nous — surveiller_"
     _send(msg)
+
+    if push_notifications.is_enabled():
+        push_title = "⚠️ Cote défavorable" if move_pct < 0 else "ℹ️ Mouvement de cote"
+        push_body = f"{p1} vs {p2} — {side} : {pick_odds:.2f} → {current_odds:.2f} ({direction} {abs(move_pct):.0f}%)"
+        push_notifications.broadcast(push_title, push_body, data={"type": "odds_move", "player1": p1, "player2": p2})
 
 
 def on_settlement(p1: str, p2: str, winner: str, side: str,
@@ -219,6 +230,11 @@ def on_settlement(p1: str, p2: str, winner: str, side: str,
         pass
 
     _send(msg)
+
+    if push_notifications.is_enabled():
+        push_title = "✅ Pick gagné" if won else "❌ Pick perdu"
+        push_body = f"{p1} vs {p2} — {side} @ {odds:.2f} ({pnl_s})"
+        push_notifications.broadcast(push_title, push_body, data={"type": "settlement", "player1": p1, "player2": p2})
 
 
 # --- Compat singleton (ancien code utilise _ra.get()) ---

@@ -23,6 +23,8 @@ object PickNotificationHelper {
     private const val SWING_CHANNEL_DESC = "Alertes quand le favori change pendant un match en direct"
     private const val SWING_NOTIFICATION_ID_BASE = 2000
 
+    private const val REMOTE_NOTIFICATION_ID_BASE = 3000
+
     fun createChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -114,6 +116,37 @@ object PickNotificationHelper {
 
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS non accordée — silencieux
+        }
+    }
+
+    /**
+     * Notification push serveur (FCM) reçue app au premier plan — quand l'app
+     * est en arrière-plan/fermée, le système Android affiche directement le
+     * payload "notification" du message sans passer par ce code. Réutilise le
+     * canal CHANNEL_ID existant plutôt que d'en créer un 3e.
+     */
+    fun showRemoteNotification(context: Context, title: String, body: String) {
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context)
+                .notify(REMOTE_NOTIFICATION_ID_BASE + (System.currentTimeMillis() % 1000).toInt(), notification)
         } catch (_: SecurityException) {
             // POST_NOTIFICATIONS non accordée — silencieux
         }

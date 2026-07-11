@@ -171,6 +171,16 @@ data class SteamMove(
     val n_snapshots: Int = 0,
 )
 
+/** Enregistrement du token FCM d'un appareil pour les notifications push. */
+data class DeviceRegisterRequest(
+    val token: String,
+    val platform: String = "android",
+)
+
+data class DeviceRegisterResponse(
+    val status: String = "",
+)
+
 /** Réponse de /api/insight — Sport Intelligence Layer Phase 1+2 : "pourquoi ce pick ?". */
 data class InsightResponse(
     val player1: String = "",

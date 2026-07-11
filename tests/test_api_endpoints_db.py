@@ -132,5 +132,19 @@ class TestInplayPicksCrud(ApiDbTestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestDeviceTokens(ApiDbTestCase):
+    def test_register_is_idempotent_and_listable(self):
+        db.register_device_token("tok1")
+        db.register_device_token("tok1")  # ré-enregistrement : ne doit pas dupliquer
+        db.register_device_token("tok2", platform="android")
+        tokens = {r["token"] for r in db.list_device_tokens()}
+        self.assertEqual(tokens, {"tok1", "tok2"})
+
+    def test_delete_removes_token(self):
+        db.register_device_token("tok1")
+        db.delete_device_token("tok1")
+        self.assertEqual(list(db.list_device_tokens()), [])
+
+
 if __name__ == "__main__":
     unittest.main()

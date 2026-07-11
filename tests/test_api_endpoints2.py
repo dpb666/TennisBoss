@@ -334,6 +334,19 @@ def test_upload_requires_file():
     assert resp.status_code == 400
 
 
+def test_device_register_requires_token():
+    resp = _client().post("/api/device/register", json={})
+    assert resp.status_code == 400
+
+
+def test_device_register_success():
+    with patch.object(api.db, "register_device_token") as mocked:
+        resp = _client().post("/api/device/register", json={"token": "abc123"})
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "registered"
+    mocked.assert_called_once_with("abc123", "android")
+
+
 def test_upload_returns_extracted_text():
     import io
     with patch("bot.file_parser.parse", return_value=("contenu extrait", "txt")):

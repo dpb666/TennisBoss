@@ -57,6 +57,9 @@ interface TennisBossApi {
     @GET("api/calibration")
     suspend fun calibration(): CalibrationResponse
 
+    @POST("api/device/register")
+    suspend fun registerDevice(@Body request: DeviceRegisterRequest): DeviceRegisterResponse
+
     @GET("api/insight")
     suspend fun insight(
         @Query("p1") p1: String,

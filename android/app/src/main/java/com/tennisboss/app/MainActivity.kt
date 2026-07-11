@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.tennisboss.app.data.ApiClient
@@ -65,6 +66,8 @@ import com.tennisboss.app.notifications.PickNotificationHelper
 import com.tennisboss.app.notifications.LiveProbPollWorker
 import com.tennisboss.app.notifications.ScannerPollWorker
 import com.tennisboss.app.ui.theme.TennisBossTheme
+import com.google.firebase.messaging.FirebaseMessaging
+import com.tennisboss.app.data.DeviceRegisterRequest
 
 class MainActivity : ComponentActivity() {
 
@@ -125,6 +128,26 @@ fun AppRoot() {
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         TokenManager.initialize(context)
+
+        // Ré-enregistre le token FCM à chaque démarrage : couvre le cas où le
+        // token existait déjà avant l'ajout de cette fonctionnalité (onNewToken
+        // ne se redéclenche pas pour un token inchangé), et rattrape un échec
+        // silencieux de TennisBossMessagingService.onNewToken. Doit s'exécuter
+        // APRÈS TokenManager.initialize (sinon ApiClient.apiToken est encore
+        // vide -> 401 sur /api/device/register, bug constaté et corrigé).
+        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+            android.util.Log.d("TennisBossFCM", "Token obtenu: $token")
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    ApiClient.create().registerDevice(DeviceRegisterRequest(token = token))
+                    android.util.Log.d("TennisBossFCM", "Enregistré côté backend OK")
+                } catch (e: Exception) {
+                    android.util.Log.e("TennisBossFCM", "Échec enregistrement backend", e)
+                }
+            }
+        }.addOnFailureListener { e ->
+            android.util.Log.e("TennisBossFCM", "Échec obtention token FCM", e)
+        }
     }
 
     Scaffold(

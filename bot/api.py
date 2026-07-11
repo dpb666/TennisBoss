@@ -2457,6 +2457,23 @@ def api_inplay_picks_delete(pick_id: int):
     return jsonify({"id": pick_id, "status": "deleted"})
 
 
+@app.route("/api/device/register", methods=["POST"])
+def api_device_register():
+    """Enregistre le token FCM d'un appareil pour les notifications push.
+
+    Appelé par l'app au démarrage et à chaque renouvellement de token
+    (FirebaseMessagingService.onNewToken). Idempotent : ré-enregistrer un
+    token déjà connu se contente de rafraîchir last_seen_ts.
+    """
+    body = request.get_json(silent=True) or {}
+    token = (body.get("token") or "").strip()
+    if not token:
+        return jsonify({"error": "paramètre requis: token"}), 400
+    platform = (body.get("platform") or "android").strip()
+    db.register_device_token(token, platform)
+    return jsonify({"status": "registered"})
+
+
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
     ev = odds_api.find_event(odds_index, raw1, raw2)
     if not ev:

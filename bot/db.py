@@ -149,6 +149,12 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     hours_ahead REAL            -- heures avant le coup d'envoi au moment de la capture
 );
 CREATE INDEX IF NOT EXISTS idx_snap_event ON market_snapshots(event_key, ts);
+CREATE TABLE IF NOT EXISTS device_tokens (
+    token       TEXT PRIMARY KEY,   -- token FCM (unique par installation d'app)
+    platform    TEXT,               -- "android" (seule plateforme actuelle)
+    registered_ts TEXT,
+    last_seen_ts  TEXT
+);
 CREATE TABLE IF NOT EXISTS live_prob_snapshots (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     event_key  TEXT,            -- id événement live (regroupe les points d'un même match)
@@ -923,6 +929,30 @@ def record_market_snapshot(event_key: str, p1: str, p2: str,
             (event_key, _dt.datetime.now().isoformat(timespec="seconds"),
              p1, p2, odds_home, odds_away, hours_ahead),
         )
+
+
+# --- Notifications push (device tokens FCM) ---------------------------------
+def register_device_token(token: str, platform: str = "android") -> None:
+    """Enregistre/rafraîchit un token FCM (INSERT OR REPLACE = idempotent)."""
+    import datetime as _dt
+    now = _dt.datetime.now().isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO device_tokens (token,platform,registered_ts,last_seen_ts) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(token) DO UPDATE SET last_seen_ts=excluded.last_seen_ts",
+            (token, platform, now, now),
+        )
+
+
+def list_device_tokens() -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute("SELECT token, platform FROM device_tokens").fetchall()
+
+
+def delete_device_token(token: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM device_tokens WHERE token=?", (token,))
 
 
 def line_movement(event_key: str) -> Optional[Dict[str, Any]]:

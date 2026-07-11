@@ -2,9 +2,6 @@
 state/
 logs/
 
-# Firebase (retiré du build — fichier orphelin, ne pas versionner)
-android/app/google-services.json
-
 # Android Kotlin incremental build errors
 android/.kotlin/
 
