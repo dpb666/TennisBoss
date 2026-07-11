@@ -722,7 +722,7 @@ def api_insight():
     explain = _explain(n1, f1, n2, f2)
 
     insight = intelligence_layer.build_insight(
-        n1, n2, explain,
+        _MEM, n1, n2, explain,
         confidence=r["confidence"], confidence_label=r["confidence_label"],
         surface=surface, event_id=event_id,
     )
@@ -1758,6 +1758,11 @@ def api_value():
         _tourn_label = _leag_name.lower()
         _terrain_ok = any(k in _tourn_label for k in _GOOD_TOURN)
 
+        # Steam move (Sport Intelligence Layer Phase 2) : purement informatif,
+        # n'entre pas dans is_value/best_ev — voir note en tête de
+        # bot/intelligence_layer.py (pas encore backtesté).
+        _steam_move = intelligence_layer.steam_move_signal(e.get("id"))
+
         _pick_entry = {
             "player1": n1, "player2": n2,
             "date": e.get("date", ""),
@@ -1769,6 +1774,7 @@ def api_value():
             "kelly_u": _kelly_u,
             "terrain_favorable": _terrain_ok,
             "honeypot": _honeypot,
+            "steam_move": _steam_move,
             "model_first_set_prob1": r["prob1"],
             "model_match_prob1": round(pm1 * 100, 1),
             "model_match_prob2": round(pm2 * 100, 1),

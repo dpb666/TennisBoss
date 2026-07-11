@@ -388,6 +388,17 @@ private fun ValueCard(c: ValueComparison) {
                 }
             }
 
+            // Sport Intelligence Layer Phase 2 : purement informatif (n'a pas
+            // influencé ev1/ev2/value côté backend — voir intelligence_layer.py).
+            c.steam_move?.let { sm ->
+                val side = if (sm.side == "home") c.player1 else c.player2
+                SignalChip(
+                    "📊 Steam move : ${side.substringAfterLast(" ")} ${String.format("%.0f", sm.move_pct)}% " +
+                        "(${sm.n_snapshots} relevés)",
+                    Color(0xFF4FC3F7),
+                )
+            }
+
             if (c.value && c.best_side != null) {
                 val odd = if (c.best_side == c.player1) c.odds.home else c.odds.away
                 val book = c.best_book?.takeIf { it.isNotBlank() }

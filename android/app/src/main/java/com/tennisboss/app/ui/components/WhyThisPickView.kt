@@ -124,6 +124,16 @@ private fun InsightContent(d: InsightResponse) {
 
         d.factors.forEach { f -> InsightFactorRow(f, d.player1, d.player2) }
 
+        d.form_signals.forEach { sig ->
+            val emoji = if (sig.direction == "surperformance") "📈" else "📉"
+            Text(
+                "$emoji ${sig.player} en ${sig.direction} : forme récente ${sig.recent_form_pct.toInt()}% " +
+                    "vs bilan carrière ${sig.career_baseline_pct.toInt()}%",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+
         modelHealthWarnings(d).forEach { warning ->
             Text(
                 "⚠️ $warning",

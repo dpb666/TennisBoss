@@ -151,7 +151,27 @@ data class ModelHealth(
     val accuracy_drift_pts: Double = 0.0,
 )
 
-/** Réponse de /api/insight — Sport Intelligence Layer Phase 1 : "pourquoi ce pick ?". */
+/**
+ * Bascule de forme (Sport Intelligence Layer Phase 2) : écart entre la forme
+ * récente (EMA) d'un joueur et son bilan carrière. Informatif uniquement —
+ * n'influence pas la prédiction (voir bot/intelligence_layer.py).
+ */
+data class FormSignal(
+    val player: String = "",
+    val direction: String = "",   // "surperformance" | "méforme"
+    val recent_form_pct: Double = 0.0,
+    val career_baseline_pct: Double = 0.0,
+    val diff_pts: Double = 0.0,
+)
+
+/** Mouvement de cote anormal (Sport Intelligence Layer Phase 2), informatif. */
+data class SteamMove(
+    val side: String = "",   // "home" | "away"
+    val move_pct: Double = 0.0,
+    val n_snapshots: Int = 0,
+)
+
+/** Réponse de /api/insight — Sport Intelligence Layer Phase 1+2 : "pourquoi ce pick ?". */
 data class InsightResponse(
     val player1: String = "",
     val player2: String = "",
@@ -159,6 +179,7 @@ data class InsightResponse(
     val confidence_label: String = "",
     val decisive_factor: String? = null,
     val factors: List<InsightFactor> = emptyList(),
+    val form_signals: List<FormSignal> = emptyList(),
     val market: MarketMovement? = null,
     val model_health: ModelHealth = ModelHealth(),
 )
@@ -386,6 +407,9 @@ data class ValueComparison(
     val source: String = "",
     val surface: String? = null,
     val filter_reason: String? = null,
+    // Sport Intelligence Layer Phase 2 : purement informatif, n'influence pas
+    // ev1/ev2/value côté backend (voir bot/intelligence_layer.py).
+    val steam_move: SteamMove? = null,
     val honeypot: HoneypotSignal? = null,
 )
 
