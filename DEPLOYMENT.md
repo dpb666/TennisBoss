@@ -1,9 +1,19 @@
 # Déploiement — accès public permanent (WSL2 + Cloudflare)
 
-Comment l'API TennisBoss (`bot/api.py`, port 8000) et le quant (`app/`, port 8001)
-sont exposés en permanence sur **https://api.tennisboss.online**, et comment tout
-redémarre automatiquement après un reboot du PC. Procédure écrite pour être
-reproductible sur une nouvelle machine.
+Comment l'API TennisBoss (`bot/api.py`, port 8000) est exposée en permanence sur
+**https://api.tennisboss.online**, et comment tout redémarre automatiquement
+après un reboot du PC. Procédure écrite pour être reproductible sur une
+nouvelle machine.
+
+> **`app/` (quant, port 8001) est désactivé (2026-07-11)** — c'était un second
+> backend FastAPI (moteur de trading/risque : `auto_bet_engine`, `hedge_manager`,
+> `portfolio_greeks`...), jamais relié à l'app Android, jamais testé, laissé
+> tourner sans qu'on l'audite. Confirmé abandonné par l'utilisateur lors d'un
+> audit senior-engineer du projet. `tennisboss-quant.service` a été stoppé et
+> désactivé (`systemctl stop/disable`) — pas supprimé, le code reste dans `app/`
+> si besoin de le reprendre un jour. `tennisboss-bot.service` n'en dépend pas
+> réellement (son `After=tennisboss-quant.service` n'est qu'un ordre de
+> démarrage, pas une dépendance dure) — vérifié fonctionnel sans lui.
 
 ## Vue d'ensemble
 
@@ -13,10 +23,10 @@ Windows boot → tâche planifiée → wsl.exe démarre Ubuntu
                                         ▼
                                     systemd (PID 1)
                                         │
-        ┌───────────────┬──────────────┼───────────────┐
-        ▼               ▼              ▼               ▼
-tennisboss-quant  tennisboss-bot  tennisboss-supervisor  tennisboss-tunnel
-   (port 8001)      (port 8000)     (apprentissage)     (cloudflared)
+                        ┌───────────────┼───────────────┐
+                        ▼               ▼               ▼
+                  tennisboss-bot  tennisboss-supervisor  tennisboss-tunnel
+                    (port 8000)     (apprentissage)     (cloudflared)
                                                               │
                                                               ▼
                                               Cloudflare (tunnel nommé "tennisboss")
@@ -107,15 +117,19 @@ commité en clair dans git (c'est arrivé une fois, corrigé par la suite). Touj
 WSL2 doit avoir systemd actif (`/etc/wsl.conf` → `[boot]` → `systemd=true`, puis
 `wsl --shutdown` depuis Windows pour appliquer).
 
-4 units dans `systemd/*.service` (chemins/utilisateur à adapter si la machine
-change — actuellement `User=alchemist`, `WorkingDirectory=/mnt/c/Users/donpa/TennisBoss`) :
+Units actifs dans `systemd/*.service` (chemins/utilisateur à adapter si la
+machine change — actuellement `User=alchemist`,
+`WorkingDirectory=/mnt/c/Users/donpa/TennisBoss`) :
 
 | Service | Rôle | Dépend de |
 |---|---|---|
-| `tennisboss-quant` | API FastAPI (port 8001) | réseau |
-| `tennisboss-bot` | API Flask (port 8000, backend Android) | quant |
+| `tennisboss-bot` | API Flask (port 8000, backend Android) | réseau |
 | `tennisboss-supervisor` | apprentissage continu / self-healing (`run.py start`) | bot |
 | `tennisboss-tunnel` | `cloudflared tunnel run` (expose bot en public) | réseau |
+| `tennisboss-scheduler` | tâches planifiées (`bot.scheduler`) | réseau |
+
+`tennisboss-quant` (port 8001, `app/`) existe toujours dans `systemd/` mais est
+**stoppé et désactivé** (`systemctl disable`) — voir note en haut de ce document.
 
 Installation (sur une nouvelle machine, en remplaçant `User=`/`WorkingDirectory=`
 dans les fichiers si besoin) :
@@ -123,13 +137,13 @@ dans les fichiers si besoin) :
 ```bash
 sudo cp systemd/tennisboss-*.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now tennisboss-quant tennisboss-bot tennisboss-supervisor tennisboss-tunnel
+sudo systemctl enable --now tennisboss-bot tennisboss-supervisor tennisboss-tunnel tennisboss-scheduler
 ```
 
 Vérification :
 
 ```bash
-systemctl status tennisboss-quant tennisboss-bot tennisboss-supervisor tennisboss-tunnel --no-pager
+systemctl status tennisboss-bot tennisboss-supervisor tennisboss-tunnel tennisboss-scheduler --no-pager
 curl -s http://localhost:8000/health
 curl -s https://api.tennisboss.online/health
 ```
