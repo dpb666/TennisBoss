@@ -56,6 +56,7 @@ import com.tennisboss.app.data.InplayROIStats
 import com.tennisboss.app.data.LiveMatch
 import com.tennisboss.app.data.LivePrediction
 import com.tennisboss.app.ui.components.SkeletonList
+import com.tennisboss.app.ui.components.WhyThisPickSection
 import kotlinx.coroutines.delay
 
 private val LiveRed    = Color(0xFFFF3B3B)
@@ -734,6 +735,13 @@ private fun LiveMatchCard(
             }
 
             m.prediction?.let { pred -> PreMatchPredRow(m, pred) }
+
+            WhyThisPickSection(
+                player1 = m.player1_resolved ?: m.player1,
+                player2 = m.player2_resolved ?: m.player2,
+                surface = m.surface,
+                eventId = m.event_id.toString(),
+            )
         }
     }
 }

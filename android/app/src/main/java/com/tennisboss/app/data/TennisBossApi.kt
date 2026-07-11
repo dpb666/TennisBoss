@@ -57,6 +57,14 @@ interface TennisBossApi {
     @GET("api/calibration")
     suspend fun calibration(): CalibrationResponse
 
+    @GET("api/insight")
+    suspend fun insight(
+        @Query("p1") p1: String,
+        @Query("p2") p2: String,
+        @Query("surface") surface: String? = null,
+        @Query("event_id") eventId: String? = null,
+    ): InsightResponse
+
     @GET("api/live")
     suspend fun live(): LiveResponse
 

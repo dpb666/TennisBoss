@@ -116,6 +116,53 @@ data class Explain(
     val model_accuracy: Double,
 )
 
+/**
+ * Un facteur de /api/insight. weight/contribution restent à 0.0 pour le
+ * facteur H2H (pas de décomposition de logit pour lui, juste value1/value2) —
+ * contrairement à [ExplainFactor] où ils sont toujours renseignés.
+ */
+data class InsightFactor(
+    val key: String = "",
+    val label: String = "",
+    val value1: Double = 0.0,
+    val value2: Double = 0.0,
+    val weight: Double = 0.0,
+    val contribution: Double = 0.0,
+    val favors: String? = null,
+)
+
+/** Mouvement de cote capté par le scanner (ouverture -> dernière cote). Null si <2 snapshots. */
+data class MarketMovement(
+    val event_key: String = "",
+    val n_snapshots: Int = 0,
+    val opening_odds_home: Double = 0.0,
+    val closing_odds_home: Double = 0.0,
+    val opening_odds_away: Double = 0.0,
+    val closing_odds_away: Double = 0.0,
+    val move_home_pct: Double = 0.0,
+    val move_away_pct: Double = 0.0,
+)
+
+/** Auto-diagnostic du modèle (voir bot/intelligence.py) appliqué aux 2 joueurs du match. */
+data class ModelHealth(
+    val player1_blacklisted: Boolean = false,
+    val player2_blacklisted: Boolean = false,
+    val surface_danger: Boolean = false,
+    val accuracy_drift_pts: Double = 0.0,
+)
+
+/** Réponse de /api/insight — Sport Intelligence Layer Phase 1 : "pourquoi ce pick ?". */
+data class InsightResponse(
+    val player1: String = "",
+    val player2: String = "",
+    val confidence: Double = 0.0,
+    val confidence_label: String = "",
+    val decisive_factor: String? = null,
+    val factors: List<InsightFactor> = emptyList(),
+    val market: MarketMovement? = null,
+    val model_health: ModelHealth = ModelHealth(),
+)
+
 /** Une confrontation directe passée. */
 data class H2HMeeting(
     val date: String = "",
@@ -413,6 +460,7 @@ data class LiveMatch(
     val player1_resolved: String? = null,
     val player2_resolved: String? = null,
     val league: String = "",
+    val surface: String? = null,
     val sets_home: Int = 0,
     val sets_away: Int = 0,
     val set_scores: List<LiveSetScore> = emptyList(),

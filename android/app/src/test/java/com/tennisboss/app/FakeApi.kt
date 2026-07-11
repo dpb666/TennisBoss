@@ -13,6 +13,7 @@ import com.tennisboss.app.data.InplayMarketsResponse
 import com.tennisboss.app.data.InplayPickLogResponse
 import com.tennisboss.app.data.InplayPickRequest
 import com.tennisboss.app.data.InplayPicksResponse
+import com.tennisboss.app.data.InsightResponse
 import com.tennisboss.app.data.IntelligenceStats
 import com.tennisboss.app.data.LearnerStats
 import com.tennisboss.app.data.LiveResponse
@@ -67,6 +68,9 @@ class FakeApi(
     }
 
     override suspend fun calibration(): CalibrationResponse = throw NotImplementedError("non utilisé")
+
+    override suspend fun insight(p1: String, p2: String, surface: String?, eventId: String?): InsightResponse =
+        throw NotImplementedError("non utilisé")
 
     override suspend fun live(): LiveResponse {
         throwError?.let { throw it }
