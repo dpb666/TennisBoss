@@ -93,14 +93,17 @@ private fun StatsTab(vm: PerformanceViewModel) {
         when (val s = vm.state) {
             is PerformanceUiState.Loading -> SkeletonList(count = 3)
             is PerformanceUiState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error)
-            is PerformanceUiState.Success -> StatsContent(s.data.metrics, s.data.calibration_k, s.data.recent)
+            is PerformanceUiState.Success -> StatsContent(s.data)
             else -> {}
         }
     }
 }
 
 @Composable
-private fun StatsContent(m: CalibMetrics, k: Double, recent: List<SettledRecent>) {
+private fun StatsContent(data: com.tennisboss.app.data.CalibrationResponse) {
+    val m = data.metrics
+    val k = data.calibration_k
+    val recent = data.recent
     if (m.n == 0 && recent.isEmpty()) {
         Text("Pas encore de match réglé.",
             style = MaterialTheme.typography.bodyMedium,
@@ -126,11 +129,35 @@ private fun StatsContent(m: CalibMetrics, k: Double, recent: List<SettledRecent>
             }
         }
         item {
+            // Platt (a,b) prime sur k dès qu'il est fitté (bot/api.py::_calib) — afficher
+            // "Calibration k" alors que Platt calibre réellement les probas en production
+            // aurait été trompeur (l'ancien code ne montrait que k, toujours).
+            val plattActive = data.platt_a != 1.0 || data.platt_b != 0.0
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatCard("Calibration k", String.format("%.2f", k), AccentColor,
-                    Modifier.weight(1f), sub = kInterpretation(k))
+                if (plattActive) {
+                    StatCard("Calibration (Platt)", "a=${String.format("%.2f", data.platt_a)}",
+                        AccentColor, Modifier.weight(1f),
+                        sub = kInterpretation(data.platt_a) + " · b=${String.format("%.2f", data.platt_b)}")
+                } else {
+                    StatCard("Calibration k", String.format("%.2f", k), AccentColor,
+                        Modifier.weight(1f), sub = kInterpretation(k))
+                }
                 StatCard("Brier", m.brier?.let { String.format("%.3f", it) } ?: "—",
                     AccentColor, Modifier.weight(1f), sub = "plus bas = mieux")
+            }
+        }
+        if (data.elo_blend != null || data.market_blend_w != null) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    data.elo_blend?.let {
+                        StatCard("Poids ELO", String.format("%.2f", it), AccentColor,
+                            Modifier.weight(1f), sub = "mélange ELO/features, auto-appris")
+                    }
+                    data.market_blend_w?.let {
+                        StatCard("Poids marché", String.format("%.2f", it), AccentColor,
+                            Modifier.weight(1f), sub = "0=marché pur, 1=modèle pur")
+                    }
+                }
             }
         }
         item {

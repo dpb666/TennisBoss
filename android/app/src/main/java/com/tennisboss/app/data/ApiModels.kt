@@ -612,6 +612,14 @@ data class SettledRecent(
 data class CalibrationResponse(
     val metrics: CalibMetrics = CalibMetrics(),
     val calibration_k: Double = 1.0,
+    // Platt (a,b) prime sur la température k dès qu'il est fitté (bot/api.py::_calib) —
+    // (1.0, 0.0) = non fitté, encore sur k. Jamais modélisé avant ce fix : l'écran
+    // Perf montrait "Calibration k" même quand ce n'était plus vraiment k qui
+    // calibrait les probas en production.
+    val platt_a: Double = 1.0,
+    val platt_b: Double = 0.0,
+    val elo_blend: Double? = null,
+    val market_blend_w: Double? = null,
     val recent: List<SettledRecent> = emptyList(),
 )
 
