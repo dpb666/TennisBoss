@@ -98,6 +98,38 @@ class TestScoreUpcomingMatch(unittest.TestCase):
         self.assertGreater(result["score"], 0)
 
 
+class TestDailyDigest(RecoTestCase):
+    def test_cold_start_without_any_history(self):
+        result = reco.daily_digest()
+        self.assertTrue(result["cold_start"])
+        self.assertIn("Bienvenue", result["title"])
+
+    def test_summarizes_recent_wins_and_losses(self):
+        # Historique suffisant pour sortir du cold-start (risk_profile + favs).
+        for i in range(6):
+            db.log_value_pick(f"2026-07-0{i+1}", f"A{i}", f"B{i}", f"A{i}", 2.0, 12.0)
+        db.log_value_pick("2026-07-11", "Sinner", "Alcaraz", "Sinner", 1.9, 12.0)
+        db.settle_value_pick("Sinner", "Alcaraz", "Sinner")  # gagné
+        db.log_value_pick("2026-07-11", "Djokovic", "Medvedev", "Djokovic", 1.9, 12.0)
+        db.settle_value_pick("Djokovic", "Medvedev", "Medvedev")  # perdu
+
+        result = reco.daily_digest()
+        self.assertFalse(result["cold_start"])
+        self.assertIn("1W-1L", result["body"])
+
+    def test_old_results_outside_window_are_excluded(self):
+        for i in range(6):
+            db.log_value_pick(f"2026-07-0{i+1}", f"A{i}", f"B{i}", f"A{i}", 2.0, 12.0)
+        db.log_value_pick("2026-01-01", "Old1", "Old2", "Old1", 1.9, 12.0)
+        db.settle_value_pick("Old1", "Old2", "Old1")
+        with db.connect() as conn:
+            conn.execute("UPDATE value_picks SET ts=? WHERE player1='Old1'",
+                         ("2026-01-01T00:00:00",))
+
+        result = reco.daily_digest(window_hours=24)
+        self.assertNotIn("1W", result["body"])
+
+
 class TestBuildRecommendations(RecoTestCase):
     def test_filters_out_zero_score_matches_and_sorts(self):
         for _ in range(3):

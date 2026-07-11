@@ -105,6 +105,64 @@ def score_upcoming_match(match: Dict[str, Any], favorites: Set[str],
     return {"score": round(score, 2), "reasons": reasons}
 
 
+def daily_digest(window_hours: int = 24) -> Dict[str, Any]:
+    """Résumé pour la notification push quotidienne (bot/scheduler.py::job_daily_digest).
+
+    Ne re-fetch aucune fixture live : le scheduler tourne hors contexte Flask/
+    requête, contrairement à /api/recommendations qui peut appeler la vue
+    /api/upcoming directement. S'appuie uniquement sur ce qui est déjà en
+    base (picks capturés/réglés) — pas de nouvel appel réseau.
+
+    Fenêtre glissante sur `ts` (horodatage de capture, toujours ISO) plutôt
+    que sur la colonne `date` (date du match) : `date` a des formats
+    incohérents selon la source d'origine (vu en pratique : "2026-06-05" et
+    "20260602" mélangés), `ts` est fiable pour un intervalle "dernières 24h".
+    """
+    import datetime as _dt
+    cutoff = (_dt.datetime.now() - _dt.timedelta(hours=window_hours)).isoformat(timespec="seconds")
+
+    with db.connect() as conn:
+        vp_settled = conn.execute(
+            "SELECT result, pnl FROM value_picks WHERE result IS NOT NULL AND ts >= ?",
+            (cutoff,),
+        ).fetchall()
+        ip_settled = conn.execute(
+            "SELECT result, pnl FROM inplay_picks WHERE result IS NOT NULL AND ts >= ?",
+            (cutoff,),
+        ).fetchall()
+        n_new_picks = conn.execute(
+            "SELECT COUNT(*) FROM value_picks WHERE ts >= ?", (cutoff,),
+        ).fetchone()[0]
+
+    wins = sum(1 for r in vp_settled if r["result"] == 1)
+    wins += sum(1 for r in ip_settled if r["result"] == "W")
+    losses = sum(1 for r in vp_settled if r["result"] == 0)
+    losses += sum(1 for r in ip_settled if r["result"] == "L")
+    pnl = sum((r["pnl"] or 0.0) for r in vp_settled) + sum((r["pnl"] or 0.0) for r in ip_settled)
+
+    favs = favorite_players(limit=3)
+    risk = risk_profile()
+
+    if risk.get("profile") == "insuffisant" and not favs:
+        return {
+            "title": "🎾 Bienvenue sur TennisBoss",
+            "body": "Analyse quelques matchs et prends tes premiers picks pour débloquer tes recommandations personnalisées.",
+            "cold_start": True,
+        }
+
+    parts: List[str] = []
+    if wins or losses:
+        sign = "+" if pnl >= 0 else ""
+        parts.append(f"{wins}W-{losses}L ({sign}{pnl:.1f}u) sur les dernières 24h")
+    if n_new_picks:
+        parts.append(f"{n_new_picks} pick(s) détecté(s)")
+    if favs:
+        parts.append(f"tu suis {', '.join(f['player'] for f in favs[:2])}")
+
+    body = " · ".join(parts) if parts else "Rien de neuf depuis hier — reviens plus tard."
+    return {"title": "🎾 Ton résumé TennisBoss", "body": body, "cold_start": False}
+
+
 def build_recommendations(upcoming_matches: List[Dict[str, Any]], limit: int = 10) -> Dict[str, Any]:
     """Assemble le profil (favoris/risque/surfaces) et score les matchs fournis."""
     favs = {f["player"] for f in favorite_players()}

@@ -8,9 +8,9 @@ Runs continuously with these jobs:
 
 import schedule
 import time
-from datetime import datetime
+from datetime import date, datetime
 
-from . import auto_learner, backup, monitor, tennisdata_feeder
+from . import auto_learner, backup, db, monitor, push_notifications, recommendations, tennisdata_feeder
 from .log import log
 
 
@@ -64,13 +64,34 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"Backup job failed: {e}", "ERROR")
 
+    def job_daily_digest(self):
+        """Notification push quotidienne (bot/recommendations.py::daily_digest).
+
+        Garde-fou explicite (meta "last_daily_digest_date") plutôt que de
+        s'appuyer uniquement sur schedule.every().day.at(...) : un redémarrage
+        du service dans la même journée ne doit jamais renvoyer un 2e digest.
+        """
+        log("=== SCHEDULER: Daily digest ===", "INFO")
+        today = date.today().isoformat()
+        if db.get_meta("last_daily_digest_date") == today:
+            return
+        try:
+            digest = recommendations.daily_digest()
+            sent = push_notifications.broadcast(digest["title"], digest["body"])
+            db.set_meta("last_daily_digest_date", today)
+            log(f"Daily digest sent to {sent} device(s): {digest['body']}", "INFO")
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"Daily digest job failed: {e}", "ERROR")
+
     def setup_jobs(self):
         """Configure job schedule."""
         schedule.every(1).hours.do(self.job_learn)
         schedule.every(6).hours.do(self.job_ingest)
         schedule.every(5).minutes.do(self.job_monitor)
         schedule.every(6).hours.do(self.job_backup)
-        log("Scheduler: 4 jobs configured (learn 1h, ingest 6h, monitor 5m, backup 6h)", "INFO")
+        schedule.every().day.at("09:00").do(self.job_daily_digest)
+        log("Scheduler: 5 jobs configured (learn 1h, ingest 6h, monitor 5m, backup 6h, digest 9h/j)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()
