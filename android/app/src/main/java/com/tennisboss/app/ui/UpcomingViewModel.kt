@@ -27,10 +27,10 @@ sealed interface UpcomingUiState {
  * Fonction pure -> testable sans Android.
  */
 fun sortUpcoming(matches: List<UpcomingMatch>): List<UpcomingMatch> =
-    matches.sortedWith(compareBy(
-        { it.date },
-        { it.time.ifBlank { "99:99" } },  // matchs sans heure → fin de journée
-    ))
+    matches.sortedWith(
+        compareByDescending<UpcomingMatch> { it.prediction != null }
+            .thenByDescending { it.prediction?.let { p -> maxOf(p.prob1, p.prob2) } ?: -1.0 }
+    )
 
 class UpcomingViewModel : ViewModel() {
 
