@@ -1,7 +1,9 @@
 package com.tennisboss.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.tooling.preview.Preview
 import com.tennisboss.app.data.CalibrationResponse
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.ValueComparison
@@ -46,7 +48,10 @@ private val AccentColor = Color(0xFF4F8CFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(vm: DashboardViewModel = viewModel()) {
+fun DashboardScreen(
+    onMatchClick: (String, String, String?) -> Unit,
+    vm: DashboardViewModel = viewModel()
+) {
     PullToRefreshBox(
         isRefreshing = vm.state is DashboardUiState.Loading,
         onRefresh = { vm.load() },
@@ -64,7 +69,7 @@ fun DashboardScreen(vm: DashboardViewModel = viewModel()) {
                 }
             }
             is DashboardUiState.Success -> {
-                DashboardContent(s.upcoming.matches, s.value.comparisons, s.calibration)
+                DashboardContent(s.upcoming.matches, s.value.comparisons, s.calibration, onMatchClick)
             }
         }
     }
@@ -74,7 +79,8 @@ fun DashboardScreen(vm: DashboardViewModel = viewModel()) {
 private fun DashboardContent(
     upcoming: List<UpcomingMatch>,
     values: List<ValueComparison>,
-    calib: CalibrationResponse
+    calib: CalibrationResponse,
+    onMatchClick: (String, String, String?) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -101,7 +107,7 @@ private fun DashboardContent(
                 SectionHeader("💎 Meilleures opportunités", Icons.Default.Diamond)
             }
             items(values.take(3)) { valItem ->
-                ValueOpportunityCard(valItem)
+                ValueOpportunityCard(valItem, onClick = { onMatchClick(valItem.player1, valItem.player2, null) })
             }
         }
 
@@ -111,7 +117,7 @@ private fun DashboardContent(
                 SectionHeader("📅 Matchs du jour", Icons.Default.Insights)
             }
             items(upcoming.take(5)) { match ->
-                MatchSummaryCard(match)
+                MatchSummaryCard(match, onClick = { onMatchClick(match.player1_raw, match.player2_raw, null) })
             }
         }
     }
@@ -140,6 +146,18 @@ private fun ModelStatusCard(calib: CalibrationResponse) {
                 StatItem("Prédictions", "${calib.metrics.n}")
                 StatItem("ROI Value", String.format("%+.1f%%", (calib.metrics.roi_value ?: 0.0) * 100))
             }
+            // Platt (a,b) prime sur k dès qu'il est fitté (bot/api.py::_calib) — voir
+            // la même logique dans PerformanceScreen.StatsContent.
+            val plattActive = calib.platt_a != 1.0 || calib.platt_b != 0.0
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (plattActive)
+                    "Calibration Platt : a=${String.format("%.2f", calib.platt_a)} · b=${String.format("%.2f", calib.platt_b)}"
+                else
+                    "Calibration k : ${String.format("%.2f", calib.calibration_k)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+            )
         }
     }
 }
@@ -153,9 +171,9 @@ private fun StatItem(label: String, value: String) {
 }
 
 @Composable
-private fun ValueOpportunityCard(v: ValueComparison) {
+private fun ValueOpportunityCard(v: ValueComparison, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(12.dp)) {
@@ -181,9 +199,9 @@ private fun ValueOpportunityCard(v: ValueComparison) {
 }
 
 @Composable
-private fun MatchSummaryCard(m: UpcomingMatch) {
+private fun MatchSummaryCard(m: UpcomingMatch, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
@@ -194,7 +212,15 @@ private fun MatchSummaryCard(m: UpcomingMatch) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(m.tournament, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(m.tournament, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(Modifier.width(6.dp))
+                    Text(combineDateTimeUtcToLocal(m.date, m.time), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    m.prediction?.surface?.let { surf ->
+                        Spacer(Modifier.width(6.dp))
+                        SurfaceBadge(surf)
+                    }
+                }
                 Text("${m.player1_raw} vs ${m.player2_raw}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             }
             m.prediction?.let { pred ->
@@ -208,5 +234,18 @@ private fun MatchSummaryCard(m: UpcomingMatch) {
                 }
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun DashboardPreview() {
+    MaterialTheme {
+        DashboardContent(
+            upcoming = emptyList(),
+            values = emptyList(),
+            calib = CalibrationResponse(),
+            onMatchClick = { _, _, _ -> }
+        )
     }
 }

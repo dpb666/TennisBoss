@@ -44,6 +44,10 @@ class FakeApi(
     private val valueResponse: ValueResponse? = null,
     private val predictResponse: PredictResponse? = null,
     private val liveResponse: LiveResponse? = null,
+    private val calibrationResponse: CalibrationResponse? = null,
+    private val playerResponses: Map<String, PlayerDetail>? = null,
+    private val insightResponse: InsightResponse? = null,
+    private val h2hResponse: H2H? = null,
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
@@ -57,8 +61,10 @@ class FakeApi(
     override suspend fun players(q: String, tour: String?, limit: Int): PlayersResponse =
         throw NotImplementedError("non utilisé")
 
-    override suspend fun player(name: String): PlayerDetail =
-        throw NotImplementedError("non utilisé")
+    override suspend fun player(name: String): PlayerDetail {
+        throwError?.let { throw it }
+        return playerResponses?.get(name) ?: throw NotImplementedError("playerResponses[$name] non fourni")
+    }
 
     override suspend fun followPlayer(request: FollowPlayerRequest): FollowPlayerResponse =
         throw NotImplementedError("non utilisé")
@@ -69,8 +75,10 @@ class FakeApi(
     override suspend fun followedPlayers(): FollowedPlayersResponse =
         throw NotImplementedError("non utilisé")
 
+    // RuntimeException (pas NotImplementedError) : MatchDetailViewModel rattrape
+    // l'échec du H2H avec catch (e: Exception) { null }, best-effort.
     override suspend fun h2h(p1: String, p2: String): H2H =
-        throw NotImplementedError("non utilisé")
+        h2hResponse ?: throw RuntimeException("non utilisé")
 
     override suspend fun upcoming(days: Int, limit: Int, odds: Boolean): UpcomingResponse {
         throwError?.let { throw it }
@@ -82,7 +90,10 @@ class FakeApi(
         return valueResponse ?: ValueResponse()
     }
 
-    override suspend fun calibration(): CalibrationResponse = throw NotImplementedError("non utilisé")
+    override suspend fun calibration(): CalibrationResponse {
+        throwError?.let { throw it }
+        return calibrationResponse ?: CalibrationResponse()
+    }
 
     override suspend fun registerDevice(request: DeviceRegisterRequest): DeviceRegisterResponse =
         throw NotImplementedError("non utilisé")
@@ -90,8 +101,10 @@ class FakeApi(
     override suspend fun recommendations(limit: Int): RecommendationsResponse =
         throw NotImplementedError("non utilisé")
 
-    override suspend fun insight(p1: String, p2: String, surface: String?, eventId: String?): InsightResponse =
-        throw NotImplementedError("non utilisé")
+    override suspend fun insight(p1: String, p2: String, surface: String?, eventId: String?): InsightResponse {
+        throwError?.let { throw it }
+        return insightResponse ?: throw NotImplementedError("insightResponse non fourni")
+    }
 
     override suspend fun live(): LiveResponse {
         throwError?.let { throw it }

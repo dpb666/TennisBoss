@@ -64,7 +64,10 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
+fun UpcomingScreen(
+    onMatchClick: (String, String, String?) -> Unit,
+    vm: UpcomingViewModel = viewModel()
+) {
     LaunchedEffect(Unit) { if (vm.state is UpcomingUiState.Idle) vm.load() }
 
     // Selected day filter (null = toutes les journées)
@@ -155,7 +158,7 @@ fun UpcomingScreen(vm: UpcomingViewModel = viewModel()) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            items(filteredMatches) { m -> MatchCard(m) }
+                            items(filteredMatches) { m -> MatchCard(m, onClick = { onMatchClick(m.player1_raw, m.player2_raw, null) }) }
                         }
                     }
                 }
@@ -342,7 +345,7 @@ private fun dayLabel(dateStr: String, today: LocalDate): Pair<String, String> {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MatchCard(m: UpcomingMatch) {
+private fun MatchCard(m: UpcomingMatch, onClick: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val pred = m.prediction
 
@@ -401,7 +404,7 @@ private fun MatchCard(m: UpcomingMatch) {
             }
 
             // ── Joueurs + rankings ────────────────────────────────────────────
-            Row(modifier = Modifier.fillMaxWidth(),
+            Row(modifier = Modifier.fillMaxWidth().clickable { onClick() },
                 verticalAlignment = Alignment.CenterVertically) {
                 // Joueur 1
                 Column(modifier = Modifier.weight(1f)) {

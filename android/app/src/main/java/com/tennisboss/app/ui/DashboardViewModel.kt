@@ -10,6 +10,7 @@ import com.tennisboss.app.data.CalibrationResponse
 import com.tennisboss.app.data.UpcomingResponse
 import com.tennisboss.app.data.ValueResponse
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 sealed interface DashboardUiState {
@@ -33,19 +34,27 @@ class DashboardViewModel : ViewModel() {
     fun load() {
         state = DashboardUiState.Loading
         viewModelScope.launch {
-            try {
-                val api = ApiClient.create()
-                val upcomingDeferred = async { api.upcoming(days = 1, limit = 5) }
-                val valueDeferred = async { api.value(limit = 5) }
-                val calibrationDeferred = async { api.calibration() }
+            // coroutineScope{} (pas juste le launch englobant) : si un des 3 appels
+            // échoue, l'exception doit ressortir par un vrai `throw` au point d'appel
+            // pour être interceptée par le catch ci-dessous. Avec des async{} lancés
+            // directement sur le scope du launch, l'échec peut annuler le parent
+            // avant que .await() ne soit atteint et court-circuiter le catch,
+            // laissant l'écran bloqué en Loading au lieu d'afficher une erreur.
+            state = try {
+                coroutineScope {
+                    val api = ApiClient.create()
+                    val upcomingDeferred = async { api.upcoming(days = 1, limit = 5) }
+                    val valueDeferred = async { api.value(limit = 5) }
+                    val calibrationDeferred = async { api.calibration() }
 
-                state = DashboardUiState.Success(
-                    upcoming = upcomingDeferred.await(),
-                    value = valueDeferred.await(),
-                    calibration = calibrationDeferred.await()
-                )
+                    DashboardUiState.Success(
+                        upcoming = upcomingDeferred.await(),
+                        value = valueDeferred.await(),
+                        calibration = calibrationDeferred.await()
+                    )
+                }
             } catch (e: Exception) {
-                state = DashboardUiState.Error(e.message ?: "Erreur de chargement")
+                DashboardUiState.Error(e.message ?: "Erreur de chargement")
             }
         }
     }
