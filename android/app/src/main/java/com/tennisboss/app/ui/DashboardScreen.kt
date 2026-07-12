@@ -144,7 +144,7 @@ private fun DashboardContent(
             item {
                 SectionHeader("📅 Matchs du jour", Icons.Default.Insights)
             }
-            items(upcoming.take(5)) { match ->
+            items(sortForDashboard(upcoming).take(5)) { match ->
                 MatchSummaryCard(match, onClick = { onMatchClick(match.player1_raw, match.player2_raw, null) })
             }
         }
