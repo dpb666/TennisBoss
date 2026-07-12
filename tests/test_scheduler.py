@@ -51,5 +51,26 @@ class TestJobDailyDigest(unittest.TestCase):
         self.assertIsNone(db.get_meta("last_daily_digest_date"))
 
 
+class TestJobMtdIngest(unittest.TestCase):
+    """job_mtd_ingest : voir bot/mantennisdata_feeder.py (remplacement de
+    Sackmann pour l'ingestion continue ATP)."""
+
+    def setUp(self):
+        self.scheduler = sched_mod.TennisBossScheduler()
+
+    def test_calls_feeder_and_increments_jobs_run(self):
+        with patch("bot.scheduler.mantennisdata_feeder.ingest",
+                   return_value={"trained": 3, "inserted": 3}) as mocked:
+            self.scheduler.job_mtd_ingest()
+        mocked.assert_called_once_with()
+        self.assertEqual(self.scheduler.jobs_run, 1)
+
+    def test_failure_is_caught_and_does_not_raise(self):
+        with patch("bot.scheduler.mantennisdata_feeder.ingest",
+                   side_effect=RuntimeError("boom")):
+            self.scheduler.job_mtd_ingest()  # ne doit pas lever
+        self.assertEqual(self.scheduler.jobs_run, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,8 @@ import schedule
 import time
 from datetime import date, datetime
 
-from . import auto_learner, backup, db, monitor, push_notifications, recommendations, tennisdata_feeder
+from . import (auto_learner, backup, db, mantennisdata_feeder, monitor,
+              push_notifications, recommendations, tennisdata_feeder)
 from .log import log
 
 
@@ -40,6 +41,21 @@ class TennisBossScheduler:
             self.jobs_run += 1
         except Exception as e:  # noqa: BLE001
             log(f"Ingest job failed: {e}", "ERROR")
+
+    def job_mtd_ingest(self):
+        """Ingest ManTennisData ATP (serve/return/BP/TB) — voir mantennisdata_feeder.py.
+
+        Complète job_ingest (tennisdata.co.uk, ELO+ranking seulement, ATP+WTA)
+        avec des matchs FEATURE-COMPLETS pour l'entraînement des poids/profils,
+        côté ATP uniquement (pas d'équivalent WTA connu à ce jour).
+        """
+        log("=== SCHEDULER: ManTennisData ingest (ATP, features complètes) ===", "INFO")
+        try:
+            report = mantennisdata_feeder.ingest()
+            log(f"MTD ingest job complete: {report}", "INFO")
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"MTD ingest job failed: {e}", "ERROR")
 
     def job_monitor(self):
         """Run system health check."""
@@ -88,10 +104,12 @@ class TennisBossScheduler:
         """Configure job schedule."""
         schedule.every(1).hours.do(self.job_learn)
         schedule.every(6).hours.do(self.job_ingest)
+        schedule.every(6).hours.do(self.job_mtd_ingest)
         schedule.every(5).minutes.do(self.job_monitor)
         schedule.every(6).hours.do(self.job_backup)
         schedule.every().day.at("09:00").do(self.job_daily_digest)
-        log("Scheduler: 5 jobs configured (learn 1h, ingest 6h, monitor 5m, backup 6h, digest 9h/j)", "INFO")
+        log("Scheduler: 6 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+            "monitor 5m, backup 6h, digest 9h/j)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()

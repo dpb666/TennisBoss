@@ -112,6 +112,13 @@ et dans les docstrings de `db.py`.
 1. **Dépendance odds-api.io plan limité** (100 req/h, WebSocket 403, ITF non
    cotés) : le cache rate-limit existe, mais toute nouvelle feature
    consommatrice de cotes doit budgéter ses requêtes.
+1bis. **Ingestion ATP feature-complète : résolue le 12/07 après incident.** Les
+   repos GitHub de Jeff Sackmann ont disparu (~mai-juin 2026) ; restaurée côté
+   ATP via `bot/mantennisdata_feeder.py` (nouvelle source, câblée dans le
+   scheduler). **Gap WTA restant** : aucune source gratuite de stats
+   serve/return/BP/TB féminines identifiée — les nouveaux matchs WTA
+   n'alimentent plus que l'ELO/classement (stats neutres) depuis la même
+   date. Voir [[tennisboss-sackmann-incident]] en mémoire ; à surveiller.
 2. **Pas d'edge prouvé à ce stade** : la couche CLV est en place pour le
    mesurer, mais l'échantillon de picks réglés est encore petit. Le
    positionnement Google Play (« aide à la décision », pas « prédicteur
