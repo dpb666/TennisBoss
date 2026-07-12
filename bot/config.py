@@ -51,20 +51,29 @@ FEATURE_ORDER = ["serve", "return1", "return2", "recent"]
 
 # Sources de données ouvertes (sans contournement, sans clé API).
 #   tour = "atp" (hommes) ou "wta" (femmes).
-SACKMANN_URL = (
+# ⚠ INCIDENT (constaté 2026-07-12) : les repos GitHub JeffSackmann/tennis_atp
+# et tennis_wta ont DISPARU (404, y compris via l'API — seuls des miroirs
+# tiers subsistent, figés ~2026-06-09). Les gabarits restent pointés sur
+# l'adresse canonique (si le repo revient) mais sont surchargeables par env
+# pour basculer sur un miroir sans toucher au code. L'ingestion de NOUVEAUX
+# matchs nécessite une source de remplacement (voir docs/AUDIT.md).
+SACKMANN_URL = os.environ.get(
+    "SACKMANN_URL_TEMPLATE",
     "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
-    "{tour}_matches_{year}.csv"
+    "{tour}_matches_{year}.csv",
 )
 # ATP Futures/Challengers (~18 000 matchs/an, joueurs peu connus).
-CHALLENGER_URL = (
+CHALLENGER_URL = os.environ.get(
+    "CHALLENGER_URL_TEMPLATE",
     "https://raw.githubusercontent.com/JeffSackmann/tennis_{tour}/master/"
-    "{tour}_matches_futures_{year}.csv"
+    "{tour}_matches_futures_{year}.csv",
 )
 # WTA ITF circuit (W15–W100) — même format CSV, fichier distinct du repo WTA.
 # Couvre les joueuses ITF absentes du tableau principal WTA.
-WTA_ITF_URL = (
+WTA_ITF_URL = os.environ.get(
+    "WTA_ITF_URL_TEMPLATE",
     "https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/"
-    "wta_matches_qual_itf_{year}.csv"
+    "wta_matches_qual_itf_{year}.csv",
 )
 # Endpoint "live" (souvent bloqué par Cloudflare -> géré par le self-healing).
 SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"

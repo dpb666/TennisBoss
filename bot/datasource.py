@@ -81,6 +81,7 @@ def _match_features(row: Dict[str, str]) -> Optional[Dict]:
         "return2": ratio(w_2ndpts - w_2ndW, w_2ndpts),
     }
 
+    tb_w, tb_l = parse_tiebreaks(row.get("score", ""))
     return {
         "id": f"{row.get('tourney_id','?')}-{row.get('match_num','?')}",
         "date": row.get("tourney_date", "00000000"),
@@ -91,6 +92,10 @@ def _match_features(row: Dict[str, str]) -> Optional[Dict]:
         "surface": (row.get("surface") or "").strip().lower(),   # hard/clay/grass
         "tourney_name": (row.get("tourney_name") or "").strip(),
         "margin": parse_margin(row.get("score", "")),            # jeux gagnant - perdant
+        # Stats "clutch" (souvent absentes sur les vieux matchs/ITF -> None)
+        "w_bp_saved": _f(row, "w_bpSaved"), "w_bp_faced": _f(row, "w_bpFaced"),
+        "l_bp_saved": _f(row, "l_bpSaved"), "l_bp_faced": _f(row, "l_bpFaced"),
+        "w_tb_won": tb_w, "l_tb_won": tb_l,
     }
 
 
@@ -113,6 +118,42 @@ def parse_margin(score: str) -> Optional[int]:
         except ValueError:
             continue
     return (wg - lg) if found else None
+
+
+def parse_tiebreaks(score: str) -> tuple:
+    """Tie-breaks gagnés par (vainqueur, perdant) du match, lus dans le score.
+
+    Le score Sackmann est écrit du point de vue du VAINQUEUR du match :
+    '7-6(5) 4-6 7-6(10)' -> le vainqueur a gagné les sets 1 et 3 (donc leurs
+    tie-breaks), '6-7(3)' serait un tie-break gagné par le perdant. Un set en
+    super tie-break ('[10-7]') compte aussi. Renvoie (None, None) si score vide
+    (walkover) — distinct de (0, 0) = match joué sans tie-break.
+    """
+    if not score or not score.strip():
+        return None, None
+    tb_w = tb_l = 0
+    for tok in score.split():
+        if tok.startswith("[") and "-" in tok:      # super tie-break '[10-7]'
+            a, _, b = tok.strip("[]").partition("-")
+            try:
+                if int(a) > int(b):
+                    tb_w += 1
+                else:
+                    tb_l += 1
+            except ValueError:
+                continue
+            continue
+        if "(" not in tok:                          # set sans tie-break
+            continue
+        a, _, b = tok.split("(")[0].partition("-")
+        try:
+            if int(a) > int(b):                    # ex: 7-6 -> set (et TB) au vainqueur
+                tb_w += 1
+            else:                                  # ex: 6-7 -> TB au perdant
+                tb_l += 1
+        except ValueError:
+            continue
+    return tb_w, tb_l
 
 
 def fetch_year(year: int, tour: str = "atp") -> List[Dict]:
@@ -263,6 +304,70 @@ def surface_backfill(years: Optional[List[int]] = None,
     log(f"Surface rétro-remplie : {len(id_surface)} matchs ; cartes "
         f"nom={len(name_map)} token={len(token_map)} semaine={len(week_map)}.")
     return {"name": name_map, "token": token_map, "week": week_map}
+
+
+def clutch_backfill(years: Optional[List[int]] = None,
+                    tours: Optional[List[str]] = None,
+                    include_challengers: bool = True,
+                    url_template: Optional[str] = None) -> int:
+    """Rétro-remplit les colonnes clutch (w/l_bp_saved, w/l_bp_faced,
+    w/l_tb_won) des matchs déjà archivés, en re-téléchargeant les CSV Sackmann
+    (même pattern que surface_backfill). Renvoie le nb de lignes mises à jour.
+
+    Les ids d'archive diffèrent selon la source : '{tour}-{tid}-{num}' pour le
+    circuit principal, '{tour}-chall-{tid}-{num}' pour les Challengers/ITF —
+    on reconstruit les deux. Les lignes tennis-data.co.uk (pas de stats BP)
+    restent NULL, et player_clutch_stats les ignore.
+
+    `url_template` remplace config.SACKMANN_URL (mêmes placeholders
+    {tour}/{year}) — nécessaire depuis la disparition du repo Sackmann
+    (voir config.py) pour viser un miroir ou une capture Wayback.
+    """
+    from . import db
+
+    cfg = config.DEFAULT_CONFIG
+    years = years or cfg.get("years", [2022, 2023, 2024])
+    tours = tours or cfg.get("tours", ["atp", "wta"])
+
+    updates: List[tuple] = []
+
+    def collect(text: str, id_prefix: str) -> None:
+        for row in csv.DictReader(io.StringIO(text)):
+            mid = f"{id_prefix}{row.get('tourney_id', '?')}-{row.get('match_num', '?')}"
+            tb_w, tb_l = parse_tiebreaks(row.get("score", ""))
+            bp = (_f(row, "w_bpSaved"), _f(row, "w_bpFaced"),
+                  _f(row, "l_bpSaved"), _f(row, "l_bpFaced"))
+            if all(v is None for v in bp) and tb_w is None:
+                continue  # rien à écrire pour cette ligne
+            updates.append((*bp, tb_w, tb_l, mid))
+
+    template = url_template or config.SACKMANN_URL
+    for tour in tours:
+        for year in years:
+            text = _http_get(template.format(tour=tour, year=year))
+            if text:
+                collect(text, f"{tour}-")
+            if include_challengers:
+                urls = ([config.WTA_ITF_URL.format(year=year),
+                         config.CHALLENGER_URL.format(tour=tour, year=year)]
+                        if tour == "wta"
+                        else [config.CHALLENGER_URL.format(tour=tour, year=year)])
+                for url in urls:
+                    ch_text = _http_get(url)
+                    if ch_text:
+                        collect(ch_text, f"{tour}-chall-")
+                        break  # même logique de fallback que fetch_challengers
+
+    with db.connect() as conn:
+        cur = conn.executemany(
+            "UPDATE matches SET w_bp_saved=?, w_bp_faced=?, l_bp_saved=?, "
+            "l_bp_faced=?, w_tb_won=?, l_tb_won=? WHERE id=?",
+            updates,
+        )
+        n = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    log(f"Clutch rétro-rempli : {n} matchs mis à jour "
+        f"(sur {len(updates)} lignes CSV avec stats).")
+    return n
 
 
 def probe_live() -> bool:

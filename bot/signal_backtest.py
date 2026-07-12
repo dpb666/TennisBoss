@@ -287,10 +287,83 @@ def backtest_steam_move(threshold_pct: float = None) -> Dict[str, Any]:
     }
 
 
+# ── 4. clutch (break points / tie-breaks) ─────────────────────────────────────
+
+def backtest_clutch(min_bp_faced: float = None,
+                    diff_threshold: float = 0.08) -> Dict[str, Any]:
+    """Le taux HISTORIQUE de BP sauvées prédit-il le vainqueur ?
+
+    Replay chronologique de la table `matches` (lignes avec stats BP) :
+    agrégats clutch accumulés AVANT chaque match (jamais après — pas de
+    fuite). Quand les deux joueurs ont un échantillon suffisant et que leurs
+    taux de BP sauvées diffèrent d'au moins `diff_threshold`, on regarde si
+    le côté "plus clutch" gagne plus souvent que 50% (baseline symétrique
+    par construction : chaque match a un côté plus clutch et un côté moins).
+
+    Limite assumée (comme form_signal) : le taux de BP sauvées est corrélé à
+    la qualité de service globale, déjà dans le modèle — un écart positif ici
+    ne prouve pas une info NOUVELLE, seulement que le signal n'est pas du
+    bruit. Contrôle plus strict requis avant toute entrée dans le modèle.
+    """
+    min_bp_faced = (min_bp_faced if min_bp_faced is not None
+                    else float(intelligence_layer.CLUTCH_MIN_BP_FACED))
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT winner, loser, w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced "
+            "FROM matches WHERE w_bp_faced IS NOT NULL "
+            "ORDER BY REPLACE(date,'-','') ASC, id ASC"
+        ).fetchall()
+
+    acc: Dict[str, List[float]] = {}  # name -> [bp_saved, bp_faced]
+
+    n_eval = n_clutch_won = 0
+    for r in rows:
+        w, l = r["winner"], r["loser"]
+        aw, al = acc.get(w), acc.get(l)
+        if (aw and al and aw[1] >= min_bp_faced and al[1] >= min_bp_faced):
+            rate_w, rate_l = aw[0] / aw[1], al[0] / al[1]
+            if abs(rate_w - rate_l) >= diff_threshold:
+                n_eval += 1
+                if rate_w > rate_l:   # le côté plus clutch a gagné
+                    n_clutch_won += 1
+        # Mise à jour APRÈS évaluation (jamais avant) : évite la fuite.
+        acc.setdefault(w, [0.0, 0.0])
+        acc.setdefault(l, [0.0, 0.0])
+        acc[w][0] += r["w_bp_saved"] or 0.0
+        acc[w][1] += r["w_bp_faced"] or 0.0
+        acc[l][0] += r["l_bp_saved"] or 0.0
+        acc[l][1] += r["l_bp_faced"] or 0.0
+
+    if n_eval == 0:
+        return {"n_matches_with_bp": len(rows), "n_evaluated": 0,
+                "note": "Aucun match où les deux joueurs ont un historique BP suffisant "
+                        "(lancer datasource.clutch_backfill() ?)."}
+
+    rate = n_clutch_won / n_eval
+    return {
+        "min_bp_faced": min_bp_faced,
+        "diff_threshold": diff_threshold,
+        "n_matches_with_bp": len(rows),
+        "n_evaluated": n_eval,
+        "clutch_side_win_rate": round(rate, 4),
+        "baseline": 0.5,
+        "caveat": ("Le taux de BP sauvées est corrélé à la qualité de service, déjà "
+                   "dans le modèle — un écart ici ne prouve pas une info nouvelle."),
+        "verdict": (
+            f"Le côté au meilleur historique de BP sauvées gagne {rate:.1%} des matchs "
+            f"(baseline 50%, n={n_eval})."
+            + (" Signal informatif — mérite un contrôle contre l'ELO avant d'aller plus loin."
+               if rate > 0.52 else " Pas d'écart net — signal probablement redondant/bruit.")
+        ),
+    }
+
+
 def run_all() -> Dict[str, Any]:
-    log("=== Backtest signaux : calibration + form_signal + steam_move ===", "INFO")
+    log("=== Backtest signaux : calibration + form_signal + steam_move + clutch ===", "INFO")
     return {
         "calibration": backtest_calibration(),
         "form_signal": backtest_form_signal(),
         "steam_move": backtest_steam_move(),
+        "clutch": backtest_clutch(),
     }

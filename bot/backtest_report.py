@@ -295,6 +295,10 @@ cotes portent sur le match : indicatif, pas une promesse. Aucun pari automatique
 <h3>steam_move</h3>
 {_kv_table(steam, skip=('verdict',))}
 <div class="verdict">{_esc(steam.get('verdict', steam.get('note', '—')))}</div>
+<h3>clutch (break points / tie-breaks)</h3>
+{_kv_table(sig.get('clutch', {}), skip=('verdict', 'caveat'))}
+<div class="verdict">{_esc(sig.get('clutch', {}).get('verdict', sig.get('clutch', {}).get('note', '—')))}</div>
+<p class="caveat">{_esc(sig.get('clutch', {}).get('caveat', ''))}</p>
 
 <h2>5. Performance réelle en production</h2>
 <h3>Picks value réglés</h3>

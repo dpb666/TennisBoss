@@ -67,6 +67,19 @@ OPPONENT_QUALITY_WINDOW = 10
 OPPONENT_QUALITY_MIN_MATCHES = 5
 OPPONENT_QUALITY_ELO_THRESHOLD = 100.0
 
+# Signal "clutch" (points sous pression) : taux de BP sauvées au service et de
+# tie-breaks gagnés sur les derniers matchs avec stats Sackmann. Repères
+# circuit : ~62-65% de BP sauvées (corrélé au % de points gagnés au service),
+# ~50% de TB gagnés par construction. On ne signale que les écarts nets, avec
+# un échantillon minimal — sinon c'est du bruit.
+CLUTCH_WINDOW_MATCHES = 20
+CLUTCH_MIN_BP_FACED = 15
+CLUTCH_BP_SAVE_HIGH = 0.72
+CLUTCH_BP_SAVE_LOW = 0.52
+CLUTCH_MIN_TB_PLAYED = 5
+CLUTCH_TB_WIN_HIGH = 0.70
+CLUTCH_TB_WIN_LOW = 0.30
+
 
 def _form_signal(name: str, prof: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Compare la forme récente (EMA `recent`) au bilan carrière du joueur.
@@ -163,6 +176,54 @@ def opponent_quality_signals(mem: Dict[str, Any], n1: str, n2: str) -> List[Dict
     out = []
     for name in (n1, n2):
         sig = _opponent_quality_signal(mem, name)
+        if sig:
+            out.append(sig)
+    return out
+
+
+def _clutch_signal(name: str) -> Optional[Dict[str, Any]]:
+    """Comportement sous pression : BP sauvées au service et tie-breaks gagnés
+    sur les CLUTCH_WINDOW_MATCHES derniers matchs avec stats (Sackmann).
+
+    Deux dimensions indépendantes, chacune avec son propre seuil d'échantillon ;
+    on ne renvoie un signal que si AU MOINS une est notable. Informationnel
+    uniquement (voir note Phase 2) — backtest walk-forward dans
+    bot/signal_backtest.py::backtest_clutch avant toute entrée dans le modèle.
+    """
+    stats = db.player_clutch_stats(name, CLUTCH_WINDOW_MATCHES)
+    notes: List[str] = []
+    out: Dict[str, Any] = {"player": name, "n_matches": int(stats["n_matches"])}
+
+    if stats["bp_faced"] >= CLUTCH_MIN_BP_FACED:
+        save_rate = stats["bp_saved"] / stats["bp_faced"]
+        out["bp_saved"] = int(stats["bp_saved"])
+        out["bp_faced"] = int(stats["bp_faced"])
+        out["bp_save_rate"] = round(save_rate, 3)
+        if save_rate >= CLUTCH_BP_SAVE_HIGH:
+            notes.append("solide sur balles de break")
+        elif save_rate <= CLUTCH_BP_SAVE_LOW:
+            notes.append("fragile sur balles de break")
+
+    if stats["tb_played"] >= CLUTCH_MIN_TB_PLAYED:
+        tb_rate = stats["tb_won"] / stats["tb_played"]
+        out["tb_won"] = int(stats["tb_won"])
+        out["tb_played"] = int(stats["tb_played"])
+        out["tb_win_rate"] = round(tb_rate, 3)
+        if tb_rate >= CLUTCH_TB_WIN_HIGH:
+            notes.append("très bon en tie-break")
+        elif tb_rate <= CLUTCH_TB_WIN_LOW:
+            notes.append("faible en tie-break")
+
+    if not notes:
+        return None
+    out["direction"] = " ; ".join(notes)
+    return out
+
+
+def clutch_signals(n1: str, n2: str) -> List[Dict[str, Any]]:
+    out = []
+    for name in (n1, n2):
+        sig = _clutch_signal(name)
         if sig:
             out.append(sig)
     return out
@@ -277,6 +338,7 @@ def build_insight(
         "form_signals": form_signals(mem, n1, n2),
         "fatigue_signals": fatigue_signals(n1, n2),
         "opponent_quality_signals": opponent_quality_signals(mem, n1, n2),
+        "clutch_signals": clutch_signals(n1, n2),
         "sentiment_signals": sentiment_signals(n1, n2) if include_sentiment else [],
         "market": market,
         "model_health": _model_health(n1, n2, surface),

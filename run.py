@@ -427,6 +427,17 @@ def cmd_signals(_args) -> None:
         print(f"n={s['n_with_move']} | taux de victoire réel={s['actual_win_rate_moved_side']} "
               f"vs implicite ouverture={s['avg_opening_implied_prob']} (edge {s['edge_vs_opening_line']:+})")
         print(s["verdict"])
+
+    print("\n--- CLUTCH (BP sauvées) ---")
+    c = report["clutch"]
+    if c.get("n_evaluated", 0) == 0:
+        print(c.get("note"))
+    else:
+        print(f"{c['n_matches_with_bp']} matchs avec stats BP | "
+              f"{c['n_evaluated']} évalués (écart >= {c['diff_threshold']})")
+        print(f"Côté plus clutch gagne : {c['clutch_side_win_rate']} (baseline 0.5)")
+        print(f"Limite : {c['caveat']}")
+        print(c["verdict"])
     print()
 
 

@@ -46,7 +46,12 @@ CREATE TABLE IF NOT EXISTS matches (
     w_serve   REAL, w_return1 REAL, w_return2 REAL,
     l_serve   REAL, l_return1 REAL, l_return2 REAL,
     surface   TEXT,
-    margin    INTEGER
+    margin    INTEGER,
+    -- Stats "clutch" (Sackmann ; NULL pour les lignes tennis-data.co.uk) :
+    -- break points sauvées/concédées AU SERVICE, tie-breaks gagnés par match.
+    w_bp_saved REAL, w_bp_faced REAL,
+    l_bp_saved REAL, l_bp_faced REAL,
+    w_tb_won  INTEGER, l_tb_won INTEGER
 );
 CREATE TABLE IF NOT EXISTS predictions (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -251,6 +256,12 @@ def init() -> None:
         for col, ddl in (
             ("surface", "ALTER TABLE matches ADD COLUMN surface TEXT"),
             ("margin", "ALTER TABLE matches ADD COLUMN margin INTEGER"),
+            ("w_bp_saved", "ALTER TABLE matches ADD COLUMN w_bp_saved REAL"),
+            ("w_bp_faced", "ALTER TABLE matches ADD COLUMN w_bp_faced REAL"),
+            ("l_bp_saved", "ALTER TABLE matches ADD COLUMN l_bp_saved REAL"),
+            ("l_bp_faced", "ALTER TABLE matches ADD COLUMN l_bp_faced REAL"),
+            ("w_tb_won", "ALTER TABLE matches ADD COLUMN w_tb_won INTEGER"),
+            ("l_tb_won", "ALTER TABLE matches ADD COLUMN l_tb_won INTEGER"),
             ("accuracy_elo", "ALTER TABLE backtests ADD COLUMN accuracy_elo REAL"),
             ("logloss_elo",  "ALTER TABLE backtests ADD COLUMN logloss_elo REAL"),
             ("brier_elo",    "ALTER TABLE backtests ADD COLUMN brier_elo REAL"),
@@ -313,6 +324,9 @@ def archive_matches(matches: List[Dict]) -> int:
             m["winner"]["serve"], m["winner"]["return1"], m["winner"]["return2"],
             m["loser"]["serve"], m["loser"]["return1"], m["loser"]["return2"],
             m.get("surface", ""), m.get("margin"),
+            m.get("w_bp_saved"), m.get("w_bp_faced"),
+            m.get("l_bp_saved"), m.get("l_bp_faced"),
+            m.get("w_tb_won"), m.get("l_tb_won"),
         )
         for m in matches
     ]
@@ -321,8 +335,9 @@ def archive_matches(matches: List[Dict]) -> int:
         conn.executemany(
             "INSERT OR IGNORE INTO matches "
             "(id,date,tour,winner,loser,w_serve,w_return1,w_return2,"
-            " l_serve,l_return1,l_return2,surface,margin) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " l_serve,l_return1,l_return2,surface,margin,"
+            " w_bp_saved,w_bp_faced,l_bp_saved,l_bp_faced,w_tb_won,l_tb_won) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         after = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
@@ -502,6 +517,49 @@ def player_recent_match_count(name: str, cutoff_compact: str) -> int:
             "AND REPLACE(date,'-','') >= ?",
             (name, name, cutoff_compact),
         ).fetchone()[0]
+
+
+def player_clutch_stats(name: str, limit: int) -> Dict[str, float]:
+    """Agrégats "clutch" sur les `limit` derniers matchs de `name` ayant des
+    stats de break points (lignes Sackmann ; les lignes tennis-data restent
+    NULL et sont ignorées). Voir player_recent_matches pour la normalisation
+    de date.
+
+    Renvoie des SOMMES brutes (les taux se calculent chez l'appelant) :
+      bp_saved / bp_faced : BP défendues au service par `name`
+      bp_converted / bp_chances : BP converties au retour par `name`
+        (= les BP que son adversaire a concédées moins celles qu'il a sauvées)
+      tb_won / tb_played : tie-breaks gagnés / disputés
+      n_matches : matchs avec stats BP dans la fenêtre
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT winner, w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced, "
+            "w_tb_won, l_tb_won FROM matches "
+            "WHERE (winner=? OR loser=?) AND w_bp_faced IS NOT NULL "
+            "ORDER BY REPLACE(date,'-','') DESC, id DESC LIMIT ?",
+            (name, name, limit),
+        ).fetchall()
+    out = {"bp_saved": 0.0, "bp_faced": 0.0, "bp_converted": 0.0,
+           "bp_chances": 0.0, "tb_won": 0.0, "tb_played": 0.0,
+           "n_matches": float(len(rows))}
+    for r in rows:
+        if r["winner"] == name:
+            own_s, own_f = r["w_bp_saved"], r["w_bp_faced"]
+            opp_s, opp_f = r["l_bp_saved"], r["l_bp_faced"]
+            own_tb, opp_tb = r["w_tb_won"], r["l_tb_won"]
+        else:
+            own_s, own_f = r["l_bp_saved"], r["l_bp_faced"]
+            opp_s, opp_f = r["w_bp_saved"], r["w_bp_faced"]
+            own_tb, opp_tb = r["l_tb_won"], r["w_tb_won"]
+        out["bp_saved"] += own_s or 0.0
+        out["bp_faced"] += own_f or 0.0
+        # BP converties par `name` = BP que l'adversaire n'a pas sauvées.
+        out["bp_converted"] += (opp_f or 0.0) - (opp_s or 0.0)
+        out["bp_chances"] += opp_f or 0.0
+        out["tb_won"] += own_tb or 0
+        out["tb_played"] += (own_tb or 0) + (opp_tb or 0)
+    return out
 
 
 def matches_for_backtest() -> List[Dict[str, Any]]:
