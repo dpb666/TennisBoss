@@ -10,6 +10,9 @@ Endpoints (tous en JSON) :
   GET /api/upcoming?days=&limit=&odds=true  -> matchs à venir + prédictions (+cotes)
   GET /api/value?limit=            -> modèle (1er set) vs marché (vainqueur match)
 
+Documentation complète (30 endpoints) : GET /api/docs (Swagger UI),
+GET /api/openapi.json (spec brute) — les deux publics, sans token.
+
 Sécurité : si la variable d'env TENNISBOSS_API_TOKEN est définie, chaque requête
 /api/* doit présenter l'en-tête  X-API-Token: <token>  (sinon accès libre, utile
 en réseau local pour le développement de l'app).
@@ -23,11 +26,12 @@ from collections import Counter
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
+from flask_swagger_ui import get_swaggerui_blueprint
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, intelligence, intelligence_layer, live_api, memory,
-               mistake_learner, namematch, odds_api, predictor, recommendations, sackmann_feeder,
-               settlement, weather)
+               mistake_learner, namematch, odds_api, openapi_spec, predictor, recommendations,
+               sackmann_feeder, settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -37,6 +41,17 @@ app = Flask(__name__)
 # plusieurs Go saturerait la RAM (f.read() charge tout en mémoire). 16 Mo suffit
 # pour les PDF/CSV/TXT attendus.
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+
+# Documentation Swagger UI (voir bot/openapi_spec.py) : /api/docs (interface)
+# + /api/openapi.json (spec brute, exemptée d'auth dans _auth() plus bas).
+app.register_blueprint(get_swaggerui_blueprint(
+    "/api/docs", "/api/openapi.json", config={"app_name": "TennisBoss API"},
+))
+
+
+@app.get("/api/openapi.json")
+def api_openapi_spec():
+    return jsonify(openapi_spec.build_spec())
 
 # Mémoire chargée une fois au démarrage (modèle + profils joueurs).
 _MEM: Dict[str, Any] = {}
@@ -167,7 +182,11 @@ def _cors(resp):
 def _auth():
     # /privacy doit rester public : URL exigée par Google Play Console, sans
     # token pour que les revieweurs/utilisateurs puissent la consulter librement.
-    if request.method == "OPTIONS" or request.path in ("/health", "/privacy"):
+    # /api/docs (Swagger UI) et /api/openapi.json : documentation publique,
+    # comme la plupart des API publiques (ne révèle aucune donnée, juste la
+    # forme des requêtes/réponses).
+    if (request.method == "OPTIONS" or request.path in ("/health", "/privacy", "/api/openapi.json")
+            or request.path.startswith("/api/docs")):
         return None
     token = os.environ.get("TENNISBOSS_API_TOKEN", "").strip()
     if token and request.headers.get("X-API-Token", "") != token:

@@ -42,6 +42,20 @@ def _client():
 
 # ─── health / status ─────────────────────────────────────────────────────────
 
+def test_openapi_spec_is_public_and_valid_json():
+    resp = _client().get("/api/openapi.json")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["openapi"] == "3.0.3"
+    assert "/api/predict" in data["paths"]
+    assert "/health" in data["paths"]
+
+
+def test_swagger_ui_is_public():
+    resp = _client().get("/api/docs/")
+    assert resp.status_code == 200
+
+
 def test_health_ok():
     resp = _client().get("/health")
     data = resp.get_json()
