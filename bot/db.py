@@ -155,6 +155,10 @@ CREATE TABLE IF NOT EXISTS device_tokens (
     registered_ts TEXT,
     last_seen_ts  TEXT
 );
+CREATE TABLE IF NOT EXISTS followed_players (
+    name        TEXT PRIMARY KEY,   -- nom résolu (même convention que predictions.player1/2)
+    followed_ts TEXT
+);
 CREATE TABLE IF NOT EXISTS live_prob_snapshots (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     event_key  TEXT,            -- id événement live (regroupe les points d'un même match)
@@ -953,6 +957,36 @@ def list_device_tokens() -> List[sqlite3.Row]:
 def delete_device_token(token: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM device_tokens WHERE token=?", (token,))
+
+
+# --- Joueurs suivis (signal explicite de personnalisation) -------------------
+def follow_player(name: str) -> None:
+    """Suit un joueur (INSERT OR IGNORE = idempotent, ne rafraîchit pas la date)."""
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO followed_players (name, followed_ts) VALUES (?,?)",
+            (name, _dt.datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def unfollow_player(name: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM followed_players WHERE name=?", (name,))
+
+
+def list_followed_players() -> List[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT name FROM followed_players ORDER BY followed_ts DESC"
+        ).fetchall()
+    return [r["name"] for r in rows]
+
+
+def is_player_followed(name: str) -> bool:
+    with connect() as conn:
+        row = conn.execute("SELECT 1 FROM followed_players WHERE name=?", (name,)).fetchone()
+    return row is not None
 
 
 def line_movement(event_key: str) -> Optional[Dict[str, Any]]:

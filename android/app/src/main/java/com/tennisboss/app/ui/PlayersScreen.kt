@@ -21,10 +21,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tennisboss.app.data.ApiClient
+import com.tennisboss.app.data.FollowPlayerRequest
 import com.tennisboss.app.data.FormMatch
 import com.tennisboss.app.data.H2H
 import com.tennisboss.app.data.Player
 import com.tennisboss.app.data.PlayerDetail
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 private val P1Color = Color(0xFF4F8CFF)
@@ -163,6 +166,10 @@ private fun CompareView(p1: PlayerDetail, p2: PlayerDetail?, h2h: H2H?) {
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.outline)
                     PlayerNameBadge(p2, P2Color, Alignment.End)
+                } else {
+                    // Suivre un seul joueur à la fois : pas de bouton en mode
+                    // comparaison (ambiguïté sur lequel des deux suivre).
+                    FollowButton(p1)
                 }
             }
         }
@@ -240,6 +247,48 @@ private fun PlayerNameBadge(p: PlayerDetail, color: Color, align: Alignment.Hori
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold, color = color)
         }
+    }
+}
+
+/**
+ * Suivre/ne plus suivre un joueur — signal explicite de personnalisation
+ * (bot/recommendations.py::favorite_players priorise les suivis explicites
+ * sur l'inférence par fréquence de recherche). Mise à jour optimiste avec
+ * retour arrière silencieux en cas d'échec réseau.
+ */
+@Composable
+private fun FollowButton(player: PlayerDetail) {
+    var followed by remember(player.name) { mutableStateOf(player.followed) }
+    var loading by remember(player.name) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    FilledTonalButton(
+        onClick = {
+            if (loading) return@FilledTonalButton
+            val next = !followed
+            followed = next
+            loading = true
+            scope.launch {
+                try {
+                    if (next) ApiClient.create().followPlayer(FollowPlayerRequest(player.name))
+                    else ApiClient.create().unfollowPlayer(FollowPlayerRequest(player.name))
+                } catch (_: Exception) {
+                    followed = !next  // échec réseau : reviens à l'état précédent
+                } finally {
+                    loading = false
+                }
+            }
+        },
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = if (followed) AccentColor.copy(alpha = 0.2f)
+                             else MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Text(
+            if (followed) "✓ Suivi" else "+ Suivre",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (followed) AccentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

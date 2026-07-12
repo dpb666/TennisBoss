@@ -6,6 +6,9 @@ import com.tennisboss.app.data.ChatResponse
 import com.tennisboss.app.data.ClvResponse
 import com.tennisboss.app.data.DeviceRegisterRequest
 import com.tennisboss.app.data.DeviceRegisterResponse
+import com.tennisboss.app.data.FollowPlayerRequest
+import com.tennisboss.app.data.FollowPlayerResponse
+import com.tennisboss.app.data.FollowedPlayersResponse
 import com.tennisboss.app.data.H2H
 import com.tennisboss.app.data.Health
 import com.tennisboss.app.data.HistoryDatesResponse
@@ -55,6 +58,15 @@ class FakeApi(
         throw NotImplementedError("non utilisé")
 
     override suspend fun player(name: String): PlayerDetail =
+        throw NotImplementedError("non utilisé")
+
+    override suspend fun followPlayer(request: FollowPlayerRequest): FollowPlayerResponse =
+        throw NotImplementedError("non utilisé")
+
+    override suspend fun unfollowPlayer(request: FollowPlayerRequest): FollowPlayerResponse =
+        throw NotImplementedError("non utilisé")
+
+    override suspend fun followedPlayers(): FollowedPlayersResponse =
         throw NotImplementedError("non utilisé")
 
     override suspend fun h2h(p1: String, p2: String): H2H =

@@ -21,7 +21,19 @@ from . import db
 
 
 def favorite_players(limit: int = 10, min_queries: int = 2) -> List[Dict[str, Any]]:
-    """Joueurs les plus consultés récemment (proxy : /api/predict demandé)."""
+    """Joueurs favoris : suivis explicitement (bot/db.py::follow_player) en
+    priorité, complétés par les plus consultés récemment (proxy : /api/predict
+    demandé) — un signal plus bruyant, gardé en repli tant que peu de joueurs
+    sont suivis explicitement.
+    """
+    followed = db.list_followed_players()
+    followed_set = set(followed)
+    result: List[Dict[str, Any]] = [
+        {"player": name, "queries": None, "followed": True} for name in followed[:limit]
+    ]
+    if len(result) >= limit:
+        return result
+
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT player1, player2 FROM predictions ORDER BY ts DESC LIMIT 500"
@@ -30,7 +42,13 @@ def favorite_players(limit: int = 10, min_queries: int = 2) -> List[Dict[str, An
     for r in rows:
         counts[r["player1"]] += 1
         counts[r["player2"]] += 1
-    return [{"player": name, "queries": n} for name, n in counts.most_common(limit) if n >= min_queries]
+    for name, n in counts.most_common():
+        if len(result) >= limit:
+            break
+        if name in followed_set or n < min_queries:
+            continue
+        result.append({"player": name, "queries": n, "followed": False})
+    return result
 
 
 def risk_profile() -> Dict[str, Any]:

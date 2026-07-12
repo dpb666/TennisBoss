@@ -19,6 +19,7 @@ data class Player(
     val recent: Double = 0.0,
     val win_prob_vs_avg: Double = 0.0,
     val confident: Boolean = false,
+    val followed: Boolean = false,
 )
 
 data class PlayersResponse(
@@ -66,6 +67,20 @@ data class PlayerDetail(
     val record: Record? = null,
     val form: List<FormMatch> = emptyList(),
     val elo: PlayerElo? = null,
+    val followed: Boolean = false,
+)
+
+/** Requête pour /api/player/follow et /api/player/unfollow. */
+data class FollowPlayerRequest(val name: String)
+
+data class FollowPlayerResponse(
+    val name: String = "",
+    val followed: Boolean = false,
+)
+
+data class FollowedPlayersResponse(
+    val count: Int = 0,
+    val players: List<Player> = emptyList(),
 )
 
 /** Message dans l'historique du chat. */

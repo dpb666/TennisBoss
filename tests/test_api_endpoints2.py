@@ -70,12 +70,20 @@ def test_status_returns_metrics_and_db_counts():
 # ─── players / h2h / player ──────────────────────────────────────────────────
 
 def test_players_search_filters_by_query():
-    resp = _client().get("/api/players?q=sinner")
+    with patch.object(api.db, "list_followed_players", return_value=[]):
+        resp = _client().get("/api/players?q=sinner")
     data = resp.get_json()
     assert resp.status_code == 200
     assert data["count"] == 2  # total joueurs connus
     assert len(data["players"]) == 1
     assert data["players"][0]["name"] == "Jannik Sinner"
+    assert data["players"][0]["followed"] is False
+
+
+def test_players_search_flags_followed_player():
+    with patch.object(api.db, "list_followed_players", return_value=["Jannik Sinner"]):
+        resp = _client().get("/api/players?q=sinner")
+    assert resp.get_json()["players"][0]["followed"] is True
 
 
 def test_h2h_requires_both_players():
@@ -110,13 +118,15 @@ def test_player_returns_404_for_unknown():
 def test_player_returns_profile_for_known_player():
     with patch.object(api.db, "player_record", return_value={"wins": 10, "losses": 5}), \
          patch.object(api.db, "player_recent_matches", return_value=[]), \
-         patch.object(api.db, "get_player", return_value=None):
+         patch.object(api.db, "get_player", return_value=None), \
+         patch.object(api.db, "is_player_followed", return_value=False):
         resp = _client().get("/api/player?name=Jannik+Sinner")
     data = resp.get_json()
     assert resp.status_code == 200
     assert data["name"] == "Jannik Sinner"
     assert data["record"]["wins"] == 10
     assert data["elo"]["rating"] == 2112.0
+    assert data["followed"] is False
 
 
 # ─── predict ──────────────────────────────────────────────────────────────────

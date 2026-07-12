@@ -434,6 +434,9 @@ def api_players():
     elo_grass = (_MEM.get("elo_surface") or {}).get("grass", {})
     elo_clay = (_MEM.get("elo_surface") or {}).get("clay", {})
     elo_hard = (_MEM.get("elo_surface") or {}).get("hard", {})
+    # Set pré-chargé une seule fois (pas une requête DB par joueur dans la
+    # boucle ci-dessous, qui itère sur TOUS les joueurs connus avant la limite).
+    followed_set = set(db.list_followed_players())
     results = []
     for name in _MEM["players"]:
         if q and q not in name.lower():
@@ -441,6 +444,7 @@ def api_players():
         if tour and (_MEM["players"][name].get("tour") != tour):
             continue
         p = _player_payload(name)
+        p["followed"] = name in followed_set
         from .predictor import _lookup_elo, ELO_BASE
         p["elo"] = round(_lookup_elo(elo_dict, name))
         p["elo_grass"] = round(_lookup_elo(elo_grass, name)) if elo_grass else None
@@ -532,6 +536,7 @@ def api_player():
         return jsonify({"error": "joueur inconnu", "unresolved": name}), 404
 
     payload = _player_payload(resolved)
+    payload["followed"] = db.is_player_followed(resolved)
 
     rec = db.player_record(resolved)
     total = rec["wins"] + rec["losses"]
@@ -574,6 +579,43 @@ def api_player():
             payload["elo"]["by_surface"] = by_surface
 
     return jsonify(payload)
+
+
+@app.route("/api/player/follow", methods=["POST"])
+def api_player_follow():
+    """Suit un joueur — signal explicite de personnalisation (voir
+    bot/recommendations.py::favorite_players, qui priorise les suivis
+    explicites sur l'inférence par fréquence de recherche)."""
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "paramètre requis: name"}), 400
+    resolved = _resolve(name) or name
+    db.follow_player(resolved)
+    return jsonify({"name": resolved, "followed": True})
+
+
+@app.route("/api/player/unfollow", methods=["POST"])
+def api_player_unfollow():
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "paramètre requis: name"}), 400
+    resolved = _resolve(name) or name
+    db.unfollow_player(resolved)
+    return jsonify({"name": resolved, "followed": False})
+
+
+@app.get("/api/players/followed")
+def api_players_followed():
+    """Liste des joueurs suivis, avec leur fiche complète (réutilise _player_payload)."""
+    names = db.list_followed_players()
+    players = []
+    for n in names:
+        p = _player_payload(n)
+        p["followed"] = True
+        players.append(p)
+    return jsonify({"count": len(names), "players": players})
 
 
 def _set_to_match_prob(p_set: float) -> float:

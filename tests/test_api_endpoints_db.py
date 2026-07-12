@@ -175,5 +175,31 @@ class TestRecommendations(ApiDbTestCase):
         self.assertEqual(resp.get_json()["matches"], [])
 
 
+class TestFollowedPlayers(ApiDbTestCase):
+    def test_follow_requires_name(self):
+        resp = self.client.post("/api/player/follow", json={})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_follow_then_list_then_unfollow(self):
+        resp = self.client.post("/api/player/follow", json={"name": "Jannik Sinner"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["followed"])
+
+        resp = self.client.get("/api/players/followed")
+        data = resp.get_json()
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["players"][0]["name"], "Jannik Sinner")
+        self.assertTrue(data["players"][0]["followed"])
+
+        resp = self.client.post("/api/player/unfollow", json={"name": "Jannik Sinner"})
+        self.assertFalse(resp.get_json()["followed"])
+        self.assertEqual(self.client.get("/api/players/followed").get_json()["count"], 0)
+
+    def test_follow_is_idempotent(self):
+        self.client.post("/api/player/follow", json={"name": "Sinner"})
+        self.client.post("/api/player/follow", json={"name": "Sinner"})
+        self.assertEqual(self.client.get("/api/players/followed").get_json()["count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

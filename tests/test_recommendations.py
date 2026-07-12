@@ -40,6 +40,23 @@ class TestFavoritePlayers(RecoTestCase):
         db.log_prediction("A", "B", 0.5, "A")  # 1 requête chacun -> sous le seuil par défaut (2)
         self.assertEqual(reco.favorite_players(min_queries=2), [])
 
+    def test_explicit_follow_takes_priority_over_query_frequency(self):
+        # Djokovic n'est jamais recherché mais suivi explicitement -> doit
+        # apparaître ; le signal explicite prime sur l'inférence par fréquence.
+        for _ in range(5):
+            db.log_prediction("Sinner", "Alcaraz", 0.6, "Sinner")
+        db.follow_player("Djokovic")
+        favs = {f["player"]: f["followed"] for f in reco.favorite_players()}
+        self.assertTrue(favs["Djokovic"])
+        self.assertFalse(favs["Sinner"])
+
+    def test_followed_player_not_duplicated_by_frequency_signal(self):
+        for _ in range(5):
+            db.log_prediction("Sinner", "Alcaraz", 0.6, "Sinner")
+        db.follow_player("Sinner")
+        favs = [f["player"] for f in reco.favorite_players()]
+        self.assertEqual(favs.count("Sinner"), 1)
+
 
 class TestRiskProfile(RecoTestCase):
     def test_insufficient_with_few_picks(self):

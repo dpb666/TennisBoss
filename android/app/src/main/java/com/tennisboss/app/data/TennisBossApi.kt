@@ -36,6 +36,15 @@ interface TennisBossApi {
         @Query("name") name: String,
     ): PlayerDetail
 
+    @POST("api/player/follow")
+    suspend fun followPlayer(@Body request: FollowPlayerRequest): FollowPlayerResponse
+
+    @POST("api/player/unfollow")
+    suspend fun unfollowPlayer(@Body request: FollowPlayerRequest): FollowPlayerResponse
+
+    @GET("api/players/followed")
+    suspend fun followedPlayers(): FollowedPlayersResponse
+
     @GET("api/h2h")
     suspend fun h2h(
         @Query("p1") p1: String,
