@@ -68,7 +68,10 @@ private val TealMkt    = Color(0xFF00C2A8)
 private val PurpleMkt  = Color(0xFF9C7EFF)
 
 @Composable
-fun LiveScreen(vm: LiveViewModel = viewModel()) {
+fun LiveScreen(
+    onMatchClick: (String, String, String?) -> Unit,
+    vm: LiveViewModel = viewModel()
+) {
 
     DisposableEffect(Unit) {
         vm.startAutoRefresh()
@@ -237,7 +240,7 @@ fun LiveScreen(vm: LiveViewModel = viewModel()) {
                                         player1Resolved = match2.player1_resolved,
                                         player2Resolved = match2.player2_resolved,
                                     )
-                                })
+                                }, onClick = { onMatchClick(match.player1_resolved ?: match.player1, match.player2_resolved ?: match.player2, match.event_id.toString()) })
                             }
                         }
                     }
@@ -648,16 +651,17 @@ private fun LiveMatchCard(
     allMarkets: InplayMarketsResponse? = null,
     swung: Boolean = false,
     onTakePick: (InplayMatchMarkets, InplayMarket) -> Unit,
+    onClick: () -> Unit
 ) {
     val matchMarkets = allMarkets?.matches?.find { it.event_id == m.event_id }
     Card(
-        modifier = if (swung) {
+        modifier = (if (swung) {
             Modifier
                 .fillMaxWidth()
                 .border(2.dp, GreenEV, RoundedCornerShape(12.dp))
         } else {
             Modifier.fillMaxWidth()
-        },
+        }).clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {

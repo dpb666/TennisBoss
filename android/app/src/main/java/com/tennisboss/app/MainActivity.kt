@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -53,11 +54,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.TokenManager
+import com.tennisboss.app.ui.DashboardScreen
+import com.tennisboss.app.ui.DashboardViewModel
+import com.tennisboss.app.ui.MatchDetailScreen
+import com.tennisboss.app.ui.MatchDetailViewModel
 import com.tennisboss.app.ui.ChatScreen
 import com.tennisboss.app.ui.ChatViewModel
 import com.tennisboss.app.ui.LiveViewModel
 import com.tennisboss.app.ui.MatchesGroupScreen
-import com.tennisboss.app.ui.PerfGroupScreen
 import com.tennisboss.app.ui.PlayerCompareViewModel
 import com.tennisboss.app.ui.PredictGroupScreen
 import com.tennisboss.app.ui.PredictViewModel
@@ -68,6 +72,8 @@ import com.tennisboss.app.notifications.ScannerPollWorker
 import com.tennisboss.app.ui.theme.TennisBossTheme
 import com.google.firebase.messaging.FirebaseMessaging
 import com.tennisboss.app.data.DeviceRegisterRequest
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.outlined.Home
 
 class MainActivity : ComponentActivity() {
 
@@ -117,9 +123,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppRoot() {
     var tab by remember { mutableIntStateOf(0) }
-    // ViewModel de prédiction partagé : la recherche joueurs peut le pré-remplir.
+    var selectedMatch by remember { mutableStateOf<Triple<String, String, String?>?>(null) }
+    
+    val dashboardVM: DashboardViewModel = viewModel()
     val predictVM: PredictViewModel = viewModel()
     val compareVM: PlayerCompareViewModel = viewModel()
+    val detailVM: MatchDetailViewModel = viewModel()
     val chatVM: ChatViewModel = viewModel()
     val liveVM: LiveViewModel = viewModel()
 
@@ -155,10 +164,10 @@ fun AppRoot() {
             NavigationBar {
                 data class NavTab(val index: Int, val label: String, val filled: ImageVector, val outlined: ImageVector)
                 val tabs = listOf(
-                    NavTab(0, "Prédire", Icons.Filled.Insights, Icons.Outlined.Insights),
-                    NavTab(1, "Matchs", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-                    NavTab(2, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond),
-                    NavTab(3, "Perf", Icons.Filled.BarChart, Icons.Outlined.BarChart),
+                    NavTab(0, "Accueil", Icons.Filled.Home, Icons.Outlined.Home),
+                    NavTab(1, "Prédire", Icons.Filled.Insights, Icons.Outlined.Insights),
+                    NavTab(2, "Matchs", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
+                    NavTab(3, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond),
                     NavTab(4, "Chat", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
                 )
                 tabs.forEach { t ->
@@ -183,21 +192,35 @@ fun AppRoot() {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            AnimatedContent(
-                targetState = tab,
-                transitionSpec = {
-                    (fadeIn(tween(260)) +
-                        slideInVertically(tween(260)) { it / 16 }) togetherWith
-                        fadeOut(tween(180))
-                },
-                label = "tabs",
-            ) { current ->
-                when (current) {
-                    0 -> PredictGroupScreen(predictVM, compareVM)
-                    1 -> MatchesGroupScreen(liveVM)
-                    2 -> ValueGroupScreen()
-                    3 -> PerfGroupScreen()
-                    else -> ChatScreen(chatVM)
+            val match = selectedMatch
+            if (match != null) {
+                MatchDetailScreen(
+                    p1 = match.first,
+                    p2 = match.second,
+                    eventId = match.third,
+                    onBack = { selectedMatch = null },
+                    vm = detailVM
+                )
+            } else {
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        (fadeIn(tween(260)) +
+                            slideInVertically(tween(260)) { it / 16 }) togetherWith
+                            fadeOut(tween(180))
+                    },
+                    label = "tabs",
+                ) { current ->
+                    val onMatchClick: (String, String, String?) -> Unit = { p1, p2, eid ->
+                        selectedMatch = Triple(p1, p2, eid)
+                    }
+                    when (current) {
+                        0 -> DashboardScreen(onMatchClick, dashboardVM)
+                        1 -> PredictGroupScreen(predictVM, compareVM)
+                        2 -> MatchesGroupScreen(liveVM, onMatchClick)
+                        3 -> ValueGroupScreen(onMatchClick)
+                        else -> ChatScreen(chatVM)
+                    }
                 }
             }
         }
