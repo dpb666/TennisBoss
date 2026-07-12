@@ -69,49 +69,65 @@ class TestKeyPool(unittest.TestCase):
 
 class TestParseFixtures(unittest.TestCase):
     def test_parse_fixture_atp(self):
+        # Schéma réel confirmé (2026-07-12) : categoryName = palier du circuit
+        # (ATP/WTA/Challenger...), pas un pays.
         raw = [{
             "fixtureId": "id123",
-            "participant1Name": "Jannik Sinner",
-            "participant2Name": "Carlos Alcaraz",
-            "tournamentName": "ATP Wimbledon",
-            "categoryName": "United Kingdom",
+            "participant1Name": "Krumich, Martin",
+            "participant2Name": "Ferreira Silva, Frederico",
+            "tournamentName": "ATP Bastad, Sweden Men Singles",
+            "categoryName": "ATP",
             "startTime": "2026-07-17T14:00:00.000Z",
-            "statusId": 0,
+            "statusId": op.STATUS_PRE_GAME,
         }]
         out = op.parse_fixtures(raw)
         self.assertEqual(len(out), 1)
         f = out[0]
-        self.assertEqual(f["player1"], "Jannik Sinner")
-        self.assertEqual(f["player2"], "Carlos Alcaraz")
-        self.assertEqual(f["tournament"], "ATP Wimbledon")
+        self.assertEqual(f["player1"], "Krumich, Martin")
+        self.assertEqual(f["player2"], "Ferreira Silva, Frederico")
+        self.assertEqual(f["tournament"], "ATP Bastad, Sweden Men Singles")
         self.assertEqual(f["date"], "2026-07-17")
         self.assertEqual(f["time"], "14:00")
         self.assertFalse(f["live"])
         self.assertFalse(f["is_doubles"])
         self.assertEqual(f["tour"], "atp")
 
-    def test_parse_fixture_live_status_3(self):
+    def test_parse_fixture_live_status_1(self):
+        # statusId vérifié contre l'API réelle : 1 = Live (pas 3, comme la doc
+        # publique le laissait croire — 3 = Cancelled).
         raw = [{
             "participant1Name": "A", "participant2Name": "B",
-            "tournamentName": "WTA Iasi", "categoryName": "Romania",
-            "startTime": "2026-07-17T09:00:00.000Z", "statusId": 3,
+            "tournamentName": "WTA Iasi", "categoryName": "WTA",
+            "startTime": "2026-07-17T09:00:00.000Z", "statusId": op.STATUS_LIVE,
         }]
         f = op.parse_fixtures(raw)[0]
         self.assertTrue(f["live"])
         self.assertEqual(f["tour"], "wta")
 
+    def test_parse_fixture_finished_and_cancelled_excluded(self):
+        raw = [
+            {"participant1Name": "A", "participant2Name": "B", "tournamentName": "X",
+             "categoryName": "ATP", "startTime": "2026-07-17T09:00:00.000Z",
+             "statusId": op.STATUS_FINISHED},
+            {"participant1Name": "C", "participant2Name": "D", "tournamentName": "Y",
+             "categoryName": "ATP", "startTime": "2026-07-17T09:00:00.000Z",
+             "statusId": op.STATUS_CANCELLED},
+        ]
+        self.assertEqual(op.parse_fixtures(raw), [])
+
     def test_parse_fixture_doubles_detected(self):
         raw = [{
             "participant1Name": "A / B", "participant2Name": "C / D",
-            "tournamentName": "ATP Doubles", "categoryName": "",
-            "startTime": "2026-07-17T09:00:00.000Z", "statusId": 0,
+            "tournamentName": "ATP Doubles", "categoryName": "ATP",
+            "startTime": "2026-07-17T09:00:00.000Z", "statusId": op.STATUS_PRE_GAME,
         }]
         f = op.parse_fixtures(raw)[0]
         self.assertTrue(f["is_doubles"])
 
     def test_parse_fixture_sans_nom_joueur_ignore(self):
         raw = [{"participant1Name": "", "participant2Name": "B",
-                "tournamentName": "X", "categoryName": "", "startTime": "", "statusId": 0}]
+                "tournamentName": "X", "categoryName": "", "startTime": "",
+                "statusId": op.STATUS_PRE_GAME}]
         self.assertEqual(op.parse_fixtures(raw), [])
 
     def test_parse_fixture_date_invalide_ne_plante_pas(self):

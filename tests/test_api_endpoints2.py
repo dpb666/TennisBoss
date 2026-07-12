@@ -167,12 +167,70 @@ def test_predict_returns_first_set_probabilities():
 def test_upcoming_returns_empty_when_no_source_has_fixtures():
     with patch.object(api.live_api, "fetch_upcoming", return_value=[]), \
          patch.object(api.espn_api, "fetch_upcoming", return_value=[]), \
-         patch.object(api.odds_api, "is_enabled", return_value=False):
+         patch.object(api.odds_api, "is_enabled", return_value=False), \
+         patch.object(api.oddspapi_feeder, "is_enabled", return_value=False):
         # limit=99 (unique) évite de retomber sur le cache d'un autre test.
         resp = _client().get("/api/upcoming?days=1&limit=99")
     data = resp.get_json()
     assert resp.status_code == 200
     assert data["matches"] == []
+
+
+def test_upcoming_merges_oddspapi_fixtures_without_duplicates():
+    """Source 4 (OddsPapi) doit ajouter les matchs non déjà présents, sans
+    dupliquer ceux déjà renvoyés par ESPN — même dédup par (player1, player2)
+    que pour ESPN. is_enabled=True doit déclencher fetch+parse, jamais un
+    vrai appel réseau ici (tout est mocké)."""
+    espn_fixtures = [{
+        "player1": "Alice", "player2": "Bob", "tournament": "ATP X",
+        "round": "", "date": "2026-07-17", "time": "10:00", "live": False,
+        "event_key": "espn1", "is_doubles": False, "tour": "atp",
+    }]
+    oddspapi_parsed = [
+        {  # doublon (mêmes joueurs qu'ESPN) -> ne doit PAS être ajouté deux fois
+            "player1": "Alice", "player2": "Bob", "tournament": "ATP X",
+            "round": "", "date": "2026-07-17", "time": "10:00", "live": False,
+            "event_key": "oddspapi_dup", "is_doubles": False, "tour": "atp",
+        },
+        {  # nouveau match -> doit être ajouté
+            "player1": "Carla", "player2": "Dana", "tournament": "WTA Y",
+            "round": "", "date": "2026-07-17", "time": "12:00", "live": False,
+            "event_key": "oddspapi_new", "is_doubles": False, "tour": "wta",
+        },
+    ]
+    with patch.object(api.live_api, "fetch_upcoming", return_value=[]), \
+         patch.object(api.espn_api, "fetch_upcoming", return_value=espn_fixtures), \
+         patch.object(api.odds_api, "is_enabled", return_value=False), \
+         patch.object(api.oddspapi_feeder, "is_enabled", return_value=True), \
+         patch.object(api.oddspapi_feeder, "fetch_tennis_fixtures", return_value=[{"raw": True}]), \
+         patch.object(api.oddspapi_feeder, "parse_fixtures", return_value=oddspapi_parsed):
+        # limit=97 (unique, distinct de 99 déjà pris) : le cache _upcoming_cache
+        # (TTL 270s) est indexé sur (days, limit, want_odds) -> une même
+        # combinaison réutilisée dans un autre test renverrait sa réponse
+        # cachée au lieu d'exercer les mocks de celui-ci.
+        resp = _client().get("/api/upcoming?days=1&limit=97")
+    data = resp.get_json()
+    assert resp.status_code == 200
+    pairs = {(m["player1_raw"], m["player2_raw"]) for m in data["matches"]}
+    assert ("Carla", "Dana") in pairs
+    assert data["count"] == len(data["matches"])
+    # Alice/Bob ne doit apparaître qu'une fois (dédupliqué), pas deux.
+    assert sum(1 for m in data["matches"]
+               if m["player1_raw"] == "Alice" and m["player2_raw"] == "Bob") == 1
+
+
+def test_upcoming_oddspapi_failure_does_not_break_endpoint():
+    """Un échec réseau/parsing OddsPapi ne doit jamais faire tomber
+    /api/upcoming — c'est un ajout best-effort, pas une source obligatoire."""
+    with patch.object(api.live_api, "fetch_upcoming", return_value=[]), \
+         patch.object(api.espn_api, "fetch_upcoming", return_value=[]), \
+         patch.object(api.odds_api, "is_enabled", return_value=False), \
+         patch.object(api.oddspapi_feeder, "is_enabled", return_value=True), \
+         patch.object(api.oddspapi_feeder, "fetch_tennis_fixtures",
+                       side_effect=RuntimeError("réseau en échec")):
+        resp = _client().get("/api/upcoming?days=1&limit=96")  # cache key unique
+    assert resp.status_code == 200
+    assert resp.get_json()["matches"] == []
 
 
 # ─── settlement/run ───────────────────────────────────────────────────────────

@@ -31,8 +31,8 @@ from flask_swagger_ui import get_swaggerui_blueprint
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, intelligence, intelligence_layer, live_api, memory,
-               mistake_learner, namematch, odds_api, openapi_spec, predictor, recommendations,
-               sackmann_feeder, settlement, weather)
+               mistake_learner, namematch, odds_api, oddspapi_feeder, openapi_spec, predictor,
+               recommendations, sackmann_feeder, settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -887,6 +887,27 @@ def api_upcoming():
                 added += 1
         if added:
             log(f"ESPN: {added} matchs supplémentaires ajoutés.", "INFO")
+
+    # Source 4 : OddsPapi (gratuit, 250 req/mois/compte, pool de clés) — comble
+    # la couverture ATP/WTA/Challenger/ITF pendant qu'API-Tennis est impayé
+    # (voir bot/oddspapi_feeder.py). Toujours un ajout, jamais un remplacement :
+    # is_enabled() renvoie False sans clé configurée -> aucun effet de bord.
+    if oddspapi_feeder.is_enabled():
+        try:
+            raw_oddspapi = oddspapi_feeder.fetch_tennis_fixtures(days_ahead=days)
+            oddspapi_fixtures = oddspapi_feeder.parse_fixtures(raw_oddspapi)
+            existing = {(f["player1"].lower(), f["player2"].lower()) for f in fixtures}
+            added = 0
+            for opf in oddspapi_fixtures:
+                key = (opf["player1"].lower(), opf["player2"].lower())
+                if key not in existing:
+                    fixtures.append(opf)
+                    existing.add(key)
+                    added += 1
+            if added:
+                log(f"OddsPapi: {added} matchs supplémentaires ajoutés.", "INFO")
+        except Exception as exc:
+            log(f"OddsPapi fixtures en échec ({exc}) — ignoré.", "WARN")
 
     # ── Injection des matchs live ITF/UTR (non couverts par ESPN) ───────────────
     # Les matchs odds-api.io "live" ne sont pas dans ESPN → ils disparaissent de

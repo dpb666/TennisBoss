@@ -11,10 +11,10 @@ par compte, sans CB. Plusieurs comptes = pool de clés, même principe que
 odds_api.py (odds-api.io) : rotation automatique vers la clé suivante quand
 une clé approche de son quota.
 
-IMPORTANT — non vérifié en conditions réelles (aucune clé disponible au moment
-de l'écriture) : sportId=12 pour le tennis vient de la doc publique, à
-confirmer via GET /v4/sports dès qu'une clé existe. Pas encore câblé dans
-bot/api.py::api_upcoming() — à faire une fois validé avec un vrai compte.
+Vérifié en conditions réelles le 2026-07-12 avec un vrai compte (plan free,
+250 req/mois) : sportId=12 confirmé via GET /v4/sports, couverture réelle
+constatée sur 4 jours = 574 fixtures dont 65 ATP + 58 WTA (pas seulement
+Challenger/ITF/UTR) — comble bien le trou laissé par API-Tennis expiré.
 """
 from __future__ import annotations
 
@@ -30,7 +30,14 @@ from .live_api import load_env
 from .log import log
 
 BASE = "https://api.oddspapi.io/v4"
-SPORT_ID_TENNIS = 12  # non vérifié, voir docstring du module
+SPORT_ID_TENNIS = 12  # confirmé via GET /v4/sports (2026-07-12)
+
+# Confirmés contre l'API réelle (2026-07-12) — la doc publique se trompait
+# sur ce point (indiquait 3=Live) : 0=Pre-Game, 1=Live, 2=Finished, 3=Cancelled.
+STATUS_PRE_GAME = 0
+STATUS_LIVE = 1
+STATUS_FINISHED = 2
+STATUS_CANCELLED = 3
 
 TTL_FIXTURES = 900     # 15 min
 TTL_ACCOUNT = 3600     # 1h — ne pas gaspiller le quota juste pour vérifier le quota
@@ -141,6 +148,13 @@ def parse_fixtures(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     odds-api.io. Fonction pure -> testable sans réseau."""
     out = []
     for f in raw:
+        # statusId vérifié contre l'API réelle (pas juste la doc, qui se
+        # trompait) : 0=Pre-Game, 1=Live, 2=Finished, 3=Cancelled. On exclut
+        # les matchs déjà terminés/annulés — seuls upcoming (0) et live (1)
+        # nous intéressent pour /api/upcoming.
+        status_id = f.get("statusId")
+        if status_id not in (STATUS_PRE_GAME, STATUS_LIVE):
+            continue
         p1 = (f.get("participant1Name") or "").strip()
         p2 = (f.get("participant2Name") or "").strip()
         if not p1 or not p2:
@@ -165,7 +179,7 @@ def parse_fixtures(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "round": "",
             "date": date_str,
             "time": time_str,
-            "live": f.get("statusId") == 3,
+            "live": status_id == STATUS_LIVE,
             "event_key": f.get("fixtureId"),
             "is_doubles": is_doubles,
             "tour": tour,
