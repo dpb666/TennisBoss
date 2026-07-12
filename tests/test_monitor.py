@@ -10,6 +10,11 @@ deux bugs réels en production (voir Git log) :
    codée en dur (0.62) au lieu d'utiliser la fenêtre glissante déjà
    correctement implémentée dans bot/intelligence.py — ne pouvait jamais
    détecter une vraie dérive récente (diluée dans tout l'historique).
+3. check_api_endpoints() ciblait "http://localhost:8000" en dur : correct
+   quand tout tourne sur le même hôte (systemd), mais faux dès que le
+   worker (bot/scheduler.py) tourne dans un conteneur Docker SÉPARÉ de
+   l'API (docker-compose.yml) — "localhost" dans le worker ne pointe pas
+   vers le conteneur API.
 """
 from __future__ import annotations
 
@@ -68,6 +73,42 @@ class TestCheckApiEndpoints:
             result = mon.check_api_endpoints()
         assert all(r["status"] == "error" for r in result.values())
         assert len(mon.alerts) == 4
+
+    def test_uses_configurable_base_url_for_docker_worker(self):
+        """TENNISBOSS_API_BASE_URL doit être respectée : c'est ce qui permet
+        au worker (conteneur séparé) de joindre l'API par son nom de service
+        Compose ("http://tennisboss:8000") plutôt que "localhost"."""
+        mon = _monitor()
+        captured_urls = []
+
+        def fake_urlopen(req, timeout=5):
+            captured_urls.append(req.full_url)
+            resp = MagicMock()
+            resp.status = 200
+            return resp
+
+        with patch.dict("os.environ", {"TENNISBOSS_API_BASE_URL": "http://tennisboss:8000"}), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            mon.check_api_endpoints()
+
+        assert all(url.startswith("http://tennisboss:8000") for url in captured_urls)
+
+    def test_defaults_to_localhost_without_base_url_configured(self):
+        mon = _monitor()
+        captured_urls = []
+
+        def fake_urlopen(req, timeout=5):
+            captured_urls.append(req.full_url)
+            resp = MagicMock()
+            resp.status = 200
+            return resp
+
+        env_without_base_url = {"TENNISBOSS_API_BASE_URL": ""}
+        with patch.dict("os.environ", env_without_base_url), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            mon.check_api_endpoints()
+
+        assert all(url.startswith("http://localhost:8000") for url in captured_urls)
 
 
 class TestCheckModelDrift:

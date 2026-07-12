@@ -1,0 +1,34 @@
+# Sans ce fichier, `COPY . .` dans le Dockerfile embarquait TOUT le
+# répertoire dans l'image — y compris .env (tous les secrets réels :
+# clés API, tokens Telegram/Cloudflare) en clair dans une couche d'image
+# Docker. Trouvé en testant le déploiement multi-conteneurs (worker +
+# API) : `docker run --rm tennisboss-test cat .env` exposait tout.
+
+# Secrets — JAMAIS dans une image Docker (state/ contient aussi la clé
+# Firebase Admin SDK). Montés en volume à l'exécution à la place.
+.env
+.env.*
+!.env.example
+state/
+logs/
+
+# Android : ~100 Mo de build Gradle/APK sans rapport avec l'image Python
+android/
+
+# Git / CI / IDE
+.git/
+.github/
+.claude/
+.pytest_cache/
+.gradle/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Documentation (pas nécessaire à l'exécution)
+*.md
+!README.md

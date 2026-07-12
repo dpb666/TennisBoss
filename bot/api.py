@@ -2308,6 +2308,26 @@ def api_scanner_status():
         return jsonify({**_SCANNER_STATE, "ok": True})
 
 
+@app.get("/api/monitor/status")
+def api_monitor_status():
+    """Dernier résultat du health check système (bot/monitor.py::SystemMonitor).
+
+    Calculé toutes les 5 min par le job "worker" (bot/scheduler.py::job_monitor,
+    conteneur séparé en déploiement Docker — voir docker-compose.yml), persisté
+    via db.set_meta("last_monitor_check"). Jusqu'ici jamais exposé : ce check
+    tournait déjà, mais son résultat n'était visible que dans les logs.
+    """
+    raw = db.get_meta("last_monitor_check")
+    if not raw:
+        return jsonify({"available": False,
+                        "note": "Aucun check monitor n'a encore tourné (worker pas démarré ?)."})
+    try:
+        result = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return jsonify({"available": False, "note": "Dernier check illisible."})
+    return jsonify({"available": True, **result})
+
+
 _LEARN_LOCK = __import__("threading").Lock()
 _LEARN_LAST_RUN: float = 0.0
 _LEARN_MIN_INTERVAL = 3600 * 6  # 6h minimum entre deux cycles

@@ -188,6 +188,10 @@ def build_spec() -> Dict[str, Any]:
                 "Zones dangereuses apprises automatiquement", responses=_ok(), tags=["intelligence"])},
             "/api/scanner/status": {"get": _op(
                 "État temps réel du scanner de value bets", responses=_ok(), tags=["intelligence"])},
+            "/api/monitor/status": {"get": _op(
+                "Dernier health check système (DB, endpoints, quota odds, dérive modèle) — "
+                "calculé toutes les 5 min par le worker (bot/scheduler.py::job_monitor)",
+                responses=_ok(), tags=["intelligence"])},
             "/api/history": {"get": _op(
                 "Historique des matchs réglés par date",
                 params=[_q("date"), _q("dates")], responses=_ok(), tags=["core"])},

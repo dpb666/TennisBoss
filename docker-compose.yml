@@ -1,5 +1,19 @@
 version: '3.8'
 
+# 3 services applicatifs :
+#   tennisboss  — API Flask (sert l'app Android + settlement/scanner/CLV en
+#                 threads internes, voir bot/api.py::serve())
+#   worker      — bot/scheduler.py : auto-apprentissage (1h), ingestion
+#                 tennis-data.co.uk (6h), health check (5m), sauvegarde DB
+#                 (6h), digest push quotidien (9h). AUCUN de ces jobs ne
+#                 tournait en déploiement Docker avant ce commit — seul le
+#                 déploiement systemd (tennisboss-scheduler.service) les
+#                 lançait, via un process séparé sur le même hôte.
+#   cloudflared — tunnel public (inchangé)
+#
+# tennisboss et worker partagent le même volume ./state (base SQLite en
+# mode WAL — écriture concurrente déjà supportée, voir bot/db.py) : c'est
+# le même "cerveau", juste deux process qui y accèdent.
 services:
   tennisboss:
     build: .
@@ -10,6 +24,7 @@ services:
       - ./logs:/app/logs
     environment:
       - TENNISBOSS_LOG_LEVEL=INFO
+      - TENNISBOSS_API_TOKEN=${TENNISBOSS_API_TOKEN:-}
       - ODDS_API_KEY=${ODDS_API_KEY:-}
       - AT_API_KEY=${AT_API_KEY:-}
       - GROQ_API_URL=${GROQ_API_URL:-https://api.groq.com/openai/v1/chat/completions}
@@ -19,6 +34,10 @@ services:
       - GEMINI_MODEL=${GEMINI_MODEL:-gemma-4-31b-it}
       - OLLAMA_FALLBACK_URL=${OLLAMA_FALLBACK_URL:-http://host.docker.internal:11434}
       - OLLAMA_FALLBACK_MODEL=${OLLAMA_FALLBACK_MODEL:-gemma3:4b}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_OWNER_CHAT_ID=${TELEGRAM_OWNER_CHAT_ID:-}
+      - FIREBASE_ADMIN_KEY_PATH=${FIREBASE_ADMIN_KEY_PATH:-}
+      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -26,6 +45,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
+
+  worker:
+    build: .
+    command: python3 -c "from bot.scheduler import run_scheduler; run_scheduler()"
+    volumes:
+      - ./state:/app/state
+      - ./logs:/app/logs
+    environment:
+      - TENNISBOSS_LOG_LEVEL=INFO
+      - TENNISBOSS_API_TOKEN=${TENNISBOSS_API_TOKEN:-}
+      # Nom du service Compose, pas "localhost" : voir bot/monitor.py::
+      # check_api_endpoints, corrigé pour ce déploiement multi-conteneur.
+      - TENNISBOSS_API_BASE_URL=http://tennisboss:8000
+      - ODDS_API_KEY=${ODDS_API_KEY:-}
+      - AT_API_KEY=${AT_API_KEY:-}
+      - FIREBASE_ADMIN_KEY_PATH=${FIREBASE_ADMIN_KEY_PATH:-}
+    depends_on:
+      tennisboss:
+        condition: service_healthy
+    restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -38,5 +77,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
     network_mode: host
+
+  # Monitoring : le health check système (DB, endpoints, quota odds, dérive
+  # modèle) tourne déjà dans "worker" toutes les 5 min et est exposé sans
+  # service supplémentaire via GET /api/monitor/status sur "tennisboss" —
+  # pas de stack Prometheus/Grafana ajoutée : ça ajouterait de la
+  # complexité (2 services de plus, config de scraping) sans bénéfice net
+  # pour un déploiement mono-utilisateur qui a déjà cette donnée.
 
   # Local LLM attendu: Ollama sur l'hôte (http://host.docker.internal:11434)

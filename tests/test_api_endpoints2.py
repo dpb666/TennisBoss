@@ -13,6 +13,7 @@ tests/test_settlement.py).
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 from bot import api
@@ -288,6 +289,29 @@ def test_scanner_status():
     data = resp.get_json()
     assert resp.status_code == 200
     assert data["ok"] is True
+
+
+def test_monitor_status_unavailable_when_worker_never_ran():
+    with patch.object(api.db, "get_meta", return_value=None):
+        resp = _client().get("/api/monitor/status")
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["available"] is False
+
+
+def test_monitor_status_returns_last_check():
+    fake_result = {"overall_status": "ok", "alerts": []}
+    with patch.object(api.db, "get_meta", return_value=json.dumps(fake_result)):
+        resp = _client().get("/api/monitor/status")
+    data = resp.get_json()
+    assert data["available"] is True
+    assert data["overall_status"] == "ok"
+
+
+def test_monitor_status_handles_corrupted_meta():
+    with patch.object(api.db, "get_meta", return_value="not json"):
+        resp = _client().get("/api/monitor/status")
+    assert resp.get_json()["available"] is False
 
 
 def test_learn_run_rejects_when_too_recent():

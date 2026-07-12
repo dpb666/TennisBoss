@@ -53,6 +53,13 @@ class SystemMonitor:
         générait une fausse alerte à chaque cycle (5 min) depuis l'activation du
         token — le monitor était aveugle à ses propres échecs par un bug, pas
         par un vrai problème de disponibilité.
+
+        Base URL configurable (TENNISBOSS_API_BASE_URL) : en déploiement
+        systemd (tout sur le même hôte), "localhost:8000" est correct. En
+        déploiement Docker avec le worker (bot/scheduler.py) dans un
+        conteneur SÉPARÉ de l'API (voir docker-compose.yml), "localhost"
+        dans le conteneur worker ne pointe PAS vers le conteneur API — il
+        faut le nom du service Compose ("tennisboss:8000").
         """
         import urllib.request
 
@@ -64,10 +71,11 @@ class SystemMonitor:
         }
         results = {}
         token = os.environ.get("TENNISBOSS_API_TOKEN", "").strip()
+        base = os.environ.get("TENNISBOSS_API_BASE_URL", "").strip().rstrip("/") or "http://localhost:8000"
 
         for name, path in endpoints.items():
             try:
-                url = f"http://localhost:8000{path}"
+                url = f"{base}{path}"
                 req = urllib.request.Request(url)
                 if token:
                     req.add_header("X-API-Token", token)
