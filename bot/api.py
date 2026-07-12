@@ -26,6 +26,7 @@ from collections import Counter
 from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, request
+from flask_limiter import Limiter
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
@@ -52,6 +53,42 @@ app.register_blueprint(get_swaggerui_blueprint(
 @app.get("/api/openapi.json")
 def api_openapi_spec():
     return jsonify(openapi_spec.build_spec())
+
+
+def _client_ip() -> str:
+    """IP du VRAI client, pas du tunnel Cloudflare.
+
+    Le trafic passe App -> Worker Cloudflare -> cloudflared tunnel -> Flask
+    local (voir DEPLOYMENT.md) : `request.remote_addr` ne verrait que la
+    connexion locale du tunnel (même IP pour tout le monde), rendant un
+    rate-limit par IP inutile — tous les clients partageraient un seul
+    quota. Cloudflare ajoute CF-Connecting-IP à l'edge (jamais falsifiable
+    par le client, contrairement à X-Forwarded-For) ; le Worker le relaie
+    tel quel (voir cloudflare/worker.js::new Headers(request.headers)).
+    """
+    return request.headers.get("CF-Connecting-IP") or request.remote_addr or "unknown"
+
+
+limiter = Limiter(
+    app=app,
+    key_func=_client_ip,
+    default_limits=["200 per minute"],
+    storage_uri="memory://",
+    headers_enabled=True,  # X-RateLimit-* dans la réponse, utile pour l'app cliente
+)
+
+
+@limiter.request_filter
+def _skip_rate_limit() -> bool:
+    # Tests (app.config["TESTING"]) et documentation publique : jamais throttlés.
+    return bool(app.config.get("TESTING")) or request.path in ("/health", "/api/openapi.json") \
+        or request.path.startswith("/api/docs")
+
+
+@app.errorhandler(429)
+def _rate_limit_exceeded(e):
+    return jsonify({"error": "Trop de requêtes — réessaie dans un instant.",
+                    "detail": str(e.description)}), 429
 
 # Mémoire chargée une fois au démarrage (modèle + profils joueurs).
 _MEM: Dict[str, Any] = {}
@@ -801,6 +838,7 @@ _UPCOMING_TTL = 270  # 4.5 min — ESPN change rarement plus vite
 
 
 @app.get("/api/upcoming")
+@limiter.limit("20 per minute")  # protège le quota odds-api.io partagé (100 req/h)
 def api_upcoming():
     import time as _t
     days = min(int(request.args.get("days", 2)), 7)
@@ -1035,7 +1073,10 @@ def api_recommendations():
 
     Réutilise /api/upcoming tel quel (même pipeline multi-source, même cache)
     en appelant directement la vue Flask plutôt que de dupliquer la logique
-    de fetch — pas de round-trip HTTP, même contexte de requête.
+    de fetch — pas de round-trip HTTP, même contexte de requête. Conséquence
+    assumée : cet appel direct consomme aussi le quota de rate-limit de
+    /api/upcoming (20/min) pour ce client — cohérent, puisque c'est le même
+    coût réel (appels odds-api.io) qui est protégé, pas l'endpoint en soi.
     """
     limit = min(int(request.args.get("limit", 10)), 30)
     upcoming_data = api_upcoming().get_json()
@@ -1044,6 +1085,7 @@ def api_recommendations():
 
 
 @app.get("/api/live")
+@limiter.limit("20 per minute")  # protège le quota odds-api.io partagé (100 req/h)
 def api_live():
     """Matchs tennis EN COURS : score, jeu courant, serve, odds live, prédiction pré-match.
 
@@ -1610,6 +1652,7 @@ def api_inplay_markets():
 
 
 @app.get("/api/value")
+@limiter.limit("20 per minute")  # protège le quota odds-api.io partagé (100 req/h)
 def api_value():
     """Compare le modèle au marché et calcule l'EV (espérance de gain) réelle.
 

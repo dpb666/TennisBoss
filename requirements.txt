@@ -12,3 +12,4 @@ pytest-asyncio>=0.24
 python-dotenv>=1.0
 google-auth>=2.29
 flask-swagger-ui>=4.11
+flask-limiter>=3.5
