@@ -475,6 +475,33 @@ def head_to_head(name1: str, name2: str) -> List[sqlite3.Row]:
         ).fetchall()
 
 
+def player_recent_match_count(name: str, cutoff_compact: str) -> int:
+    """Nombre de matchs joués par `name` depuis `cutoff_compact` (format
+    YYYYMMDD, sans tirets). matches.date mélange deux formats selon la
+    source d'ingestion ("20220103" Sackmann vs "2022-01-17" tennis-data.co.uk
+    — confirmé 87%/13% sur les 91946 lignes réelles) : REPLACE(date,'-','')
+    normalise les deux avant comparaison, sinon un tri/filtre lexicographique
+    naïf serait faux pour la majorité des lignes.
+    """
+    with connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM matches WHERE (winner=? OR loser=?) "
+            "AND REPLACE(date,'-','') >= ?",
+            (name, name, cutoff_compact),
+        ).fetchone()[0]
+
+
+def player_recent_opponents(name: str, limit: int) -> List[sqlite3.Row]:
+    """Les `limit` derniers matchs de `name` (winner, loser), plus récents
+    d'abord. Voir player_recent_match_count pour la normalisation de date."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT winner, loser FROM matches WHERE (winner=? OR loser=?) "
+            "ORDER BY REPLACE(date,'-','') DESC LIMIT ?",
+            (name, name, limit),
+        ).fetchall()
+
+
 def counts() -> Dict[str, int]:
     with connect() as conn:
         return {

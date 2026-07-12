@@ -47,6 +47,8 @@ def test_insight_requires_both_players():
 
 def test_insight_returns_factors_and_health():
     with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_recent_match_count", return_value=0), \
+         patch.object(api.db, "player_recent_opponents", return_value=[]), \
          patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
          patch.object(api.intelligence, "stats", return_value={
              "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
@@ -61,6 +63,8 @@ def test_insight_returns_factors_and_health():
     assert data["decisive_factor"]
     assert any(f["label"] == "Niveau ELO (historique)" for f in data["factors"])
     assert data["form_signals"] == []
+    assert data["fatigue_signals"] == []
+    assert data["opponent_quality_signals"] == []
     assert data["sentiment_signals"] == []
     assert data["market"] is None
     assert data["model_health"] == {
@@ -73,6 +77,8 @@ def test_insight_returns_factors_and_health():
 
 def test_insight_flags_blacklisted_player():
     with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_recent_match_count", return_value=0), \
+         patch.object(api.db, "player_recent_opponents", return_value=[]), \
          patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
          patch.object(api.intelligence, "stats", return_value={
              "blacklist": ["Carlos Alcaraz"], "surface_danger": ["clay"], "accuracy_drift_pts": -6.0,
@@ -90,6 +96,8 @@ def test_insight_flags_blacklisted_player():
 def test_insight_includes_market_movement_when_available():
     fake_move = {"event_key": "42", "n_snapshots": 3, "move_home_pct": -12.5, "move_away_pct": 8.0}
     with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_recent_match_count", return_value=0), \
+         patch.object(api.db, "player_recent_opponents", return_value=[]), \
          patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
          patch.object(api.intelligence, "stats", return_value={
              "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
@@ -107,6 +115,8 @@ def test_insight_flags_form_swing():
         "Carlos Alcaraz": {"wins": 50, "losses": 50},
     }
     with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_recent_match_count", return_value=0), \
+         patch.object(api.db, "player_recent_opponents", return_value=[]), \
          patch.object(api.db, "player_record", side_effect=lambda n: records[n]), \
          patch.object(api.intelligence, "stats", return_value={
              "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
@@ -123,6 +133,8 @@ def test_insight_sentiment_is_opt_in():
     # Sans ?sentiment=true, aucun appel réseau/quota consommé (voir note
     # Phase 3 dans intelligence_layer.py : quota NewsAPI très serré).
     with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_recent_match_count", return_value=0), \
+         patch.object(api.db, "player_recent_opponents", return_value=[]), \
          patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
          patch.object(api.intelligence, "stats", return_value={
              "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,
@@ -139,6 +151,8 @@ def test_insight_sentiment_included_when_requested():
     fake_sentiment = {"player": "Jannik Sinner", "n_articles": 3, "score": 0.5,
                       "label": "positif", "headlines": ["Sinner wins"]}
     with patch.object(api.db, "head_to_head", return_value=[]), \
+         patch.object(api.db, "player_recent_match_count", return_value=0), \
+         patch.object(api.db, "player_recent_opponents", return_value=[]), \
          patch.object(api.db, "player_record", side_effect=lambda n: _STABLE_RECORDS[n]), \
          patch.object(api.intelligence, "stats", return_value={
              "blacklist": [], "surface_danger": [], "accuracy_drift_pts": 0.0,

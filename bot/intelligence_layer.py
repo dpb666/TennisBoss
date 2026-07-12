@@ -29,9 +29,19 @@ serré que le pool ODDS_API). Le signal est donc désactivé par défaut dans
 /api/insight (paramètre `sentiment=true` explicite) plutôt qu'appelé à
 chaque ouverture de "Pourquoi ce pick ?" côté app — un signal qui grille le
 quota en quelques minutes d'usage normal serait pire qu'utile.
+
+Phase 4 (audit "Senior Software Engineer") ajoute fatigue et qualité des
+adversaires récents — même prudence, informatifs uniquement. Piège
+concret rencontré en les construisant : matches.date mélange deux formats
+selon la source d'ingestion (Sackmann "20220103" vs tennis-data.co.uk
+"2022-01-17" — confirmé 87%/13% sur les 91946 lignes). Un filtre
+`date >= cutoff` naïf comparerait des chaînes de longueurs différentes et
+raterait silencieusement la majorité des matchs récents. REPLACE(date,'-','')
+normalise les deux formats avant comparaison.
 """
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from . import db, intelligence, sentiment
@@ -45,6 +55,17 @@ FORM_SWING_MIN_MATCHES = 10
 # Mouvement de cote (%) entre ouverture et dernier relevé pour parler de
 # "steam move" (argent qui bouge la ligne) plutôt que du bruit de marché normal.
 STEAM_MOVE_THRESHOLD_PCT = 15.0
+
+# Nombre de matchs sur une fenêtre glissante pour signaler une charge de jeu
+# inhabituelle (proxy de fatigue — pas de données physio/médicales disponibles).
+FATIGUE_WINDOW_DAYS = 14
+FATIGUE_MATCH_THRESHOLD = 6
+
+# Écart ELO (points) entre un joueur et ses N derniers adversaires pour
+# signaler un calendrier récent anormalement facile/difficile.
+OPPONENT_QUALITY_WINDOW = 10
+OPPONENT_QUALITY_MIN_MATCHES = 5
+OPPONENT_QUALITY_ELO_THRESHOLD = 100.0
 
 
 def _form_signal(name: str, prof: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -80,6 +101,68 @@ def form_signals(mem: Dict[str, Any], n1: str, n2: str) -> List[Dict[str, Any]]:
     out = []
     for name in (n1, n2):
         sig = _form_signal(name, features.get_profile(mem, name))
+        if sig:
+            out.append(sig)
+    return out
+
+
+def _fatigue_signal(name: str) -> Optional[Dict[str, Any]]:
+    """Nombre de matchs joués sur les FATIGUE_WINDOW_DAYS derniers jours.
+
+    Voir note en tête de fichier pour le piège de format de date.
+    """
+    cutoff = (_dt.date.today() - _dt.timedelta(days=FATIGUE_WINDOW_DAYS)).strftime("%Y%m%d")
+    n = db.player_recent_match_count(name, cutoff)
+    if n < FATIGUE_MATCH_THRESHOLD:
+        return None
+    return {
+        "player": name,
+        "matches_recent": n,
+        "window_days": FATIGUE_WINDOW_DAYS,
+    }
+
+
+def fatigue_signals(n1: str, n2: str) -> List[Dict[str, Any]]:
+    out = []
+    for name in (n1, n2):
+        sig = _fatigue_signal(name)
+        if sig:
+            out.append(sig)
+    return out
+
+
+def _opponent_quality_signal(mem: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
+    """Compare l'ELO du joueur à celui de ses OPPONENT_QUALITY_WINDOW derniers
+    adversaires : un calendrier récent anormalement facile/difficile est un
+    signal que l'EMA de forme seule ne distingue pas d'une vraie évolution
+    de niveau (voir note en tête de fichier pour le format de date).
+    """
+    rows = db.player_recent_opponents(name, OPPONENT_QUALITY_WINDOW)
+    if len(rows) < OPPONENT_QUALITY_MIN_MATCHES:
+        return None
+    elo = mem.get("elo") or {}
+    own_elo = elo.get(name)
+    if own_elo is None:
+        return None
+    opp_elos = [elo.get(r["loser"] if r["winner"] == name else r["winner"], 1500.0) for r in rows]
+    avg_opp_elo = sum(opp_elos) / len(opp_elos)
+    diff = avg_opp_elo - own_elo
+    if abs(diff) < OPPONENT_QUALITY_ELO_THRESHOLD:
+        return None
+    return {
+        "player": name,
+        "n_matches": len(rows),
+        "avg_opponent_elo": round(avg_opp_elo, 1),
+        "own_elo": round(own_elo, 1),
+        "diff_elo": round(diff, 1),
+        "direction": "adversaires plus forts que lui" if diff > 0 else "adversaires plus faibles que lui",
+    }
+
+
+def opponent_quality_signals(mem: Dict[str, Any], n1: str, n2: str) -> List[Dict[str, Any]]:
+    out = []
+    for name in (n1, n2):
+        sig = _opponent_quality_signal(mem, name)
         if sig:
             out.append(sig)
     return out
@@ -192,6 +275,8 @@ def build_insight(
         "decisive_factor": explain.get("decisive"),
         "factors": factors,
         "form_signals": form_signals(mem, n1, n2),
+        "fatigue_signals": fatigue_signals(n1, n2),
+        "opponent_quality_signals": opponent_quality_signals(mem, n1, n2),
         "sentiment_signals": sentiment_signals(n1, n2) if include_sentiment else [],
         "market": market,
         "model_health": _model_health(n1, n2, surface),
