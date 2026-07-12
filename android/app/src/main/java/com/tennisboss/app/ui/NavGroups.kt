@@ -46,7 +46,7 @@ fun PredictGroupScreen(predictVM: PredictViewModel, compareVM: PlayerCompareView
 }
 
 @Composable
-fun MatchesGroupScreen(liveVM: LiveViewModel, onMatchClick: (String, String, String?) -> Unit) {
+fun MatchesGroupScreen(liveVM: LiveViewModel) {
     var subTab by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = subTab) {
@@ -56,30 +56,41 @@ fun MatchesGroupScreen(liveVM: LiveViewModel, onMatchClick: (String, String, Str
                 text = { Text("Live", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {
-            0 -> UpcomingScreen(onMatchClick = onMatchClick)
-            else -> LiveScreen(onMatchClick = onMatchClick, vm = liveVM)
+            0 -> UpcomingScreen()
+            else -> LiveScreen(liveVM)
         }
     }
 }
 
 @Composable
-fun ValueGroupScreen(onMatchClick: (String, String, String?) -> Unit) {
+fun ValueGroupScreen() {
     var subTab by remember { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 },
-                text = { Text("Value", maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                text = { Text("Value bets", maxLines = 1, overflow = TextOverflow.Ellipsis) })
             Tab(selected = subTab == 1, onClick = { subTab = 1 },
-                text = { Text("Scanner", maxLines = 1, overflow = TextOverflow.Ellipsis) })
-            Tab(selected = subTab == 2, onClick = { subTab = 2 },
-                text = { Text("Stats", maxLines = 1, overflow = TextOverflow.Ellipsis) })
-            Tab(selected = subTab == 3, onClick = { subTab = 3 },
+                text = { Text("Scan", maxLines = 1, overflow = TextOverflow.Ellipsis) })
+        }
+        when (subTab) {
+            0 -> ValueScreen()
+            else -> ScannerScreen()
+        }
+    }
+}
+
+@Composable
+fun PerfGroupScreen() {
+    var subTab by remember { mutableIntStateOf(0) }
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = subTab) {
+            Tab(selected = subTab == 0, onClick = { subTab = 0 },
+                text = { Text("Performance", maxLines = 1, overflow = TextOverflow.Ellipsis) })
+            Tab(selected = subTab == 1, onClick = { subTab = 1 },
                 text = { Text("Edge", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {
-            0 -> ValueScreen(onMatchClick = onMatchClick)
-            1 -> ScannerScreen()
-            2 -> PerformanceScreen()
+            0 -> PerformanceScreen()
             else -> EdgeScreen()
         }
     }

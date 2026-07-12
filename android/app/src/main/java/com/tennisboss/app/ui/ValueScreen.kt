@@ -39,10 +39,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tennisboss.app.data.ValueComparison
 import com.tennisboss.app.data.ValuePickHistory
+import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SkeletonList
 import com.tennisboss.app.ui.components.SurfaceBadge
-import com.tennisboss.app.ui.components.ValueCard
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -59,10 +60,7 @@ private val P2Color = Color(0xFF00C2A8)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ValueScreen(
-    onMatchClick: ((String, String, String?) -> Unit)? = null,
-    vm: ValueViewModel = viewModel()
-) {
+fun ValueScreen(vm: ValueViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
     DisposableEffect(Unit) {
@@ -115,7 +113,7 @@ fun ValueScreen(
         }
 
         when (selectedTab) {
-            0 -> ValuePicksTab(onMatchClick, vm)
+            0 -> ValuePicksTab(vm)
             1 -> ValueHistoryTab(vm)
         }
     }
@@ -123,10 +121,7 @@ fun ValueScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ValuePicksTab(
-    onMatchClick: ((String, String, String?) -> Unit)? = null,
-    vm: ValueViewModel
-) {
+private fun ValuePicksTab(vm: ValueViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -196,7 +191,7 @@ private fun ValuePicksTab(
                                         )
                                     }
                                 }
-                                items(filtered) { ValueCard(it, onClick = { onMatchClick?.invoke(it.player1, it.player2, null) }) }
+                                items(filtered) { ValueCard(it) }
                             }
                         }
                     }
@@ -321,6 +316,245 @@ private fun HistoryPickRow(p: ValuePickHistory) {
     }
 }
 
-// ValueCard, ProbCompareRow, SideBox, EvBadge/EdgeIndicator, fmt/fmtSigned :
-// extraits dans ui/components/ValueCard.kt et ui/components/EdgeIndicator.kt
-// pour être réutilisables ailleurs (ex. DashboardScreen).
+@Composable
+private fun ValueCard(c: ValueComparison) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // ── Header : ligue + date + badge ────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        c.league.ifBlank { "—" },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    val dt = utcToLocalLabel(c.date)
+                    if (dt.isNotBlank()) {
+                        Text(dt,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                SurfaceBadge(c.surface)
+                if (c.surface != null) Spacer(Modifier.size(4.dp))
+                if (c.confidence_label.isNotBlank()) {
+                    ConfidenceBadge(c.confidence_label, c.confidence)
+                    Spacer(Modifier.size(6.dp))
+                }
+                EvBadge(c.best_ev, c.value, c.filter_reason)
+            }
+
+            Text("${c.player1}  vs  ${c.player2}", fontWeight = FontWeight.SemiBold)
+
+            // Estimé (mixé modèle/marché) vs marché seul, par joueur. On affiche
+            // blend_match_prob (pas model_match_prob) car c'est CETTE proba qui
+            // calcule l'EV/value ci-dessous (bot/api.py : ev1 = pb1·cote−1, pb1 =
+            // blend_probs(...)) — avant ce fix, l'écran montrait l'écart modèle
+            // brut vs marché (souvent 3x plus large), sans rapport avec l'edge
+            // réel qui détermine si c'est marqué "value".
+            ProbCompareRow(c.player1, c.blend_match_prob1, c.market_match_prob1, P1Color)
+            ProbCompareRow(c.player2, c.blend_match_prob2, c.market_match_prob2, P2Color)
+
+            // Cotes + EV par côté.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SideBox(Modifier.weight(1f), c.player1, c.odds.home, c.ev1,
+                    highlight = c.best_side == c.player1)
+                SideBox(Modifier.weight(1f), c.player2, c.odds.away, c.ev2,
+                    highlight = c.best_side == c.player2)
+            }
+
+            c.honeypot?.let { hp ->
+                if (hp.flag) {
+                    val b = when (hp.beneficiary) {
+                        "p1" -> c.player1
+                        "p2" -> c.player2
+                        else -> hp.player
+                    }.substringAfterLast(" ")
+                    SignalChip("⚠️ HONEYPOT $b +${String.format("%.1f", hp.edge_pct)}%",
+                        Color(0xFFFFD600), bold = true)
+                }
+            }
+
+            // Sport Intelligence Layer Phase 2 : purement informatif (n'a pas
+            // influencé ev1/ev2/value côté backend — voir intelligence_layer.py).
+            c.steam_move?.let { sm ->
+                val side = if (sm.side == "home") c.player1 else c.player2
+                SignalChip(
+                    "📊 Steam move : ${side.substringAfterLast(" ")} ${String.format("%.0f", sm.move_pct)}% " +
+                        "(${sm.n_snapshots} relevés)",
+                    Color(0xFF4FC3F7),
+                )
+            }
+
+            if (c.value && c.best_side != null) {
+                val odd = if (c.best_side == c.player1) c.odds.home else c.odds.away
+                val book = c.best_book?.takeIf { it.isNotBlank() }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Badge terrain favorable
+                    if (c.terrain_favorable) {
+                        Text(
+                            "🌟 Terrain favorable — historique solide sur ce tournoi",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFFFD700),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Text(
+                        "✅ Pari conseillé : ${c.best_side} @ $odd" +
+                            (book?.let { " sur $it" } ?: "") +
+                            "  (EV ${fmtSigned(c.best_ev)})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GoodColor,
+                    )
+                    // Kelly criterion
+                    if (c.kelly_u > 0.0) {
+                        Text(
+                            "📐 Kelly 1/4 : miser ${c.kelly_u}% de ta bankroll",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF80DEEA),
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+
+            // Badge cache DB + date si source est historique
+            if (c.source == "cache_db") {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+                    ) {
+                        Text(
+                            "📦 Cache",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                    }
+                    if (c.date.isNotBlank()) {
+                        Text(
+                            utcToLocalLabel(c.date),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
+            }
+
+            if (c.odds.books.isNotEmpty()) {
+                Text(
+                    "Bookmakers : ${c.odds.books.joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProbCompareRow(name: String, model: Double, market: Double, color: Color) {
+    val edge = model - market
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(name, style = MaterialTheme.typography.bodySmall, color = color,
+            fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Text(
+            "estimé ${fmt(model)} · marché ${fmt(market)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "  ${fmtSigned(edge)}",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Bold,
+            color = if (edge >= 0) GoodColor else BadColor,
+        )
+    }
+}
+
+@Composable
+private fun SideBox(
+    modifier: Modifier,
+    name: String,
+    odd: Double,
+    ev: Double,
+    highlight: Boolean,
+) {
+    val border = if (highlight) GoodColor.copy(alpha = 0.18f) else Color.Transparent
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(border)
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(name, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Text("cote $odd", style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold)
+        Text(
+            "EV ${fmtSigned(ev)}",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Bold,
+            color = if (ev >= 0) GoodColor else BadColor,
+        )
+    }
+}
+
+@Composable
+private fun EvBadge(bestEv: Double, value: Boolean, filterReason: String? = null) {
+    val deadZone = filterReason == "dead_zone"
+    val bg = when {
+        deadZone -> Color(0xFF3E2723)
+        value    -> GoodColor
+        else     -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = when {
+        deadZone -> Color(0xFFFF8A65)
+        value    -> Color(0xFF00251A)
+        else     -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(
+            when {
+                deadZone -> "⛔ Zone EV 12-18%"
+                value    -> "🟢 VALUE ${fmtSigned(bestEv)}"
+                else     -> "Pas de value"
+            },
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = fg,
+        )
+    }
+}
+
+// Remplacé par utcToLocalLabel() dans DateUtils.kt
+
+private fun fmt(v: Double): String = String.format("%.0f%%", v)
+private fun fmtSigned(v: Double): String = String.format("%+.1f%%", v)

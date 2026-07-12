@@ -196,39 +196,6 @@ data class DeviceRegisterResponse(
     val status: String = "",
 )
 
-/** Fatigue (Sport Intelligence Layer), informatif. */
-data class FatigueSignal(
-    val player: String = "",
-    val matches_recent: Int = 0,
-    val window_days: Int = 14,
-)
-
-/** Qualité des adversaires (Sport Intelligence Layer), informatif. */
-data class OpponentQualitySignal(
-    val player: String = "",
-    val n_matches: Int = 0,
-    val avg_opponent_elo: Double = 0.0,
-    val own_elo: Double = 0.0,
-    val diff_elo: Double = 0.0,
-    val direction: String = "",
-)
-
-/** Facteur "clutch" (Sport Intelligence Layer), informatif. */
-data class ClutchSignal(
-    val player: String = "",
-    val n_matches: Int = 0,
-    val bp_save_rate: Double? = null,
-    val tb_win_rate: Double? = null,
-    val direction: String = "",
-)
-
-/** Sentiment (Sport Intelligence Layer), informatif. */
-data class SentimentSignal(
-    val player: String = "",
-    val sentiment_score: Double = 0.0,
-    val label: String = "",
-)
-
 /** Réponse de /api/insight — Sport Intelligence Layer Phase 1+2 : "pourquoi ce pick ?". */
 data class InsightResponse(
     val player1: String = "",
@@ -238,10 +205,6 @@ data class InsightResponse(
     val decisive_factor: String? = null,
     val factors: List<InsightFactor> = emptyList(),
     val form_signals: List<FormSignal> = emptyList(),
-    val fatigue_signals: List<FatigueSignal> = emptyList(),
-    val opponent_quality_signals: List<OpponentQualitySignal> = emptyList(),
-    val clutch_signals: List<ClutchSignal> = emptyList(),
-    val sentiment_signals: List<SentimentSignal> = emptyList(),
     val market: MarketMovement? = null,
     val model_health: ModelHealth = ModelHealth(),
 )
