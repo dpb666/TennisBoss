@@ -233,6 +233,37 @@ def test_upcoming_oddspapi_failure_does_not_break_endpoint():
     assert resp.get_json()["matches"] == []
 
 
+def test_upcoming_prioritizes_atp_wta_over_challenger_when_truncated():
+    """Le cap `limit` doit couper en dernier les matchs Challenger/ITF/UTR
+    (tour="") : les ATP/WTA doivent survivre à la troncature même s'ils
+    arrivent après dans la liste des sources fusionnées."""
+    def _fixture(p1, p2, tour):
+        return {
+            "player1": p1, "player2": p2, "tournament": "X", "round": "",
+            "date": "2026-07-17", "time": "10:00", "live": False,
+            "event_key": f"{p1}-{p2}", "is_doubles": False, "tour": tour,
+        }
+    # Challenger d'abord dans la liste (comme en réalité : bien plus nombreux),
+    # ATP/WTA ajouté ensuite par OddsPapi -> sans tri, il serait tronqué.
+    espn_fixtures = [
+        _fixture("Chall1", "ChallA", ""),
+        _fixture("Chall2", "ChallB", ""),
+        _fixture("Chall3", "ChallC", ""),
+    ]
+    oddspapi_parsed = [_fixture("Atp1", "AtpA", "atp")]
+    with patch.object(api.live_api, "fetch_upcoming", return_value=[]), \
+         patch.object(api.espn_api, "fetch_upcoming", return_value=espn_fixtures), \
+         patch.object(api.odds_api, "is_enabled", return_value=False), \
+         patch.object(api.oddspapi_feeder, "is_enabled", return_value=True), \
+         patch.object(api.oddspapi_feeder, "fetch_tennis_fixtures", return_value=[{"raw": True}]), \
+         patch.object(api.oddspapi_feeder, "parse_fixtures", return_value=oddspapi_parsed):
+        resp = _client().get("/api/upcoming?days=1&limit=1")
+    data = resp.get_json()
+    assert resp.status_code == 200
+    pairs = {(m["player1_raw"], m["player2_raw"]) for m in data["matches"]}
+    assert ("Atp1", "AtpA") in pairs
+
+
 # ─── settlement/run ───────────────────────────────────────────────────────────
 
 def test_settlement_run_returns_summary_and_calibration():

@@ -933,6 +933,15 @@ def api_upcoming():
         except Exception:
             pass
 
+    # Priorité ATP/WTA avant Challenger/ITF/UTR dans l'ordre de troncature :
+    # le cap `limit` (défaut 100) coupe la liste avant la fin, et le volume
+    # Challenger/ITF (toujours majoritaire) noyait sinon les matchs ATP/WTA
+    # fraîchement ajoutés par OddsPapi. Tri stable -> à priorité égale,
+    # l'ordre d'origine (et donc les autres critères déjà appliqués) est conservé.
+    def _fixture_prio(f: Dict) -> int:
+        return 0 if (f.get("tour") or "").lower() in ("atp", "wta") else 1
+    fixtures = sorted(fixtures, key=_fixture_prio)
+
     # Cache météo par tournoi pour éviter les appels répétés
     _weather_cache: Dict[str, Any] = {}
 
