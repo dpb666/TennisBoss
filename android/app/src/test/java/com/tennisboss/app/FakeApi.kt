@@ -48,6 +48,8 @@ class FakeApi(
     private val playerResponses: Map<String, PlayerDetail>? = null,
     private val insightResponse: InsightResponse? = null,
     private val h2hResponse: H2H? = null,
+    private val clvResponse: ClvResponse? = null,
+    private val followedPlayersResponse: FollowedPlayersResponse? = null,
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
@@ -72,8 +74,10 @@ class FakeApi(
     override suspend fun unfollowPlayer(request: FollowPlayerRequest): FollowPlayerResponse =
         throw NotImplementedError("non utilisé")
 
+    // RuntimeException (pas NotImplementedError) : DashboardViewModel rattrape
+    // l'échec des favoris avec catch (e: Exception) { null }, best-effort.
     override suspend fun followedPlayers(): FollowedPlayersResponse =
-        throw NotImplementedError("non utilisé")
+        followedPlayersResponse ?: throw RuntimeException("non utilisé")
 
     // RuntimeException (pas NotImplementedError) : MatchDetailViewModel rattrape
     // l'échec du H2H avec catch (e: Exception) { null }, best-effort.
@@ -125,7 +129,9 @@ class FakeApi(
         throw NotImplementedError("non utilisé")
     override suspend fun historyDates(dates: Int): HistoryDatesResponse = throw NotImplementedError("non utilisé")
     override suspend fun historyByDate(date: String): HistoryResponse = throw NotImplementedError("non utilisé")
-    override suspend fun clv(): ClvResponse = throw NotImplementedError("non utilisé")
+    // RuntimeException (pas NotImplementedError) : DashboardViewModel rattrape
+    // l'échec du CLV avec catch (e: Exception) { null }, best-effort.
+    override suspend fun clv(): ClvResponse = clvResponse ?: throw RuntimeException("non utilisé")
     override suspend fun intelligenceStats(): IntelligenceStats = throw NotImplementedError("non utilisé")
     override suspend fun learnerStats(): LearnerStats = throw NotImplementedError("non utilisé")
     override suspend fun scannerStatus(): ScannerStatus = throw NotImplementedError("non utilisé")

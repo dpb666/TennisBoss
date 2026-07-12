@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,12 +40,18 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.tooling.preview.Preview
 import com.tennisboss.app.data.CalibrationResponse
+import com.tennisboss.app.data.ClvResponse
+import com.tennisboss.app.data.FollowedPlayersResponse
+import com.tennisboss.app.data.Player
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.ValueComparison
 import com.tennisboss.app.ui.components.SurfaceBadge
 import com.tennisboss.app.ui.components.ValueCard
 
 private val AccentColor = Color(0xFF4F8CFF)
+private val GoodColor = Color(0xFF00E5A0)
+private val BadColor = Color(0xFFFF5C7A)
+private val WarnColor = Color(0xFFFFB020)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +76,7 @@ fun DashboardScreen(
                 }
             }
             is DashboardUiState.Success -> {
-                DashboardContent(s.upcoming.matches, s.value.comparisons, s.calibration, onMatchClick)
+                DashboardContent(s.upcoming.matches, s.value.comparisons, s.calibration, s.clv, s.followed, onMatchClick)
             }
         }
     }
@@ -79,6 +87,8 @@ private fun DashboardContent(
     upcoming: List<UpcomingMatch>,
     values: List<ValueComparison>,
     calib: CalibrationResponse,
+    clv: ClvResponse?,
+    followed: FollowedPlayersResponse?,
     onMatchClick: (String, String, String?) -> Unit
 ) {
     LazyColumn(
@@ -98,6 +108,25 @@ private fun DashboardContent(
         // --- État du Modèle ---
         item {
             ModelStatusCard(calib)
+        }
+
+        // --- CLV (preuve d'edge, visible sans changer d'écran — cf. onglet Edge) ---
+        clv?.let { c ->
+            if (c.global.n_clv > 0) {
+                item {
+                    ClvSummaryCard(c)
+                }
+            }
+        }
+
+        // --- Mes joueurs suivis ---
+        followed?.players?.takeIf { it.isNotEmpty() }?.let { players ->
+            item {
+                SectionHeader("⭐ Mes joueurs suivis", Icons.Default.Star)
+            }
+            item {
+                FollowedPlayersRow(players)
+            }
         }
 
         // --- Meilleures Opportunités Value ---
@@ -169,6 +198,69 @@ private fun StatItem(label: String, value: String) {
     }
 }
 
+private fun verdictColor(verdict: String): Color = when (verdict) {
+    "edge_prouvé" -> GoodColor
+    "prometteur" -> WarnColor
+    "pas_d_edge" -> BadColor
+    else -> AccentColor
+}
+
+/** Résumé CLV — teaser de l'onglet Edge, pour que le pari n'ait pas besoin de
+ * changer d'écran pour voir si le modèle bat le marché (retour parieur). */
+@Composable
+private fun ClvSummaryCard(clv: ClvResponse) {
+    val g = clv.global
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("💰 CLV (bat-on le marché ?)", style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold)
+                Text(
+                    clv.verdict_label.ifBlank { clv.verdict },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = verdictColor(clv.verdict),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                StatItem("CLV moyen", String.format("%+.1f%%", g.avg_clv_pct ?: 0.0))
+                StatItem("Bat la clôture", g.beat_closing_pct?.let { String.format("%.0f%%", it) } ?: "—")
+                StatItem("Picks", "${g.n_clv}")
+            }
+        }
+    }
+}
+
+/** Ligne horizontale des joueurs suivis (retour fanatique : les mettre en
+ * avant sur le Dashboard plutôt que seulement dans l'onglet Joueurs). */
+@Composable
+private fun FollowedPlayersRow(players: List<Player>) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(players) { p ->
+            Card(modifier = Modifier.width(150.dp)) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(p.name, fontWeight = FontWeight.Bold, maxLines = 1,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Forme : ${String.format("%.0f%%", p.recent * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Win vs moy. : ${String.format("%.0f%%", p.win_prob_vs_avg * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (p.win_prob_vs_avg >= 0.5) GoodColor else BadColor,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MatchSummaryCard(m: UpcomingMatch, onClick: () -> Unit) {
     Card(
@@ -216,6 +308,8 @@ private fun DashboardPreview() {
             upcoming = emptyList(),
             values = emptyList(),
             calib = CalibrationResponse(),
+            clv = null,
+            followed = null,
             onMatchClick = { _, _, _ -> }
         )
     }

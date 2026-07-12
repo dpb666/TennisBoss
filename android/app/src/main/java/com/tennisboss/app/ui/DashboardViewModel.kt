@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.CalibrationResponse
+import com.tennisboss.app.data.ClvResponse
+import com.tennisboss.app.data.FollowedPlayersResponse
 import com.tennisboss.app.data.UpcomingResponse
 import com.tennisboss.app.data.ValueResponse
 import kotlinx.coroutines.async
@@ -18,7 +20,11 @@ sealed interface DashboardUiState {
     data class Success(
         val upcoming: UpcomingResponse,
         val value: ValueResponse,
-        val calibration: CalibrationResponse
+        val calibration: CalibrationResponse,
+        // Best-effort (voir load()) : un pépin sur ces 2 appels ne doit pas
+        // empêcher le reste du Dashboard de s'afficher.
+        val clv: ClvResponse? = null,
+        val followed: FollowedPlayersResponse? = null,
     ) : DashboardUiState
     data class Error(val message: String) : DashboardUiState
 }
@@ -46,11 +52,19 @@ class DashboardViewModel : ViewModel() {
                     val upcomingDeferred = async { api.upcoming(days = 1, limit = 5) }
                     val valueDeferred = async { api.value(limit = 5) }
                     val calibrationDeferred = async { api.calibration() }
+                    // Best-effort : CLV a besoin de picks réglés pour être significatif,
+                    // et les favoris peuvent être vides — ni l'un ni l'autre ne doit
+                    // faire échouer tout le Dashboard (même pattern que h2h dans
+                    // MatchDetailViewModel).
+                    val clvDeferred = async { try { api.clv() } catch (e: Exception) { null } }
+                    val followedDeferred = async { try { api.followedPlayers() } catch (e: Exception) { null } }
 
                     DashboardUiState.Success(
                         upcoming = upcomingDeferred.await(),
                         value = valueDeferred.await(),
-                        calibration = calibrationDeferred.await()
+                        calibration = calibrationDeferred.await(),
+                        clv = clvDeferred.await(),
+                        followed = followedDeferred.await(),
                     )
                 }
             } catch (e: Exception) {
