@@ -113,7 +113,10 @@ class IngestTestCase(unittest.TestCase):
         # memory.save() écrit un tmp dans config.STATE_DIR puis os.replace vers
         # MEMORY_FILE : les deux doivent être sur le même device, donc le
         # fichier de test doit aussi vivre dans STATE_DIR (pas /tmp, souvent
-        # un tmpfs séparé -> "Invalid cross-device link").
+        # un tmpfs séparé -> "Invalid cross-device link"). STATE_DIR est
+        # gitignored : sur un checkout CI propre il n'existe pas encore
+        # (contrairement à une machine de dev avec un état de prod local).
+        os.makedirs(config.STATE_DIR, exist_ok=True)
         self._mem_fd, self._mem_path = tempfile.mkstemp(suffix=".json", dir=config.STATE_DIR)
         config.MEMORY_FILE = self._mem_path
 
