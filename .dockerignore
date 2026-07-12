@@ -11,6 +11,7 @@
 !.env.example
 state/
 logs/
+reports/
 
 # Android : ~100 Mo de build Gradle/APK sans rapport avec l'image Python
 android/

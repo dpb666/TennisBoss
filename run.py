@@ -123,6 +123,19 @@ def cmd_players(args) -> None:
 
 
 def cmd_backtest(args) -> None:
+    if getattr(args, "full", False):
+        from bot import backtest_report
+        path, report = backtest_report.generate()
+        core = report["core"]
+        print("\n=== RAPPORT DE BACKTEST COMPLET ===")
+        print(f"  matchs archive : {report['n_matches_archive']} ({core.get('span')})")
+        print(f"  accuracy+ELO   : {core.get('accuracy_elo')} (baseline {core.get('baseline')})")
+        print(f"  logloss+ELO    : {core.get('logloss_elo')}  brier={core.get('brier_elo')}")
+        for src, r in report["roi_theorique"].items():
+            print(f"  ROI théorique ({src}) : {r['roi_pct']}% sur {r['n_bets']} paris "
+                  f"| confiants : {r['roi_confiants_pct']}% sur {r['n_bets_confiants']}")
+        print(f"\n  Rapport HTML : {path}\n")
+        return
     cfg = bootstrap()
     if args.years:
         cfg["years"] = args.years
@@ -449,6 +462,9 @@ def main() -> None:
     p_bt.add_argument("--tours", nargs="+", choices=["atp", "wta"], help="Tours")
     p_bt.add_argument("--challengers", action="store_true",
                       help="Inclure les Futures/ITF ATP dans le backtest")
+    p_bt.add_argument("--full", action="store_true",
+                      help="Rapport complet hors-ligne (archive DB) -> "
+                           "reports/backtest_report.html")
     p_bt.set_defaults(func=cmd_backtest)
 
     p_up = sub.add_parser("upcoming", help="Matchs à venir (live) + prédiction 1er set")

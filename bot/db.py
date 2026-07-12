@@ -447,30 +447,43 @@ def player_record(name: str) -> Dict[str, int]:
 
 
 def player_recent_matches(name: str, limit: int = 10) -> List[sqlite3.Row]:
-    """Derniers matchs du joueur (gagnés ou perdus), les plus récents d'abord."""
+    """Derniers matchs du joueur (gagnés ou perdus), les plus récents d'abord.
+
+    Tri sur REPLACE(date,'-','') et pas sur date brut : la colonne mélange
+    "20220103" (Sackmann) et "2022-01-17" (tennis-data.co.uk), et en tri
+    lexicographique le tiret passe AVANT les chiffres — toutes les dates avec
+    tirets sortiraient avant les dates compactes, quelle que soit l'année.
+    """
     with connect() as conn:
         return conn.execute(
             "SELECT date,tour,winner,loser FROM matches "
-            "WHERE winner=? OR loser=? ORDER BY date DESC, id DESC LIMIT ?",
+            "WHERE winner=? OR loser=? "
+            "ORDER BY REPLACE(date,'-','') DESC, id DESC LIMIT ?",
             (name, name, limit),
         ).fetchall()
 
 
 def all_matches_chrono() -> List[sqlite3.Row]:
-    """Tous les matchs par ordre chronologique avec surface (pour l'ELO)."""
+    """Tous les matchs par ordre chronologique avec surface (pour l'ELO).
+
+    Voir player_recent_matches : REPLACE(date,'-','') obligatoire, sinon les
+    13% de lignes tennis-data (avec tirets) sortent AVANT tout Sackmann et le
+    replay chronologique (donc l'ELO) est corrompu.
+    """
     with connect() as conn:
         return conn.execute(
             "SELECT winner, loser, surface, margin FROM matches "
-            "ORDER BY date ASC, id ASC").fetchall()
+            "ORDER BY REPLACE(date,'-','') ASC, id ASC").fetchall()
 
 
 def head_to_head(name1: str, name2: str) -> List[sqlite3.Row]:
-    """Confrontations directes entre deux joueurs, les plus récentes d'abord."""
+    """Confrontations directes entre deux joueurs, les plus récentes d'abord.
+    Voir player_recent_matches pour la normalisation de date."""
     with connect() as conn:
         return conn.execute(
             "SELECT date,tour,winner,loser FROM matches "
             "WHERE (winner=? AND loser=?) OR (winner=? AND loser=?) "
-            "ORDER BY date DESC, id DESC",
+            "ORDER BY REPLACE(date,'-','') DESC, id DESC",
             (name1, name2, name2, name1),
         ).fetchall()
 
@@ -489,6 +502,49 @@ def player_recent_match_count(name: str, cutoff_compact: str) -> int:
             "AND REPLACE(date,'-','') >= ?",
             (name, name, cutoff_compact),
         ).fetchone()[0]
+
+
+def matches_for_backtest() -> List[Dict[str, Any]]:
+    """Tous les matchs archivés, ordre chronologique STRICT (date normalisée),
+    reconstruits au format attendu par bot.backtest.run / learner._train_one
+    (l'inverse exact de archive_matches). Permet un backtest 100% hors-ligne
+    sur l'archive plutôt qu'un re-téléchargement réseau des CSV.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, date, tour, winner, loser, w_serve, w_return1, w_return2, "
+            "l_serve, l_return1, l_return2, surface, margin FROM matches "
+            "ORDER BY REPLACE(date,'-','') ASC, id ASC"
+        ).fetchall()
+    return [
+        {
+            "id": r["id"], "date": r["date"], "tour": r["tour"],
+            "winner_name": r["winner"], "loser_name": r["loser"],
+            "winner": {"serve": r["w_serve"] or 0.5, "return1": r["w_return1"] or 0.5,
+                       "return2": r["w_return2"] or 0.5},
+            "loser": {"serve": r["l_serve"] or 0.5, "return1": r["l_return1"] or 0.5,
+                      "return2": r["l_return2"] or 0.5},
+            "surface": r["surface"] or "", "margin": r["margin"],
+        }
+        for r in rows
+    ]
+
+
+def historical_odds_index() -> Dict[tuple, Dict[str, Any]]:
+    """Index (date_compacte, winner, loser) -> cotes marché historiques
+    (tennis-data.co.uk). Clé de date normalisée SANS tirets pour joindre avec
+    matches.date quel que soit son format d'origine."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT REPLACE(date,'-','') AS d, winner, loser, "
+            "psw, psl, avgw, avgl FROM historical_odds"
+        ).fetchall()
+    return {
+        (r["d"], r["winner"], r["loser"]): {
+            "psw": r["psw"], "psl": r["psl"], "avgw": r["avgw"], "avgl": r["avgl"],
+        }
+        for r in rows
+    }
 
 
 def player_recent_opponents(name: str, limit: int) -> List[sqlite3.Row]:

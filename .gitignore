@@ -1,6 +1,7 @@
 # État et logs générés à l'exécution (ne pas versionner)
 state/
 logs/
+reports/
 
 # Android Kotlin incremental build errors
 android/.kotlin/

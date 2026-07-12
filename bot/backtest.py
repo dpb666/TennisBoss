@@ -41,8 +41,15 @@ def _build_elo(matches: List[Dict]) -> tuple:
     return ratings, dict(surf_ratings), n_played, dict(surf_n)
 
 
-def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[str, Any]:
-    """Exécute un backtest et renvoie (et archive) le rapport de métriques."""
+def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True,
+        return_details: bool = False) -> Dict[str, Any]:
+    """Exécute un backtest et renvoie (et archive) le rapport de métriques.
+
+    return_details=True ajoute report["details"] : une entrée par match de
+    test (date, winner, loser, p_elo = proba prédite du vainqueur réel par le
+    modèle features+ELO) — matière première du rapport HTML (courbe de
+    calibration, ROI théorique contre les cotes historiques).
+    """
     if len(matches) < 50:
         raise ValueError("Pas assez de matchs pour un backtest fiable.")
 
@@ -67,6 +74,7 @@ def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[
     correct_elo = 0
     logloss_sum = brier_sum = 0.0
     logloss_elo = brier_elo = 0.0
+    details: List[Dict[str, Any]] = []
 
     for m in test:
         n1, n2 = m["winner_name"], m["loser_name"]
@@ -100,6 +108,9 @@ def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[
         brier_sum += (1.0 - p_win_feat) ** 2
         logloss_elo += -_safe_log(p_win_elo)
         brier_elo += (1.0 - p_win_elo) ** 2
+        if return_details:
+            details.append({"date": m.get("date"), "winner": n1, "loser": n2,
+                            "p_elo": p_win_elo})
 
         # Mise à jour profils et ELO live (K dynamique)
         tour = m.get("tour")
@@ -141,4 +152,6 @@ def run(matches: List[Dict], cfg: Dict[str, Any], persist: bool = True) -> Dict[
         bid = db.save_backtest(report)
         report["id"] = bid
         log(f"Backtest archivé en base (id={bid}).")
+    if return_details:
+        report["details"] = details
     return report

@@ -130,7 +130,8 @@ def backtest_form_signal(threshold_pts: float = None, min_matches: int = None) -
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT date, tour, winner, loser, w_serve, w_return1, w_return2, "
-            "l_serve, l_return1, l_return2 FROM matches ORDER BY date ASC, id ASC"
+            "l_serve, l_return1, l_return2 FROM matches "
+            "ORDER BY REPLACE(date,'-','') ASC, id ASC"  # cf. db.player_recent_matches : formats de date mixtes
         ).fetchall()
 
     mem: Dict[str, Any] = {"players": {}}
