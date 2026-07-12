@@ -79,6 +79,42 @@ class TestFatigueSignal(SignalsTestCase):
         self.assertEqual(signals[0]["matches_recent"], 8)
 
 
+class TestRestDaysSignal(SignalsTestCase):
+    def test_no_signal_in_neutral_range(self):
+        # entre REST_DAYS_LOW (2) et REST_DAYS_HIGH (21) exclusifs -> pas de signal
+        d = (_dt.date.today() - _dt.timedelta(days=10)).strftime("%Y%m%d")
+        self._insert_match(d, "Alice", "Opp")
+        self.assertEqual(il.rest_days_signals("Alice", "Bob"), [])
+
+    def test_no_signal_without_any_match(self):
+        self.assertEqual(il.rest_days_signals("Alice", "Bob"), [])
+
+    def test_flags_quick_turnaround(self):
+        d = (_dt.date.today() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")  # tirets
+        self._insert_match(d, "Alice", "Opp")
+        signals = il.rest_days_signals("Alice", "Bob")
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0]["player"], "Alice")
+        self.assertEqual(signals[0]["rest_days"], 1)
+        self.assertEqual(signals[0]["flag"], "enchainement_rapide")
+
+    def test_flags_long_layoff_compact_format(self):
+        d = (_dt.date.today() - _dt.timedelta(days=45)).strftime("%Y%m%d")  # sans tirets
+        self._insert_match(d, "Alice", "Opp")
+        signals = il.rest_days_signals("Alice", "Bob")
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0]["rest_days"], 45)
+        self.assertEqual(signals[0]["flag"], "retour_apres_coupure")
+
+    def test_uses_most_recent_match_when_several(self):
+        old = (_dt.date.today() - _dt.timedelta(days=45)).strftime("%Y%m%d")
+        recent = (_dt.date.today() - _dt.timedelta(days=1)).strftime("%Y%m%d")
+        self._insert_match(old, "Alice", "OppOld")
+        self._insert_match(recent, "Alice", "OppRecent")
+        signals = il.rest_days_signals("Alice", "Bob")
+        self.assertEqual(signals[0]["rest_days"], 1)
+
+
 class TestOpponentQualitySignal(SignalsTestCase):
     def _mem(self, elo: dict):
         return {"elo": elo}

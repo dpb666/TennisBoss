@@ -135,27 +135,23 @@ et dans les docstrings de `db.py`.
 | Étape | État | Détail |
 |---|---|---|
 | 1. Audit | ✅ ce document | |
-| 2. Cerveau IA | ✅ ~85 % | Elo global+surface, forme, fatigue, qualité adversaires, H2H, service/retour, odds/value : faits. **Manquent : break points, tie-breaks, jours de repos** (nécessitent parsing de stats fines Sackmann). Restructuration `bot/ml/` : écartée (voir §4). |
+| 2. Cerveau IA | ✅ ~90 % | Elo global+surface, forme, fatigue, jours de repos, qualité adversaires, clutch (BP/TB), H2H, service/retour, odds/value : faits. Restructuration `bot/ml/` : écartée (voir §4). |
 | 3. Backtest | ✅ ~80 % | `signal_backtest.py` (walk-forward strict) + `backtest.py` + calibration. **Manque : rapport HTML** (`reports/backtest_report.html`) et une commande unifiée `backtest --full` avec Brier/log-loss/ROI consolidés. |
 | 4. API prod | ✅ fait | Auth, rate limiting, Swagger, validation, logs. Migration FastAPI : **écartée** — aucun besoin async avéré, réécriture risquée de 30+ endpoints stables. Redis : **écarté** — cache SQLite/mémoire suffit à cette charge. |
 | 5. Mode autonome | ✅ fait | Scheduler 5 jobs 24/7, settlement, auto-learn, monitor + `/api/monitor/status`. |
-| 6. Android | ✅ ~80 % | MVVM, Retrofit, nav 5 groupes, prédiction/confiance/value/historique/Edge/notifications : faits. **Manquent : Room/offline** (écarté sauf demande) et un vrai écran Dashboard synthétique. |
+| 6. Android | ✅ ~85 % | MVVM, Retrofit, nav 5 groupes, prédiction/confiance/value/historique/Edge/notifications, Dashboard synthétique (digest, CLV, joueurs suivis) : faits. **Manque : Room/offline** (écarté sauf demande). |
 | 7. Déploiement | ✅ fait | Dockerfile, compose 3 services, .env.example, systemd, DEPLOYMENT.md. |
 | 8. Qualité | ✅ fait | 298 tests, commits documentés, CI GitHub Actions verte. |
 
 ## 7. Roadmap recommandée (par valeur décroissante)
 
-1. **Rapport de backtest consolidé** (étape 3) : commande
-   `python -m bot.backtest --full` produisant `reports/backtest_report.html`
-   avec accuracy, log loss, Brier, calibration, ROI théorique — c'est aussi
-   un argument de transparence pour Google Play.
-2. **Features stats fines** (étape 2) : break points convertis/sauvés et
-   tie-breaks depuis les CSV Sackmann (colonnes déjà présentes dans les
-   données brutes) — à backtester avant toute entrée dans le modèle, comme
-   toujours.
-3. **Écran Dashboard Android** (étape 6) : synthèse du jour (digest, picks
-   ouverts, CLV cumulé, santé modèle) en écran d'accueil.
-4. **Jours de repos** (étape 2) : complément naturel du signal fatigue déjà
-   livré (même infra `db.player_recent_*`).
+1. ✅ **Rapport de backtest consolidé** (étape 3) — fait (`backtest --full`).
+2. ✅ **Features stats fines** (étape 2) — clutch (BP sauvées, TB gagnés) fait ;
+   voir `intelligence_layer.clutch_signals` (informatif, pas encore backtesté
+   dans le modèle).
+3. ✅ **Écran Dashboard Android** (étape 6) — fait (digest, CLV, joueurs suivis).
+4. ✅ **Jours de repos** (étape 2) — fait, `intelligence_layer.rest_days_signals`
+   (complément du signal fatigue existant : signale aussi les longs retours
+   de coupure, pas seulement le surmenage récent).
 5. (Différé) Migration format de date en base, Room Android, sous-packages
    `bot/` — seulement sur besoin avéré.

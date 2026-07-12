@@ -605,6 +605,22 @@ def historical_odds_index() -> Dict[tuple, Dict[str, Any]]:
     }
 
 
+def player_last_match_date(name: str) -> Optional[str]:
+    """Date du dernier match connu de `name`, au format compact YYYYMMDD.
+
+    Voir player_recent_matches pour la normalisation REPLACE(date,'-','')
+    (deux formats de date coexistent en base selon la source d'ingestion).
+    """
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT REPLACE(date,'-','') AS d FROM matches "
+            "WHERE winner=? OR loser=? "
+            "ORDER BY REPLACE(date,'-','') DESC, id DESC LIMIT 1",
+            (name, name),
+        ).fetchone()
+        return row["d"] if row else None
+
+
 def player_recent_opponents(name: str, limit: int) -> List[sqlite3.Row]:
     """Les `limit` derniers matchs de `name` (winner, loser), plus récents
     d'abord. Voir player_recent_match_count pour la normalisation de date."""

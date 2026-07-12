@@ -80,6 +80,13 @@ CLUTCH_MIN_TB_PLAYED = 5
 CLUTCH_TB_WIN_HIGH = 0.70
 CLUTCH_TB_WIN_LOW = 0.30
 
+# Jours de repos avant le match : complète fatigue_signals (qui compte le
+# volume sur une fenêtre glissante) avec le signal inverse — un retour après
+# une longue coupure (blessure, pause) n'apparaît pas dans une fenêtre de
+# matchs joués. Repères calendrier uniquement, pas de données physio/médicales.
+REST_DAYS_LOW = 2       # <= : enchaînement rapide, fatigue potentielle
+REST_DAYS_HIGH = 21     # >= : retour après coupure, rythme de jeu incertain
+
 
 def _form_signal(name: str, prof: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Compare la forme récente (EMA `recent`) au bilan carrière du joueur.
@@ -139,6 +146,38 @@ def fatigue_signals(n1: str, n2: str) -> List[Dict[str, Any]]:
     out = []
     for name in (n1, n2):
         sig = _fatigue_signal(name)
+        if sig:
+            out.append(sig)
+    return out
+
+
+def _rest_days_signal(name: str) -> Optional[Dict[str, Any]]:
+    """Jours écoulés depuis le dernier match connu du joueur.
+
+    Voir note en tête de fichier pour le piège de format de date (même
+    normalisation que fatigue_signals, via db.player_last_match_date).
+    """
+    last = db.player_last_match_date(name)
+    if not last:
+        return None
+    try:
+        last_date = _dt.datetime.strptime(last, "%Y%m%d").date()
+    except ValueError:
+        return None
+    rest_days = (_dt.date.today() - last_date).days
+    if rest_days < 0 or REST_DAYS_LOW < rest_days < REST_DAYS_HIGH:
+        return None
+    return {
+        "player": name,
+        "rest_days": rest_days,
+        "flag": "enchainement_rapide" if rest_days <= REST_DAYS_LOW else "retour_apres_coupure",
+    }
+
+
+def rest_days_signals(n1: str, n2: str) -> List[Dict[str, Any]]:
+    out = []
+    for name in (n1, n2):
+        sig = _rest_days_signal(name)
         if sig:
             out.append(sig)
     return out
@@ -337,6 +376,7 @@ def build_insight(
         "factors": factors,
         "form_signals": form_signals(mem, n1, n2),
         "fatigue_signals": fatigue_signals(n1, n2),
+        "rest_days_signals": rest_days_signals(n1, n2),
         "opponent_quality_signals": opponent_quality_signals(mem, n1, n2),
         "clutch_signals": clutch_signals(n1, n2),
         "sentiment_signals": sentiment_signals(n1, n2) if include_sentiment else [],
