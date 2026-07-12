@@ -2441,10 +2441,12 @@ def api_chat():
     primary_url = os.environ.get("GROQ_API_URL", config.GROQ_API_URL)
     primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
     try:
-        extra = chat_mod.build_match_context(message, _MEM)
-        reply = chat_mod.chat(message, history, _MEM, primary_url, model=primary_model,
-                              extra_context=extra)
-        return jsonify({"reply": reply, "context_used": bool(extra)})
+        agent, clean_message = chat_mod.strip_agent_prefix(message)
+        agent_prompt = chat_mod.AGENT_PROMPTS.get(agent, "") if agent else ""
+        extra = chat_mod.build_match_context(clean_message, _MEM, agent=agent)
+        reply = chat_mod.chat(clean_message, history, _MEM, primary_url, model=primary_model,
+                              extra_context=extra, agent_prompt=agent_prompt)
+        return jsonify({"reply": reply, "context_used": bool(extra), "agent": agent})
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")
         return jsonify({"error": f"LLM inaccessible (modèle: {primary_model}) : {exc}"}), 503

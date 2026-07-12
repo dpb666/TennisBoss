@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .log import log
+from .agent_router import AGENT_PROMPTS
 
 DEFAULT_LM_URL = "https://api.groq.com/openai/v1/chat/completions"
 DEFAULT_MODEL = "llama-3.1-8b-instant"
@@ -99,6 +100,26 @@ def _detect_lang(text: str) -> str:
     return "en" if score > 0 else "fr"
 
 
+_AGENT_PREFIX_RE = re.compile(r"^@(\w+)\s*(.*)$", re.DOTALL)
+
+
+def strip_agent_prefix(message: str) -> tuple:
+    """Détecte un préfixe « @agent_name » en tête de message (ex. « @odds_agent
+    meilleurs value bets du moment »). Retourne (agent_name_ou_None, message_sans_prefixe).
+
+    Avant ce fix, @odds_agent/@stats_agent/etc. n'étaient JAMAIS parsés nulle
+    part (agent_router.py était du code mort, jamais importé) : le préfixe
+    partait tel quel dans le message utilisateur et le LLM l'ignorait
+    silencieusement — aucune spécialisation, aucun grounding forcé."""
+    m = _AGENT_PREFIX_RE.match(message.strip())
+    if not m:
+        return None, message
+    name, rest = m.group(1), m.group(2)
+    if name not in AGENT_PROMPTS:
+        return None, message
+    return name, (rest or message)
+
+
 def build_context(mem: Dict[str, Any]) -> str:
     """Contexte minimal TennisBoss — optimisé pour LLM local (peu de tokens)."""
     lines = []
@@ -152,14 +173,55 @@ def _surface_elo_line(mem: Dict[str, Any], names: List[str]) -> str:
     return " | ".join(parts)
 
 
-def build_match_context(message: str, mem: Dict[str, Any]) -> str:
+_VALUE_QUERY_WORDS = frozenset(
+    "value edge pari pronostic pronostics cote cotes opportunite "
+    "opportunites bet bets betting odds pick picks".split()
+    # "paris" (pluriel de pari) volontairement absent : collision avec la
+    # ville de Paris trop probable dans une question générale sur le tennis.
+)
+
+
+def _detect_value_query(message: str) -> bool:
+    """Heuristique : la question porte sur les value bets en général (pas un
+    joueur précis) — ex. « meilleurs value bets du moment », « des paris
+    intéressants ce soir ? ». Mots FR/EN sans accent (comparés après normalisation
+    basique : accents retirés côté appelant via _tokens qui utilise \\w)."""
+    tokens = _tokens(message)
+    normalized = {t.replace("é", "e").replace("è", "e") for t in tokens}
+    return bool(normalized & _VALUE_QUERY_WORDS)
+
+
+def _format_value_picks(rows: List[Any], limit: int = 5) -> str:
+    """Formate les value picks OUVERTS (déjà identifiés par le scanner/API,
+    donc réels — aucun appel réseau ici) pour grounder le LLM. Si la liste est
+    vide, le dit explicitement : mieux vaut « aucun pick ouvert actuellement »
+    qu'un silence que le LLM comblerait en inventant un match."""
+    if not rows:
+        return "Aucun value bet ouvert actuellement dans le scanner TennisBoss."
+    top = sorted(rows, key=lambda r: r["ev"], reverse=True)[:limit]
+    lines = ["Value bets ouverts (réels, détectés par le scanner TennisBoss) :"]
+    for r in top:
+        lines.append(
+            f"- {r['player1']} vs {r['player2']} : pari {r['side']} "
+            f"@ {r['odds']} (EV {r['ev']:+.1f}%), {r['date']}"
+        )
+    return "\n".join(lines)
+
+
+def build_match_context(message: str, mem: Dict[str, Any], agent: Optional[str] = None) -> str:
     """Contexte prédiction/joueur CALIBRÉ pour le chat (sans appel réseau).
 
     Détecte les joueurs cités et injecte la prédiction match best-of-3 calibrée
     + H2H (2 joueurs) ou la fiche ELO/forme (1 joueur). Sans ça, le LLM du
     téléphone n'a que des stats brutes et invente des probabilités.
     Pas de cotes live ici (1 appel API/message épuiserait le quota).
-    """
+
+    agent="odds_agent" ou question sans nom de joueur mais évoquant les value
+    bets ("meilleurs value bets du moment ?") : injecte les VRAIS picks ouverts
+    du scanner (db.list_value_picks_open, déjà en mémoire, pas d'appel réseau)
+    au lieu de laisser le LLM inventer des matchs/cotes plausibles mais faux —
+    constaté sur émulateur avec de vraies données (ex. Sinner/Alcaraz inventés
+    alors que les vrais picks du jour étaient des Challenger qualifs)."""
     try:
         from . import predictor, features, db
         players_lower = {n.lower(): n for n in (mem.get("players") or {})}
@@ -168,6 +230,12 @@ def build_match_context(message: str, mem: Dict[str, Any]) -> str:
         return ""
 
     if not names:
+        if agent == "odds_agent" or _detect_value_query(message):
+            try:
+                return _format_value_picks(db.list_value_picks_open())
+            except Exception as exc:
+                log(f"build_match_context (value picks): {exc}", "WARN")
+                return ""
         return ""
 
     k = _calib_k(mem)
@@ -243,11 +311,15 @@ def chat(
     lm_url: str = DEFAULT_LM_URL,
     model: str = DEFAULT_MODEL,
     extra_context: str = "",
+    agent_prompt: str = "",
 ) -> str:
     """Envoie un message au LLM local avec contexte TennisBoss enrichi dynamiquement.
 
-    extra_context : bloc pré-construit (prédiction, H2H, stats joueur) injecté directement,
-    court-circuite la détection automatique de joueurs.
+    extra_context : bloc pré-construit (prédiction, H2H, stats joueur, ou value
+    picks réels via build_match_context) injecté directement, court-circuite
+    la détection automatique de joueurs.
+    agent_prompt : instruction spécialisée d'un agent (voir agent_router.py),
+    ex. « You are the TennisBoss Odds Agent... » — préfixée au system prompt.
     """
     context = build_context(mem)
 
@@ -291,9 +363,23 @@ def chat(
         "— never promise a win or guarantee profit, even if asked directly; state "
         "probabilities as estimates, not certainties."
     )
+    # Constaté sur émulateur avec de vraies données : sans contrainte explicite,
+    # une question générale ("meilleurs value bets du moment ?") sans nom de
+    # joueur cité faisait halluciner des matchs connus (Sinner/Alcaraz) avec des
+    # cotes inventées, alors que les vrais picks du jour étaient tout autres.
+    # Cette clause s'applique TOUJOURS (pas juste quand extra_context est fourni)
+    # pour couvrir les cas que la détection de contexte aurait manqués.
+    no_fabrication_instr = (
+        " Never invent specific matches, player pairings, or odds numbers that "
+        "are not explicitly given in the context above — if you lack real "
+        "TennisBoss data to answer a specific question, say so plainly instead "
+        "of guessing plausible-sounding examples."
+    )
+    agent_block = f"{agent_prompt} " if agent_prompt else ""
     system = (
-        f"TennisBoss AI. Global ELO: {context}{player_context}"
-        f"{extra_block}{web_context} {reply_instr}{web_instr}{extra_instr}{honesty_instr}"
+        f"{agent_block}TennisBoss AI. Global ELO: {context}{player_context}"
+        f"{extra_block}{web_context} {reply_instr}{web_instr}{extra_instr}"
+        f"{honesty_instr}{no_fabrication_instr}"
     )
 
     messages = [{"role": "system", "content": system}]

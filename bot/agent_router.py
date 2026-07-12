@@ -1,7 +1,12 @@
 """Agent routing for TennisBoss AI Chat.
 
-Currently a stub — will integrate with OpenClaw sessions_spawn when available.
-Routes messages to specialized agents:
+AGENT_PROMPTS est utilisé par bot/chat.py::strip_agent_prefix (préfixe
+« @agent_name » en tête de message) pour injecter un system prompt spécialisé.
+route_to_agent() ci-dessous et spawn_agent_session() restent un stub — ils
+préparaient une vraie sous-session OpenClaw par agent (jamais implémentée) ;
+la spécialisation réelle actuelle passe par chat.py, pas par ces fonctions.
+
+Agents :
   - stats_agent: player performance analysis
   - odds_agent: market value detection
   - analyzer_agent: signal synthesis
