@@ -45,7 +45,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -112,6 +111,16 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        // Doit s'exécuter avant setContent{} : TokenManager.initialize() est synchrone
+        // (pas de suspend), donc appelé ici ApiClient.apiToken est déjà renseigné avant
+        // la toute première composition — et donc avant que les ViewModel (dont
+        // DashboardViewModel, qui lance son 1er appel API dans son init{}) ne soient
+        // construits. Un appel équivalent dans un LaunchedEffect(Unit) de AppRoot()
+        // arrive trop tard : la coroutine du LaunchedEffect ne démarre qu'après la
+        // composition initiale, donc après DashboardViewModel.init{} — le tout premier
+        // appel API partait avec un token vide -> 401 (constaté sur émulateur).
+        TokenManager.initialize(this)
+
         setContent {
             TennisBossTheme {
                 AppRoot()
@@ -132,18 +141,14 @@ fun AppRoot() {
     val chatVM: ChatViewModel = viewModel()
     val liveVM: LiveViewModel = viewModel()
 
-    // Le token est chargé depuis TokenManager (variables de build ou stockage chiffré).
+    // Le token est chargé dans MainActivity.onCreate() (avant setContent{}), pour être
+    // déjà en place lorsque les ViewModel se construisent — voir le commentaire là-bas.
     // baseUrl est déjà auto-détecté (localhost:8000 émulateur, ngrok sinon).
-    val context = LocalContext.current
     LaunchedEffect(Unit) {
-        TokenManager.initialize(context)
-
         // Ré-enregistre le token FCM à chaque démarrage : couvre le cas où le
         // token existait déjà avant l'ajout de cette fonctionnalité (onNewToken
         // ne se redéclenche pas pour un token inchangé), et rattrape un échec
-        // silencieux de TennisBossMessagingService.onNewToken. Doit s'exécuter
-        // APRÈS TokenManager.initialize (sinon ApiClient.apiToken est encore
-        // vide -> 401 sur /api/device/register, bug constaté et corrigé).
+        // silencieux de TennisBossMessagingService.onNewToken.
         FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
             android.util.Log.d("TennisBossFCM", "Token obtenu: $token")
             CoroutineScope(Dispatchers.IO).launch {

@@ -40,10 +40,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.tennisboss.app.data.CalibrationResponse
 import com.tennisboss.app.data.UpcomingMatch
 import com.tennisboss.app.data.ValueComparison
-import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SurfaceBadge
+import com.tennisboss.app.ui.components.ValueCard
 
-private val GoodColor = Color(0xFF00E5A0)
 private val AccentColor = Color(0xFF4F8CFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,7 +106,7 @@ private fun DashboardContent(
                 SectionHeader("💎 Meilleures opportunités", Icons.Default.Diamond)
             }
             items(values.take(3)) { valItem ->
-                ValueOpportunityCard(valItem, onClick = { onMatchClick(valItem.player1, valItem.player2, null) })
+                ValueCard(valItem, onClick = { onMatchClick(valItem.player1, valItem.player2, null) })
             }
         }
 
@@ -167,34 +166,6 @@ private fun StatItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
-    }
-}
-
-@Composable
-private fun ValueOpportunityCard(v: ValueComparison, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
-        elevation = CardDefaults.cardElevation(2.dp)
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(v.league, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                ConfidenceBadge(v.confidence_label, v.confidence)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text("${v.player1} vs ${v.player2}", fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Pari conseillé", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                    Text(v.best_side ?: "Pas de pick", color = GoodColor, fontWeight = FontWeight.Bold)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Edge %", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                    Text(String.format("%+.1f%%", v.best_ev), color = GoodColor, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                }
-            }
-        }
     }
 }
 
