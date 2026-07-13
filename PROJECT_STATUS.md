@@ -12,9 +12,9 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 | Android app | ~85% | 13 screens/ViewModels, MVVM, real error/loading states. No Room/offline (deliberately deferred). |
 | Testing | Backend 403 tests passing / Android 23 tests passing | See TEST_REPORT.md — coverage is uneven (7 of 13 Android ViewModels untested). |
 | Deployment (Docker/systemd/CI) | ~95% | Working GitHub Actions CI (backend pytest + Android unit tests), Dockerfile + compose, systemd units, DEPLOYMENT.md. |
-| Documentation hygiene | ~70% | `docs/AUDIT.md` didn't know about the dormant `app/` FastAPI service (see below) — a real, material gap in the project's own understanding of itself until this audit. |
+| Documentation hygiene | ~80% | `docs/AUDIT.md` didn't know about the dormant `app/` FastAPI service (see below) until this audit — **since removed**, closing that gap. |
 
-**Overall: ~85% toward a stable, production-usable app.** The gap to "RC1" is concentrated in test coverage, one real UI bug, a handful of dead-code/duplication cleanups, and a decision about the dormant `app/` package — not in missing core functionality.
+**Overall: ~87% toward a stable, production-usable app.** The gap to "RC1" is concentrated in test coverage (7 of 13 Android ViewModels still untested) and the remaining orphaned backend modules — not in missing core functionality.
 
 ## Working features (verified this session, not just claimed)
 
@@ -28,7 +28,7 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 
 1. **`SurfaceBadge` name collision** (Android) — two different Composables named identically: `ui/components/SurfaceBadge.kt` (keyed on surface: clay/hard/grass) vs. `ui/UpcomingScreen.kt:905` (keyed on tournament-name substring). Compiles fine today because of package scoping, but importing the wrong one silently gives wrong colors/logic. **Real bug risk, not yet a confirmed live bug.**
 2. **Dashboard "Meilleures opportunités" card shows contradictory tags** — observed live on-device: a match tagged `bonne` (good) sits next to `Pas de value` (no value) and a `HONEYPOT +23.0%` warning on the same card. Confusing to a real user; needs a UX/copy decision, not just a bug fix (see UI_REPORT.md).
-3. **Undocumented dormant `app/` FastAPI package** (~34 files: `app/core`, `app/trading`, `app/risk`, `app/analytics`) — a full quant/trading engine (Kelly sizing, drawdown alerts, portfolio Greeks, auto-bet engine) that `docs/AUDIT.md` never mentioned, disabled via systemd (`tennisboss-quant.service`, confirmed `inactive`), untested, but **still imported from production code** (`bot/clv.py`, `bot/paper_trading.py`, `bot/odds_live_feeder.py` pull from `app.trading.kelly_dynamic`). This is a real architectural loose end: either finish and test it, or cut the production import and delete it. See MASTER_TODO.md #1.
+3. ~~Undocumented dormant `app/` FastAPI package~~ — **removed 2026-07-13** with user sign-off, after confirming no reachable code depended on it (`bot/clv.py`'s import already had a working fallback; the two `bot/` files with hard imports were themselves dead code). Restore point: git tag `pre-app-removal-backup`. See MASTER_TODO.md #1.
 
 ## Missing features (deliberately deferred, not bugs)
 

@@ -32,8 +32,8 @@ Checked for the specific mistake pattern this session already caught once (a cur
 
 ## The dormant `app/` service, security angle
 
-`tennisboss-quant.service` is confirmed `inactive` via `systemctl`, so it is not currently an exposed attack surface. However, it exists, is untested, and its code (`app/api/chat_routes.py` etc.) has never been security-reviewed since it was deprioritized — if it is ever re-enabled without a fresh review, that would be the moment to re-run this checklist against it specifically. Flagging now so it isn't forgotten later. See `MASTER_TODO.md` #1.
+~~`tennisboss-quant.service`...~~ **Removed 2026-07-13** (user-confirmed, git tag `pre-app-removal-backup` as restore point) — no longer a latent attack surface to track. See `MASTER_TODO.md` #1.
 
 ## Summary
 
-No active secrets exposure, no transport-security gap, no authentication bypass found. The codebase's security posture is genuinely solid for its scale. The two items worth tracking are non-urgent: the alpha crypto dependency (stability, not a known CVE) and re-reviewing the dormant `app/` service if it's ever reactivated.
+No active secrets exposure, no transport-security gap, no authentication bypass found. The codebase's security posture is genuinely solid for its scale. The one item worth tracking is non-urgent: the alpha crypto dependency (stability, not a known CVE).

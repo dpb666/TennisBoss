@@ -5,15 +5,17 @@ Comment l'API TennisBoss (`bot/api.py`, port 8000) est exposée en permanence su
 après un reboot du PC. Procédure écrite pour être reproductible sur une
 nouvelle machine.
 
-> **`app/` (quant, port 8001) est désactivé (2026-07-11)** — c'était un second
-> backend FastAPI (moteur de trading/risque : `auto_bet_engine`, `hedge_manager`,
-> `portfolio_greeks`...), jamais relié à l'app Android, jamais testé, laissé
-> tourner sans qu'on l'audite. Confirmé abandonné par l'utilisateur lors d'un
-> audit senior-engineer du projet. `tennisboss-quant.service` a été stoppé et
-> désactivé (`systemctl stop/disable`) — pas supprimé, le code reste dans `app/`
-> si besoin de le reprendre un jour. `tennisboss-bot.service` n'en dépend pas
-> réellement (son `After=tennisboss-quant.service` n'est qu'un ordre de
-> démarrage, pas une dépendance dure) — vérifié fonctionnel sans lui.
+> **`app/` (quant, port 8001) a été supprimé (2026-07-13)**, après avoir été
+> désactivé le 2026-07-11. C'était un second backend FastAPI (moteur de
+> trading/risque : `auto_bet_engine`, `hedge_manager`, `portfolio_greeks`...),
+> jamais relié à l'app Android, jamais testé. Un audit a confirmé qu'aucun
+> code réellement atteignable n'en dépendait (`bot/clv.py` avait déjà un
+> fallback local pour `kelly_fraction` ; `bot/paper_trading.py` et
+> `bot/odds_live_feeder.py`, qui l'importaient sans fallback, n'étaient
+> eux-mêmes jamais importés par rien — supprimés avec lui). Point de
+> restauration : tag git `pre-app-removal-backup`. `tennisboss-bot.service`
+> n'en dépendait pas réellement (son `After=tennisboss-quant.service` n'était
+> qu'un ordre de démarrage, pas une dépendance dure).
 
 ## Vue d'ensemble
 
@@ -128,8 +130,10 @@ machine change — actuellement `User=alchemist`,
 | `tennisboss-tunnel` | `cloudflared tunnel run` (expose bot en public) | réseau |
 | `tennisboss-scheduler` | tâches planifiées (`bot.scheduler`) : learn 1h, ingest 6h, monitor 5m, **backup DB 6h** | réseau |
 
-`tennisboss-quant` (port 8001, `app/`) existe toujours dans `systemd/` mais est
-**stoppé et désactivé** (`systemctl disable`) — voir note en haut de ce document.
+`tennisboss-quant` (port 8001, `app/`) a été supprimé du repo (`systemd/` inclus)
+le 2026-07-13 — voir note en haut de ce document. Le service installé sur la
+machine reste stoppé/désactivé (`systemctl disable`) ; à désinstaller
+manuellement si besoin (`systemctl disable --now tennisboss-quant`).
 
 Installation (sur une nouvelle machine, en remplaçant `User=`/`WorkingDirectory=`
 dans les fichiers si besoin) :

@@ -38,7 +38,7 @@ Retrofit + OkHttp + Gson, `TokenManager` handles the `X-API-Token` header, `netw
 
 Flat module structure (58 files in `bot/`, no subpackages) with a clear separation: `api.py` (HTTP layer) → `predictor.py`/`features.py`/`elo.py` (model) → `db.py` (SQLite persistence) → a family of `*_feeder.py` modules (data ingestion, one per external source). This flat-file approach was deliberately chosen over restructuring into `bot/ml/` subpackages per `docs/AUDIT.md` §4 ("écartée") — a documented, reasoned decision, not neglect.
 
-**The one real architectural gap**: the dormant `app/` FastAPI package (see `PROJECT_STATUS.md` and `MASTER_TODO.md` #1) represents a second, competing architecture (async FastAPI + Pydantic vs. sync Flask) that was started, partially built (~34 files), and then abandoned/disabled — but not fully decoupled from `bot/`. This is the one place where "architecture" isn't singular right now.
+**The one real architectural gap**: the dormant `app/` FastAPI package (see `PROJECT_STATUS.md` and `MASTER_TODO.md` #1) represented a second, competing architecture (async FastAPI + Pydantic vs. sync Flask) that was started, partially built (~34 files), and then abandoned/disabled. **Resolved 2026-07-13** — removed with user sign-off after confirming it was already fully decoupled in practice.
 
 ## Error handling / state management
 
@@ -46,4 +46,4 @@ Backend: centralized auth (`before_request`), consistent `log()` calls, but heav
 
 ## Summary verdict
 
-The architecture is coherent and mostly well-reasoned for its actual scale — the main structural debt is (a) the orphaned `app/` FastAPI service pulling the codebase in two directions at once, and (b) the Android app's total absence of a Repository/DI layer, which is fine today but is exactly the seam that would need to exist before Room/offline could be added cleanly.
+The architecture is coherent and mostly well-reasoned for its actual scale — with the `app/` FastAPI service now removed, the main remaining structural note is the Android app's total absence of a Repository/DI layer, which is fine today but is exactly the seam that would need to exist before Room/offline could be added cleanly.

@@ -22,9 +22,10 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
 
 ### 3. Start Server
 ```bash
-python run.py quant
-# Or directly:
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+python3 run.py serve
+# Le polling Telegram (_tg_poll_loop, bot/api.py) démarre automatiquement
+# avec le serveur Flask si TELEGRAM_BOT_TOKEN est défini — pas de service
+# séparé à lancer (l'ancien service quant/FastAPI a été retiré le 2026-07-13).
 ```
 
 ### 4. Register Webhook (from outside WSL)

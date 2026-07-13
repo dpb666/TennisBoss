@@ -6,13 +6,12 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 
 ### 1. Decide the fate of the dormant `app/` FastAPI package
 - **Priority**: Critical
-- **Difficulty**: Medium (decision) / High (if fully finishing it) / Low (if cutting it)
-- **Estimated time**: 30 min (decision) + 2-4h (execute either path)
-- **Dependencies**: None — but blocks a clean answer to "is this repo production-ready"
-- **Status**: Not started
-- **Files involved**: `app/core/*`, `app/trading/*`, `app/risk/*`, `app/analytics/*`, `app/api/*`, `app/main.py`, `app/STATUS.md`, `bot/clv.py`, `bot/paper_trading.py`, `bot/odds_live_feeder.py` (all import from `app.trading.kelly_dynamic` etc.), `docker-compose.yml`, `requirements.txt`
-- **Why it matters**: An entire second backend service exists, is disabled (`tennisboss-quant.service` confirmed `inactive`), untested, and undocumented in `docs/AUDIT.md` — yet production code still imports from it. This is the single largest gap between "the docs say the project is understood" and reality.
-- **Recommended path**: cut the production dependency (replace the 3 `app.trading.kelly_dynamic` imports with a small local Kelly-fraction function in `bot/`, since it's presumably a short formula) and delete `app/` entirely, rather than resurrecting and testing a whole second FastAPI service for a feature (auto-bet execution) explicitly out of scope per `docs/AUDIT.md` ("NON utilisée pour du placement automatique de paris"). Requires user sign-off before deleting — this is a "could permanently change project behavior" decision.
+- **Status**: **Done — removed**, with explicit user sign-off (2026-07-13).
+- **What was found on closer inspection** (corrected the initial framing): `bot/clv.py`'s import of `app.trading.kelly_dynamic` was already wrapped in `try/except Exception` with a working local fallback — it was inert in production, not a real dependency. `bot/paper_trading.py` and `bot/odds_live_feeder.py` had hard, unconditional imports from `app/` with no fallback, but neither was itself imported by anything else in the codebase — they were dead code, not live callers.
+- **What was removed**: `app/` (~34 files), `bot/paper_trading.py`, `bot/odds_live_feeder.py`, their dedicated test files (`tests/test_analytics.py`, `tests/test_risk_advanced.py`, `tests/test_trading.py` — tested `app/` exclusively, would otherwise break test collection), `run.py`'s `cmd_quant` + `quant` subparser, `systemd/tennisboss-quant.service`, `fastapi`/`uvicorn`/`pydantic` from `requirements.txt` (confirmed unused elsewhere), and `QUICK_START.md` (entirely about the removed service). `DEPLOYMENT.md` and `TELEGRAM_SETUP.md` updated to remove stale instructions.
+- **Safety net**: annotated git tag `pre-app-removal-backup` created before any deletion — `git checkout pre-app-removal-backup` restores everything.
+- **Verified**: `python3 -m pytest` 357/357 passed (down from 403 — the 46 removed tests belonged to the 3 deleted `app/`-only test files, not a regression), `python3 -c "import run"` and `import bot.api` both succeed.
+- **Left untouched, flagged for separate review**: `REALTIME-ROI.md` (331-line doc, partially describes still-valid `bot/realtime.py` functionality mixed with the removed FastAPI serving layer — needs a proper rewrite, not a mechanical find-replace) and `AI_CHAT_AUDIT.md`/`RELEASE_NOTES_CHAT.md` (one diagram label and a historical release note respectively — lower priority, and the latter shouldn't be revised as history).
 
 ### 2. Fix `SurfaceBadge` name collision (Android)
 - **Priority**: Critical

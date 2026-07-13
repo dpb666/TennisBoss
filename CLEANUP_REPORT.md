@@ -8,9 +8,9 @@ _Verified 2026-07-13 by grepping actual reference counts, not inferred from nami
 |---|---|---|---|
 | `bot/ai_resolver.py` | 401 | 0 outside its own file | Dead — full AI-based player-resolution pipeline never wired to anything |
 | `bot/alerts.py` | 145 | 0 outside its own file | Dead — sharp-signal/hedge/drawdown alerts; superseded by `bot/realtime_alerts.py` which IS used. Name collision risk. |
-| `bot/telegram_poll.py` | 213 | 0 anywhere | Fully dead — zero references, not even from the dormant `app/` package |
-| `bot/telegram_handler.py` | 158 | 1: `app/api/chat_routes.py:24` (`from bot import telegram_handler as tg`) | Dead **in practice** — its only caller lives inside the disabled `app/` FastAPI service (`tennisboss-quant.service`, confirmed `inactive`) |
-| `app/` (~34 files) | — | disabled service, but 3 files in `bot/` still import from it | See `MASTER_TODO.md` #1 — not simple dead code, needs a decision |
+| `bot/telegram_poll.py` | 213 | 0 anywhere | Fully dead — zero references. **Left in place** (user chose to keep the 4 orphaned modules for now). |
+| `bot/telegram_handler.py` | 158 | was 1, from the now-deleted `app/` | Its only caller was removed along with `app/` — now also fully dead. **Left in place** (same decision). |
+| `app/` (~34 files) | — | none reachable (see correction below) | **Removed 2026-07-13**, user-confirmed, see `MASTER_TODO.md` #1. |
 
 Correction from an earlier draft of this report: I initially assumed `bot/telegram_poll.py` was the live one because `bot/api.py` runs a `_tg_poll_loop` background thread (`api.py:3237,3328`) — but that function is defined **inline inside `api.py` itself**, not imported from either `telegram_poll.py` or `telegram_handler.py`. So there are actually **three independent Telegram implementations**: the inline one in `api.py` (live), `bot/telegram_poll.py` (fully dead), and `bot/telegram_handler.py` (reachable only from the dormant `app/` package, so dead in any currently-running configuration). Verified via `grep -rn "telegram_poll\|telegram_handler" --include=*.py .` across the whole repo before asserting this.
 
