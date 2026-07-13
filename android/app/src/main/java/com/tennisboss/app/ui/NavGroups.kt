@@ -73,12 +73,16 @@ fun ValueGroupScreen(onMatchClick: (String, String, String?) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 },
+                modifier = Modifier.testTag("value_tab_value"),
                 text = { Text("Value", maxLines = 1, overflow = TextOverflow.Ellipsis) })
             Tab(selected = subTab == 1, onClick = { subTab = 1 },
+                modifier = Modifier.testTag("value_tab_scanner"),
                 text = { Text("Scanner", maxLines = 1, overflow = TextOverflow.Ellipsis) })
             Tab(selected = subTab == 2, onClick = { subTab = 2 },
+                modifier = Modifier.testTag("value_tab_stats"),
                 text = { Text("Stats", maxLines = 1, overflow = TextOverflow.Ellipsis) })
             Tab(selected = subTab == 3, onClick = { subTab = 3 },
+                modifier = Modifier.testTag("value_tab_edge"),
                 text = { Text("Edge", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {

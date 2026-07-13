@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -102,6 +103,7 @@ fun ValueScreen(
                     Button(
                         onClick = { vm.load() },
                         enabled = vm.state !is ValueUiState.Loading,
+                        modifier = Modifier.testTag("value_refresh"),
                     ) { Text("Rafraîchir") }
                 }
             }
@@ -109,8 +111,10 @@ fun ValueScreen(
 
         TabRow(selectedTabIndex = selectedTab) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
+                modifier = Modifier.testTag("value_subtab_today"),
                 text = { Text("Aujourd'hui") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
+                modifier = Modifier.testTag("value_subtab_history"),
                 text = { Text("Historique") })
         }
 
@@ -143,6 +147,7 @@ private fun ValuePicksTab(
                 selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
                 selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
             ),
+            modifier = Modifier.testTag("value_chip_confidence"),
         )
 
         PullToRefreshBox(
@@ -256,7 +261,7 @@ private fun ValueHistoryTab(vm: ValueViewModel) {
                 }
             }
             else -> {
-                Button(onClick = { vm.loadHistory() }) { Text("Charger l'historique") }
+                Button(onClick = { vm.loadHistory() }, modifier = Modifier.testTag("value_load_history")) { Text("Charger l'historique") }
             }
         }
     }
