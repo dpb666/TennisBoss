@@ -38,7 +38,7 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 ## Technical debt
 
 - **Orphaned modules, confirmed zero references anywhere** (safe to delete or explicitly document as future work): `bot/ai_resolver.py` (401 lines), `bot/alerts.py` (145 lines — dangerously similar name to the actually-used `bot/realtime_alerts.py`), `bot/telegram_handler.py` + `bot/telegram_poll.py` (two competing unused Telegram integrations).
-- Heavy `except Exception: pass` silent-swallow pattern in `bot/api.py` (36 occurrences) — mostly guarding legitimately optional paths, but failures are invisible with zero log trace.
+- ~~Heavy `except Exception: pass` silent-swallow pattern in `bot/api.py` (31 occurrences)~~ — **fixed this session**: 26 now log a specific `WARN` message, 3 left intentionally silent with a documented reason (see `MASTER_TODO.md` #7). Not yet deployed to the live service (needs a restart).
 - Android: `StatCard` duplicated byte-for-byte in `EdgeScreen.kt:183` and `PerformanceScreen.kt:320`; `RecentRow` likely duplicated the same way.
 - `androidx.security:security-crypto:1.1.0-alpha06` — still alpha, used for token storage (`TokenManager.kt`) in what is otherwise a production app.
 - Compose BOM (`2024.09.03`) is over a year old relative to today; likely several releases behind.

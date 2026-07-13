@@ -166,8 +166,8 @@ def _load_state() -> None:
         _surf_blends = _json.loads(db.get_meta("elo_blend_by_surface") or "{}")
         if _surf_blends:
             _MEM["elo_blend_surface"] = {k: float(v) for k, v in _surf_blends.items()}
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"Chargement elo_blend_by_surface échoué ({exc}) — repli sur le blend global.", "WARN")
     try:
         _PLATT_A = float(db.get_meta("platt_a") or 1.0)
     except (TypeError, ValueError):
@@ -181,15 +181,15 @@ def _load_state() -> None:
     try:
         mistake_learner.load_from_db()
         mistake_learner.update()
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"mistake_learner (zones dangereuses) échoué au démarrage ({exc}).", "WARN")
 
     # Intelligence autonome : blacklist joueurs + surfaces en danger
     try:
         intelligence.load_from_db()
         intelligence.run_cycle(send_telegram=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"intelligence (blacklist/surface danger) échoué au démarrage ({exc}).", "WARN")
 
 
 def _calib(p_match: float) -> float:
@@ -753,8 +753,8 @@ def api_predict():
 
     try:
         db.log_prediction(n1, n2, r["prob1"] / 100.0, r["favorite"], source="api")
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log(f"db.log_prediction échoué pour {n1} vs {n2} ({exc}) — prédiction non archivée.", "WARN")
 
     payload = {
         "player1": _player_payload(n1) if n1 not in unknown else {"name": n1, "tour": "", "matches": 0, "confident": False},
@@ -787,8 +787,8 @@ def api_predict():
         wa = wp.analyze(_MEM, n1, p1_prof, n2, p2_prof,
                         w_data, tournament, surface_req or "hard")
         payload["weather_analysis"] = wa
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log(f"weather_profile.analyze échoué pour {n1} vs {n2} (/api/predict) ({exc}) — ignoré.", "WARN")
 
     return jsonify(payload)
 
@@ -930,8 +930,8 @@ def api_upcoming():
                     added_live += 1
             if added_live:
                 log(f"Inplay inject: {added_live} matchs live ITF/UTR ajoutés à upcoming.", "INFO")
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"Inplay inject (matchs live ITF/UTR) échoué ({exc}) — ignoré.", "WARN")
 
     # Priorité ATP/WTA avant Challenger/ITF/UTR dans l'ordre de troncature :
     # le cap `limit` (défaut 100) coupe la liste avant la fin, et le volume
@@ -1069,8 +1069,8 @@ def api_upcoming():
                     wa = wp.analyze(_MEM, n1, p1_prof, n2, p2_prof,
                                     w, f["tournament"], surface or "hard")
                     item["weather_analysis"] = wa
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log(f"weather_profile.analyze échoué pour {n1} vs {n2} ({exc}) — ignoré.", "WARN")
 
             # ── H2H résumé rapide ─────────────────────────────────────────────
             try:
@@ -1081,8 +1081,8 @@ def api_upcoming():
                     "wins1": hw1, "wins2": hw2, "total": hw1 + hw2,
                     "last_winner": h2h_rows[0]["winner"] if h2h_rows else None,
                 }
-            except Exception:
-                pass
+            except Exception as exc:
+                log(f"H2H échoué pour {n1} vs {n2} ({exc}) — ignoré.", "WARN")
 
             # ── Ranking ───────────────────────────────────────────────────────
             item["rank1"] = _MEM["players"].get(n1, {}).get("rank")
@@ -1146,8 +1146,8 @@ def api_live():
                 if _mw:
                     _odds_fetched[str(_ev["id"])] = _mw
                     _odds_budget -= 1
-            except Exception:
-                pass
+            except Exception as exc:
+                log(f"fetch_match_winner échoué pour event {_ev.get('id')} ({exc}) — ignoré.", "WARN")
 
     out = []
     for e in live_events:
@@ -1216,10 +1216,10 @@ def api_live():
                          "sets": f"{h['sets_home']}-{h['sets_away']}"}
                         for h in hist
                     ]
-                except Exception:  # noqa: BLE001
-                    pass
-            except Exception:  # noqa: BLE001
-                pass
+                except Exception as exc:  # noqa: BLE001
+                    log(f"record_live_prob/history échoué pour event {e.get('id')} ({exc}) — ignoré.", "WARN")
+            except Exception as exc:  # noqa: BLE001
+                log(f"Prédiction in-play échouée pour event {e.get('id')} ({exc}) — ignoré.", "WARN")
 
         # ── Cotes live (pré-chargées pour ATP/WTA uniquement) ────────────────
         live_mw = _odds_fetched.get(str(e["id"]))
@@ -1290,7 +1290,8 @@ def api_inplay_best():
             f1 = features.feature_vector(features.get_profile(_MEM, n1))
             f2 = features.feature_vector(features.get_profile(_MEM, n2))
             r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_ip_surf)
-        except Exception:
+        except Exception as exc:
+            log(f"Prédiction échouée pour {n1} vs {n2} (inplay/best) ({exc}) — candidat ignoré.", "WARN")
             continue
 
         conf = r.get("confidence", 0.0)
@@ -1313,8 +1314,8 @@ def api_inplay_best():
         if len(candidates) < 20:
             try:
                 live_mw = odds_api.fetch_match_winner(e["id"])
-            except Exception:
-                pass
+            except Exception as exc:
+                log(f"fetch_match_winner échoué pour event {e.get('id')} (inplay/best) ({exc}) — ignoré.", "WARN")
 
         edge: Optional[float] = None
         fav_odds: Optional[float] = None
@@ -1465,8 +1466,8 @@ def api_inplay_markets():
                 "odds": mw_odds,
                 "has_real_odds": mw_odds is not None,
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"Marché 'Vainqueur du match' échoué ({exc}) — omis.", "WARN")
 
         # ── Market 1 : Gagnant set actuel ──────────────────────────────────────
         lead = games_h - games_a
@@ -1749,8 +1750,8 @@ def api_value():
                 _hours_ahead = (_e_dt - _now_utc).total_seconds() / 3600
                 if _hours_ahead > _MAX_HOURS_AHEAD or _hours_ahead < -3.0:
                     continue  # trop lointain ou déjà commencé depuis >3h
-            except Exception:
-                pass
+            except Exception as exc:
+                log(f"Parsing date événement échoué ({_e_date!r}: {exc}) — filtre temporel ignoré.", "WARN")
         if odds_calls >= MAX_ODDS_CALLS:
             break
         mw = odds_api.fetch_match_winner(e["id"])
@@ -1809,8 +1810,8 @@ def api_value():
             fav_odds = ho if r["favorite"] == n1 else ao
             try:
                 db.log_bet(e.get("date", ""), n1, n2, r["favorite"], fav_odds)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log(f"db.log_bet échoué pour {n1} vs {n2} ({exc}) — pari non archivé.", "WARN")
 
         # EV en % pour filtrage et affichage.
         best_ev_pct = round(best_ev * 100, 1)
@@ -1868,8 +1869,8 @@ def api_value():
                               n2, features.get_profile(_MEM, n2),
                               None, _leag_name, _ev_surf or "hard")
             _honeypot = _wa.get("honeypot")
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log(f"weather_profile.analyze (honeypot) échoué pour {n1} vs {n2} ({exc}) — ignoré.", "WARN")
 
         # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
         if is_value:
@@ -1883,8 +1884,8 @@ def api_value():
                                   pick_odds, best_ev_pct,
                                   league=_leag_name, surface=_surf_log,
                                   kelly_u=_kelly_u_log)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log(f"db.log_value_pick échoué pour {n1} vs {n2} ({exc}) — value pick non archivé.", "WARN")
             # CLV : sème le pick à la cote de décision.
             # NE PAS appeler refresh_closing ici — la closing line doit être
             # captée APRÈS la décision par le _clv_closing_loop (toutes les 20min)
@@ -1895,8 +1896,8 @@ def api_value():
                 clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
                               pick_odds, pick_prob, r["confidence"],
                               honeypot=_honeypot)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log(f"clv.seed_pick échoué pour {n1} vs {n2} ({exc}) — CLV non semé.", "WARN")
 
         # Kelly criterion (fraction 1/4 pour limiter le risque) :
         # f* = (p*b - q) / b  où b = cote-1, p = proba blendée du côté conseillé
@@ -1966,8 +1967,8 @@ def api_value():
                     import threading as _th
                     _th.Thread(target=_alerter.on_value_pick,
                                args=(_pick_entry,), daemon=True).start()
-            except Exception:
-                pass
+            except Exception as exc:
+                log(f"Alerte Telegram (value pick) échouée pour {n1} vs {n2} ({exc}) — ignorée.", "WARN")
 
     # Les meilleures values d'abord.
     out.sort(key=lambda c: c["best_ev"], reverse=True)
@@ -2175,8 +2176,8 @@ def api_backfill():
                     (pred_fav, pred_prob1, correct, r["id"])
                 )
             updated += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"Backfill pred_favorite échoué pour settled_matches id={r.get('id')} ({exc}) — ignoré.", "WARN")
 
     metrics = settlement.calibration_metrics()
     if metrics["n"] > 0:
@@ -2201,8 +2202,8 @@ def api_settlement_run():
     if metrics["n"] > 0:
         try:
             db.save_calibration(metrics)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log(f"db.save_calibration échoué ({exc}) — métriques non persistées.", "WARN")
     return jsonify({"settlement": summary, "calibration": metrics, "fit": fit})
 
 
@@ -2557,8 +2558,8 @@ def api_inplay_picks_log():
                 odds_home = lo["home"]
                 odds_away = lo["away"]
                 odds_book = ", ".join(lo.get("books", []))
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"Lecture cache live_matches échouée pour event {eid} ({exc}) — repli sur fetch direct.", "WARN")
 
     if not odds_home and eid:
         # 2. Fallback : appel direct odds-api.io Betfair Exchange
@@ -2568,8 +2569,8 @@ def api_inplay_picks_log():
                 odds_home = mw["home_odds"]
                 odds_away = mw["away_odds"]
                 odds_book = "Betfair Exchange"
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"fetch_match_winner échoué pour event {eid} (log manuel) ({exc}) — odds non enrichies.", "WARN")
 
     # Dériver odds du côté misé si pas fourni explicitement
     pick_odds = body.get("odds")
@@ -2752,8 +2753,8 @@ def _value_scanner_loop(interval: int = 90) -> None:
                         if hours_ahead > 6.0 or hours_ahead < -1.0:
                             _rej_time += 1
                             continue
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log(f"Parsing date événement échoué ({_e_date!r}: {exc}) — filtre temporel ignoré (scanner).", "WARN")
 
                 # Déjà alerté = pas la peine de re-fetcher les cotes
                 if eid in _alerted:
@@ -2795,8 +2796,8 @@ def _value_scanner_loop(interval: int = 90) -> None:
                 try:
                     db.record_market_snapshot(eid, n1, n2, mw["home_odds"], mw["away_odds"],
                                               hours_ahead=round(hours_ahead, 2) if hours_ahead is not None else None)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    log(f"record_market_snapshot échoué pour {n1} vs {n2} ({exc}) — ligne non archivée.", "WARN")
 
                 # Guard cross-genre
                 t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
@@ -2811,7 +2812,8 @@ def _value_scanner_loop(interval: int = 90) -> None:
                     _lg_name = (e.get("league") or {}).get("name", "") if isinstance(e.get("league"), dict) else str(e.get("league", ""))
                     _surf = e.get("surface") or config.surface_from_league(_lg_name)
                     r = predictor.predict(_MEM, n1, f1, n2, f2, surface=_surf or None)
-                except Exception:
+                except Exception as exc:
+                    log(f"Prédiction échouée pour {n1} vs {n2} (scanner) ({exc}) — événement ignoré.", "WARN")
                     continue
 
                 # Seuil de confiance : plus strict pour ITF (rang 3)
@@ -2890,8 +2892,8 @@ def _value_scanner_loop(interval: int = 90) -> None:
                         n2, features.get_profile(_MEM, n2),
                         None, _lg_name, _surf or "hard",
                     ).get("honeypot")
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    log(f"weather_profile.analyze (honeypot) échoué pour {n1} vs {n2} (scanner) ({exc}) — ignoré.", "WARN")
                 try:
                     db.log_value_pick(e.get("date", ""), n1, n2, best_side,
                                       pick_odds, best_ev_pct, league=_lg_name,
@@ -2900,8 +2902,8 @@ def _value_scanner_loop(interval: int = 90) -> None:
                     clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
                                   pick_odds, pb_pick, r["confidence"],
                                   honeypot=_sc_honeypot)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log(f"log_value_pick/seed_pick échoué pour {n1} vs {n2} (scanner) ({exc}) — pick non archivé.", "WARN")
 
                 # Alerte Telegram immédiate (priorité haute = scanner temps réel)
                 alerter = _ra.get()
@@ -3159,7 +3161,8 @@ def _inplay_settle_loop(interval: int = 300) -> None:
             try:
                 live_events = odds_api.fetch_live_events()
                 live_ids = {str(e.get("event_id", "")) for e in live_events}
-            except Exception:
+            except Exception as exc:
+                log(f"fetch_live_events échoué (inplay settle loop) ({exc}) — traité comme aucun match live.", "WARN")
                 live_ids = set()
             settled = db.auto_settle_picks(live_ids)
             if settled:
@@ -3288,8 +3291,8 @@ def _digest_loop() -> None:
                     from . import digest as _digest
                     _digest.send_daily_digest(today)
                     all_settled_notified = today
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"Digest loop (notifications quotidiennes) échoué ({exc}).", "WARN")
 
 
 def _data_refresh_loop() -> None:
@@ -3341,8 +3344,8 @@ def _tg_poll_loop() -> None:
             _req.post(f"{base}/sendMessage",
                       json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
                       timeout=10)
-        except Exception:
-            pass
+        except Exception as exc:
+            log(f"Envoi Telegram échoué vers chat {chat_id} ({exc}).", "WARN")
 
     while True:
         try:
@@ -3350,7 +3353,8 @@ def _tg_poll_loop() -> None:
                          params={"offset": offset, "timeout": 10, "allowed_updates": ["message"]},
                          timeout=16)
             updates = r.json().get("result", []) if r.ok else []
-        except Exception:
+        except Exception as exc:
+            log(f"Telegram getUpdates échoué ({exc}) — retry dans 5s.", "WARN")
             _time.sleep(5)
             continue
         for upd in updates:
@@ -3403,6 +3407,13 @@ def _tg_poll_loop() -> None:
                     "_Ou posez n'importe quelle question en texte libre._"
                 )
             elif text.startswith("/clear"):
+                # NOTE (audit 2026-07-13) : ce endpoint vit dans le service FastAPI
+                # `app/` (port 8001, tennisboss-quant.service), actuellement DÉSACTIVÉ
+                # (voir MASTER_TODO.md #1) -> cet appel échoue systématiquement
+                # aujourd'hui. Pas de log ici : ce n'est pas une panne inattendue,
+                # c'est la conséquence connue du service désactivé ; le message
+                # "Historique effacé" reste affiché car côté Telegram l'historique
+                # de CETTE conversation (géré ailleurs) est bien effacé.
                 try:
                     _req.post(f"http://127.0.0.1:8001/tg-sessions/{chat_id}/clear", timeout=5)
                 except Exception:

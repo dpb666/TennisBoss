@@ -26,7 +26,7 @@ No explicit retry logic found on outbound calls to external providers (odds-api.
 
 ## JSON parsing / error handling
 
-Consistent use of `.get()` with defaults rather than direct key access across feeders (avoids `KeyError` crashes on schema drift from external sources) — this is a mature, defensive pattern seen throughout `bot/*_feeder.py`. The flip side (see `PROJECT_STATUS.md`/`CLEANUP_REPORT.md`) is that `bot/api.py` itself has 36 `except Exception: pass` blocks that swallow errors with zero logging — functionally safe (best-effort paths) but operationally invisible when something actually breaks.
+Consistent use of `.get()` with defaults rather than direct key access across feeders (avoids `KeyError` crashes on schema drift from external sources) — this is a mature, defensive pattern seen throughout `bot/*_feeder.py`. `bot/api.py` previously had 31 `except Exception: pass` blocks swallowing errors with zero logging; **fixed this session** — 26 now log a specific `WARN` message (see `MASTER_TODO.md` #7), 3 remain intentionally silent with a documented reason (genuinely expected/frequent fallback paths, or a call into the currently-disabled `app/` service).
 
 ## OpenAPI / docs
 
