@@ -57,6 +57,7 @@ import com.tennisboss.app.data.WeatherAnalysis
 import com.tennisboss.app.ui.components.BetBuilderView
 import com.tennisboss.app.ui.components.ConfidenceBadge
 import com.tennisboss.app.ui.components.SkeletonList
+import com.tennisboss.app.ui.components.SurfaceBadge
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -898,24 +899,6 @@ fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
                 )
             }
         }
-    }
-}
-
-@Composable
-fun SurfaceBadge(tour: String) {
-    val color = when {
-        tour.contains("Clay", ignoreCase = true)  -> Color(0xFFD84315)
-        tour.contains("Grass", ignoreCase = true) -> Color(0xFF2E7D32)
-        else                                       -> Color(0xFF1565C0)
-    }
-    Surface(color = color.copy(alpha = 0.1f), shape = CircleShape,
-        modifier = Modifier.clip(CircleShape)) {
-        Text(
-            text = if (tour.length > 10) tour.take(10) + "…" else tour,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = color, fontWeight = FontWeight.Bold,
-        )
     }
 }
 
