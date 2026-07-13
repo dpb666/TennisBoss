@@ -32,12 +32,12 @@ Already-completed extractions from earlier this session (for reference, not re-f
 
 ## Deprecated APIs
 
-- `bot/db.py:1367` — `datetime.datetime.utcnow()` (deprecated since Python 3.12, still functional, surfaces as a `DeprecationWarning` in every test run). Trivial fix: `datetime.datetime.now(datetime.UTC)`.
-- Android: `Icons.Filled.ArrowBack` and `Icons.Filled.TrendingUp` (used in `MatchDetailScreen.kt:51,166,191`) are deprecated in favor of `Icons.AutoMirrored.Filled.*` — currently only compiler warnings, not errors.
+- ~~`bot/db.py` — `datetime.datetime.utcnow()`~~ — **Fixed**: 3 sites (not 1 as an earlier draft of this report said — corrected after grepping the whole file), all in `bot/db.py` (dedup window + settlement cutoff/stale_cutoff). Changed to `datetime.datetime.now(datetime.timezone.utc)`, matching the convention already used elsewhere in `bot/api.py`/`bot/clv.py` (not `datetime.UTC`, which is Python 3.11+ only and inconsistent with the rest of the codebase). Verified the `ts` column comparisons these feed (`inplay_picks.ts DEFAULT strftime('%Y-%m-%dT%H:%M:%S','now')`, a naive string) aren't meaningfully affected — the added `+00:00` suffix is the same class of harmless lexicographic noise the naive `.isoformat()` microseconds suffix already introduced, and these are multi-hour dedup/staleness windows, not exact-time comparisons.
+- ~~Android: `Icons.Filled.ArrowBack` and `Icons.Filled.TrendingUp`~~ — **Fixed**: `MatchDetailScreen.kt:53,168,193` now use `Icons.AutoMirrored.Filled.ArrowBack`/`TrendingUp` via explicit imports (which take precedence over the existing `filled.*` wildcard import, avoiding ambiguity). Verified: `compileDebugKotlin` + `testDebugUnitTest` (54/54) pass.
 
 ## Recommended actions (see MASTER_TODO.md for priority/time estimates)
 
-1. Delete `bot/ai_resolver.py`, `bot/alerts.py`, `bot/telegram_handler.py` — **after user confirmation** (never delete without asking, per project convention).
-2. Rename the `UpcomingScreen.kt` `SurfaceBadge` to avoid the collision (higher priority than plain duplication — this one risks a silent wrong-behavior bug, not just extra maintenance).
-3. Extract `StatCard`/`RecentRow` to `ui/components/`.
-4. Fix the two deprecated-API one-liners (`utcnow()`, Compose icon imports) opportunistically — low risk, low value, do only if touching those files for another reason.
+1. Delete `bot/ai_resolver.py`, `bot/alerts.py`, `bot/telegram_handler.py`, `bot/telegram_poll.py` — user explicitly said **leave them for now** (2026-07-13); not a to-do, a settled decision. Revisit only if asked.
+2. ~~Rename the `UpcomingScreen.kt` `SurfaceBadge` to avoid the collision~~ — done.
+3. ~~Extract `StatCard`/`RecentRow` to `ui/components/`~~ — done (`RecentRow` turned out not to need it).
+4. ~~Fix the two deprecated-API one-liners~~ — done.

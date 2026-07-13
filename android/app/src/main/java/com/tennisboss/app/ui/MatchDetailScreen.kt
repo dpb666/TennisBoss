@@ -6,6 +6,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -48,7 +50,7 @@ fun MatchDetailScreen(
                 title = { Text("Analyse Premium", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Retour")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                     }
                 }
             )
@@ -163,7 +165,7 @@ private fun PremiumSignalsSection(insight: InsightResponse) {
             SignalCard(Icons.Default.Star, "Clutch : ${c.player}", desc, GoodColor)
         }
         insight.opponent_quality_signals.forEach { o ->
-            SignalCard(Icons.Default.TrendingUp, "Qualité opposition : ${o.player}", o.direction, AccentColor)
+            SignalCard(Icons.AutoMirrored.Filled.TrendingUp, "Qualité opposition : ${o.player}", o.direction, AccentColor)
         }
     }
 }
@@ -188,7 +190,7 @@ private fun SignalCard(icon: ImageVector, title: String, desc: String, color: Co
 @Composable
 private fun FormSection(p1: PlayerDetail, p2: PlayerDetail, insight: InsightResponse) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionTitle("📈 Forme & Momentum", Icons.Default.TrendingUp)
+        SectionTitle("📈 Forme & Momentum", Icons.AutoMirrored.Filled.TrendingUp)
         insight.form_signals.forEach { sig ->
             val color = if (sig.direction == "surperformance") GoodColor else WarnColor
             Text(

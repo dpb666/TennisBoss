@@ -1373,7 +1373,7 @@ def log_inplay_pick(player1: str, player2: str, league: str,
             ).fetchone()
         else:
             import datetime as _dt
-            dedup_window = (_dt.datetime.utcnow() - _dt.timedelta(hours=24)).isoformat()
+            dedup_window = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=24)).isoformat()
             existing = conn.execute(
                 """SELECT id FROM inplay_picks
                    WHERE player1=? AND player2=? AND pick=? AND result IS NULL
@@ -1503,8 +1503,8 @@ def auto_settle_picks(live_event_ids: set) -> List[Dict]:
     """
     import datetime as _dt
     settled_out = []
-    cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=2)).isoformat()
-    stale_cutoff = (_dt.datetime.utcnow() - _dt.timedelta(hours=48)).isoformat()
+    cutoff = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)).isoformat()
+    stale_cutoff = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=48)).isoformat()
 
     # Void picks vieux de >48h sans résultat (match terminé depuis longtemps)
     with connect() as conn:
