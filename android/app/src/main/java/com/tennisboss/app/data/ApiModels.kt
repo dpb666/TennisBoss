@@ -203,6 +203,13 @@ data class FatigueSignal(
     val window_days: Int = 14,
 )
 
+/** Jours de repos avant le match (Sport Intelligence Layer), informatif. */
+data class RestDaySignal(
+    val player: String = "",
+    val rest_days: Int = 0,
+    val flag: String = "",
+)
+
 /** Qualité des adversaires (Sport Intelligence Layer), informatif. */
 data class OpponentQualitySignal(
     val player: String = "",
@@ -239,6 +246,7 @@ data class InsightResponse(
     val factors: List<InsightFactor> = emptyList(),
     val form_signals: List<FormSignal> = emptyList(),
     val fatigue_signals: List<FatigueSignal> = emptyList(),
+    val rest_days_signals: List<RestDaySignal> = emptyList(),
     val opponent_quality_signals: List<OpponentQualitySignal> = emptyList(),
     val clutch_signals: List<ClutchSignal> = emptyList(),
     val sentiment_signals: List<SentimentSignal> = emptyList(),
