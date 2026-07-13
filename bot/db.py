@@ -344,6 +344,39 @@ def archive_matches(matches: List[Dict]) -> int:
     return after - before
 
 
+def rename_players_in_matches(rename_map: Dict[str, str]) -> int:
+    """Renomme winner/loser dans matches selon rename_map (alias -> canonique).
+
+    Utilisé par la fusion de profils dupliqués (bot/dedupe_players.py) :
+    une fois les alias renommés vers le nom canonique, elo.build_dynamic()
+    rejoue toute la DB et produit directement un historique ELO unifié pour
+    ce joueur, sans qu'il soit nécessaire de fusionner les ratings à la main.
+    """
+    if not rename_map:
+        return 0
+    total = 0
+    with connect() as conn:
+        for alias, canon in rename_map.items():
+            total += conn.execute(
+                "UPDATE matches SET winner=? WHERE winner=?", (canon, alias)).rowcount
+            total += conn.execute(
+                "UPDATE matches SET loser=? WHERE loser=?", (canon, alias)).rowcount
+    return total
+
+
+def delete_players(names: List[str]) -> int:
+    """Supprime des lignes de la table players (alias fusionnés — voir
+    bot/dedupe_players.py). sync_from_memory() ne fait qu'upsert, jamais de
+    DELETE, donc les alias orphelins doivent être nettoyés explicitement."""
+    if not names:
+        return 0
+    total = 0
+    with connect() as conn:
+        for n in names:
+            total += conn.execute("DELETE FROM players WHERE name=?", (n,)).rowcount
+    return total
+
+
 def archive_historical_odds(rows: List[Dict]) -> int:
     """Insère les cotes historiques (tennis-data.co.uk) — ignore les doublons.
 

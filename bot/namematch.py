@@ -25,9 +25,20 @@ def _norm(s: str) -> str:
 def split_name(name: str) -> Tuple[str, str]:
     """Renvoie (initiale_prenom, nom_de_famille) normalisés.
 
-    Gère les deux formats rencontrés :
-      "Alexander Zverev" / "A. Zverev"   -> prénom d'abord
+    Gère les formats rencontrés :
+      "Alexander Zverev" / "A. Zverev"   -> prénom (ou initiale) d'abord
+      "Andreeva M."                      -> nom de famille D'ABORD, initiale
+                                            ensuite (tennis-data.co.uk)
       "Zverev, Alexander"                -> nom de famille d'abord (virgule)
+
+    Bug corrigé (2026-07-12) : sans détection du token-initiale, "Andreeva M."
+    était compris comme prénom="andreeva"/nom="m" (à l'envers) — deux joueurs
+    identiques ingérés par des sources différentes ("Andreeva M." via
+    tennisdata_feeder vs "Mirra Andreeva" via ESPN/Sackmann) ne se
+    rejoignaient jamais dans l'index, créant deux profils ELO/EMA distincts
+    pour la même personne. On détecte maintenant l'initiale par sa LONGUEUR
+    (1 lettre) plutôt que par sa position : le token le plus court est
+    l'initiale, l'autre le nom de famille, quelle que soit sa place.
     """
     raw = name or ""
     if "," in raw:
@@ -41,7 +52,9 @@ def split_name(name: str) -> Tuple[str, str]:
         return "", ""
     if len(parts) == 1:
         return "", parts[0]
-    return parts[0][:1], parts[-1]
+    if len(parts[-1]) == 1 and len(parts[0]) > 1:
+        return parts[-1], parts[0]  # "Andreeva M." -> init="m", nom="andreeva"
+    return parts[0][:1], parts[-1]  # "Alexander Zverev" / "A Zverev"
 
 
 def build_index(names: List[str], counts: Dict[str, int]) -> Dict[str, List[str]]:

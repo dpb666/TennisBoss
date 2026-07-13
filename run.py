@@ -10,6 +10,7 @@ Commandes :
   python3 run.py db                          -> contenu de la base + derniers backtests
   python3 run.py status                      -> état (poids, précision, top joueurs)
   python3 run.py reset                       -> efface l'état appris
+  python3 run.py dedupe-players [--apply]    -> fusionne les profils joueurs dupliqués
 """
 from __future__ import annotations
 
@@ -441,6 +442,42 @@ def cmd_signals(_args) -> None:
     print()
 
 
+def cmd_dedupe_players(args) -> None:
+    """Fusionne les profils joueurs dupliqués par variation de format de nom
+    (ex. "Andreeva M." / "Mirra Andreeva" — voir bot/dedupe_players.py pour
+    le contexte du bug corrigé dans namematch.split_name()).
+
+    Par défaut : dry-run (affiche le diagnostic, ne modifie rien).
+    --apply : fusionne réellement (mem + DB matches + rebuild ELO complet).
+    """
+    from bot import dedupe_players
+
+    mem = memory.load()
+    rep = dedupe_players.report(mem)
+    print(f"{rep['total_players']} joueurs, {rep['duplicate_groups']} groupes "
+          f"dupliqués sûrs ({rep['players_involved']} profils concernés).")
+    for d in rep["details"][:args.top]:
+        print(f"  {d['canonical']!r} <- {d['aliases']} (n total={d['total_n']})")
+    if len(rep["details"]) > args.top:
+        print(f"  ... et {len(rep['details']) - args.top} autres groupes.")
+
+    if rep["ambiguous_groups"]:
+        print(f"\n{rep['ambiguous_groups']} groupes AMBIGUS (2+ prénoms complets "
+              f"distincts partageant nom+initiale — non fusionnés automatiquement) :")
+        for d in rep["ambiguous_details"][:args.top]:
+            print(f"  {d['canonical']!r} vs {d['aliases']} (n total={d['total_n']})")
+
+    if not args.apply:
+        print("\nDry-run (aucune écriture). Relancer avec --apply pour fusionner.")
+        return
+
+    result = dedupe_players.merge(mem)
+    memory.save(mem)
+    print(f"\nFusion appliquée : {result['merged_groups']} groupes fusionnés, "
+          f"{result['matches_renamed']} lignes matches renommées, "
+          f"{result['players_deleted']} alias supprimés de la table players.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="tennisboss", description="Bot tennis autonome")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -509,6 +546,13 @@ def main() -> None:
 
     sub.add_parser("backup", help="Sauvegarde immédiate de la base SQLite").set_defaults(func=cmd_backup)
     sub.add_parser("signals", help="Backtest calib_k/form_signal/steam_move").set_defaults(func=cmd_signals)
+
+    p_dedupe = sub.add_parser("dedupe-players",
+                              help="Fusionne les profils joueurs dupliqués (ex. 'Andreeva M.' / 'Mirra Andreeva')")
+    p_dedupe.add_argument("--apply", action="store_true",
+                          help="Applique la fusion (par défaut : dry-run, diagnostic seulement)")
+    p_dedupe.add_argument("--top", type=int, default=15, help="Nb de groupes affichés dans le diagnostic")
+    p_dedupe.set_defaults(func=cmd_dedupe_players)
 
     args = parser.parse_args()
     args.func(args)
