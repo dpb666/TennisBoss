@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Text
 
@@ -26,8 +27,10 @@ fun PredictGroupScreen(predictVM: PredictViewModel, compareVM: PlayerCompareView
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 },
+                modifier = Modifier.testTag("predict_tab_predict"),
                 text = { Text("Prédire", maxLines = 1, overflow = TextOverflow.Ellipsis) })
             Tab(selected = subTab == 1, onClick = { subTab = 1 },
+                modifier = Modifier.testTag("predict_tab_players"),
                 text = { Text("Joueurs", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {

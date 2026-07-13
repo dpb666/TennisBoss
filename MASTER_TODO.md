@@ -103,9 +103,9 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Medium (touches many files, low risk per file)
 - **Estimated time**: 2-3h for the highest-traffic screens (Dashboard, Chat, bottom nav)
 - **Dependencies**: None
-- **Status**: **Started — highest-traffic surfaces done**: the 5 bottom-nav tabs (`nav_dashboard`/`nav_predict`/`nav_matches`/`nav_value`/`nav_chat` in `MainActivity.kt`), Dashboard's two clickable match cards (`MatchSummaryCard`/`ValueCard`, tagged by player names), and Chat's input/send/upload/message-list (`chat_input`/`chat_send`/`chat_upload`/`chat_messages`). Remaining screens (Predict, Matchs, Value's Scanner/Stats/Edge sub-tabs, Players, MatchDetail) not yet tagged.
+- **Status**: **In progress.** Done so far: bottom nav (5 tabs), Dashboard's 2 clickable match cards, Chat's input/send/upload/message-list, `PredictScreen` (`predict_player1`/`predict_player2`/`predict_submit`) + its 2 sub-tabs (`predict_tab_predict`/`predict_tab_players` in `NavGroups.kt`). Remaining: Matchs (Upcoming/Live), Players, MatchDetail, Value's 4 sub-tabs (Value/Scanner/Stats/Edge).
 - **Important scoping correction**: verified via a fresh `uiautomator dump` on-device that `testTag` does **not** surface there — it's a Compose semantics property visible only to `androidx.compose.ui.test` (instrumented Compose UI tests via `createAndroidComposeRule`), not the platform accessibility/View tree that `uiautomator` reads. So this work sets up *future* Compose UI tests; it does **not** speed up this session's own `uiautomator`-based manual navigation (that would need real `contentDescription`/text, which already exists for most of what was tapped this session).
-- **Files involved**: `MainActivity.kt`, `DashboardScreen.kt`, `ui/components/ValueCard.kt`, `ChatScreen.kt`
+- **Files involved**: `MainActivity.kt`, `DashboardScreen.kt`, `ui/components/ValueCard.kt`, `ChatScreen.kt`, `PredictScreen.kt`, `NavGroups.kt`
 - **Verified**: `compileDebugKotlin` + `testDebugUnitTest` (54/54) pass; confirmed app installs/launches/navigates normally on-device after the change (tags are additive, no visual or behavioral effect).
 
 ### 11. Improve accessibility (`contentDescription`) coverage

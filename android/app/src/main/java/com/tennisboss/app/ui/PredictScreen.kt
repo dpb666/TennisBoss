@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,19 +56,19 @@ fun PredictScreen(
             onValueChange = { vm.player1 = it },
             label = { Text("Joueur 1") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("predict_player1"),
         )
         OutlinedTextField(
             value = vm.player2,
             onValueChange = { vm.player2 = it },
             label = { Text("Joueur 2") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("predict_player2"),
         )
 
         Button(
             onClick = { vm.predict() },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("predict_submit"),
             enabled = vm.state !is PredictUiState.Loading,
         ) {
             Text("Analyser avec l'IA")
