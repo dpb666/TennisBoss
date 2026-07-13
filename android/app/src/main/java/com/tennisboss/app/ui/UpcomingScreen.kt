@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -243,7 +244,8 @@ private fun OddsToggleChip(active: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(50))
             .background(bg)
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("upcoming_chip_odds"),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -268,7 +270,8 @@ private fun ConfFilterChip(active: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(50))
             .background(bg)
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .testTag("upcoming_chip_confidence"),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -350,7 +353,7 @@ private fun MatchCard(m: UpcomingMatch, onClick: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val pred = m.prediction
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = Modifier.fillMaxWidth().testTag("upcoming_card_${m.player1_raw}_${m.player2_raw}")) {
         Column(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -661,7 +662,7 @@ private fun LiveMatchCard(
                 .border(2.dp, GreenEV, RoundedCornerShape(12.dp))
         } else {
             Modifier.fillMaxWidth()
-        }).clickable { onClick() },
+        }).testTag("live_card_${m.event_id}").clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {

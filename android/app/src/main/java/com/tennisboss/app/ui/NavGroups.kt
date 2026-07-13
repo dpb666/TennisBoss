@@ -54,8 +54,10 @@ fun MatchesGroupScreen(liveVM: LiveViewModel, onMatchClick: (String, String, Str
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 },
+                modifier = Modifier.testTag("matches_tab_upcoming"),
                 text = { Text("À venir", maxLines = 1, overflow = TextOverflow.Ellipsis) })
             Tab(selected = subTab == 1, onClick = { subTab = 1 },
+                modifier = Modifier.testTag("matches_tab_live"),
                 text = { Text("Live", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {
