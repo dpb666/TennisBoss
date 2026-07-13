@@ -56,6 +56,18 @@ class TestFindDuplicateGroups(unittest.TestCase):
         self.assertEqual(ambiguous, {})
         self.assertEqual(len(safe), 1)
 
+    def test_same_first_name_with_and_without_space_is_safe(self):
+        # Cas réel trouvé en production : même joueur, prénom composé
+        # orthographié avec/sans espace par deux sources différentes
+        # ("Yun Seong Chung" / "Yunseong Chung") -> ne doit PAS être ambigu.
+        mem = {"players": {
+            "Yun Seong Chung": {"n": 20},
+            "Yunseong Chung": {"n": 8},
+        }}
+        safe, ambiguous = dp.find_duplicate_groups(mem)
+        self.assertEqual(ambiguous, {})
+        self.assertEqual(len(safe), 1)
+
 
 class TestChooseCanonical(unittest.TestCase):
     def test_prefers_full_name_even_with_lower_n(self):

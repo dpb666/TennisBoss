@@ -56,7 +56,13 @@ def _full_first_name_key(name: str) -> Optional[str]:
     """Signature normalisée du prénom complet si `name` est un nom complet
     (voir _is_full_name), sinon None. Sert à détecter les collisions
     d'initiale entre prénoms complets DIFFÉRENTS partageant un même nom de
-    famille (ex. "Xin Yu Wang" vs "Xiyu Wang" vs "Xiaofei Wang")."""
+    famille (ex. "Xin Yu Wang" vs "Xiyu Wang" vs "Xiaofei Wang").
+
+    Espaces retirés avant comparaison (ex. "Yun Seong Chung" / "Yunseong
+    Chung" -> même signature "yunseong") : deux sources orthographient
+    parfois le même prénom composé avec/sans espace — un cas réel trouvé en
+    production qui aurait sinon été classé "ambigu" à tort.
+    """
     if not _is_full_name(name):
         return None
     if "," in name:
@@ -64,7 +70,7 @@ def _full_first_name_key(name: str) -> Optional[str]:
         tokens = _norm(first_part).split()
     else:
         tokens = _norm(name).split()[:-1]
-    return " ".join(tokens) or None
+    return "".join(tokens) or None
 
 
 def find_duplicate_groups(
