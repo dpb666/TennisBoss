@@ -42,9 +42,12 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Medium
 - **Estimated time**: 3-4h (all 7) or ~30min each incrementally
 - **Dependencies**: None — `FakeApi.kt` pattern already established, just extend it
-- **Status**: **1 of 7 done** — `ChatViewModelTest.kt` added (6 tests: send success/blank/concurrent-while-loading/network-error/empty-reply, clear), since it was explicitly the highest-priority gap (the "AI booster" feature). Required extending `FakeApi.kt` with configurable `chatResponse`/`uploadResponse` (previously hardcoded to throw `NotImplementedError` unconditionally). `uploadFile()` deliberately NOT tested — it needs a real `android.content.Context` (contentResolver, cacheDir), which would require Robolectric; out of scope for this pass. Remaining 6: `PlayersViewModelTest.kt`, `PlayerCompareViewModelTest.kt`, `PlayerDetailViewModelTest.kt`, `PerformanceViewModelTest.kt`, `EdgeViewModelTest.kt`, `ScannerViewModelTest.kt`.
-- **Files involved**: `android/app/src/test/java/com/tennisboss/app/ChatViewModelTest.kt` (new), `FakeApi.kt` (extended)
-- **Verified**: `testDebugUnitTest` — 6/6 new tests pass (confirmed via the JUnit XML report, not just BUILD SUCCESSFUL).
+- **Status**: **Done — 7 of 7**. `ChatViewModelTest.kt` (6 tests) added first as the highest-priority gap. Then all 6 remaining: `PlayersViewModelTest.kt` (4), `PlayerDetailViewModelTest.kt` (4), `PlayerCompareViewModelTest.kt` (5), `PerformanceViewModelTest.kt` (4), `EdgeViewModelTest.kt` (3), `ScannerViewModelTest.kt` (4) — 24 more tests, 53 total across all ViewModel test files.
+- **What this required**: extending `FakeApi.kt` with configurable responses for `players()`, `historyDates()`, `historyByDate()`, `intelligenceStats()`, `learnerStats()`, `scannerStatus()`. Also — these 6 ViewModels hardcode `withContext(Dispatchers.IO)`/`async(Dispatchers.IO)` (unlike `PredictViewModel`/`UpcomingViewModel`/`ValueViewModel`, which already had an injectable `internal var io: CoroutineDispatcher` seam for tests). Applied the same established seam to `PlayersViewModel`, `PlayerCompareViewModel`, `PlayerDetailViewModel`, `PerformanceViewModel`, `EdgeViewModel`, `ScannerViewModel` so tests can pin IO to the `StandardTestDispatcher` instead of racing a real background thread pool against `advanceUntilIdle()`.
+- **Real bug found and fixed in the process**: `EdgeViewModel.load()` had the same un-scoped `async{}` bug that `DashboardViewModel`/`MatchDetailViewModel` were already fixed for this session (see `ARCHITECTURE_REVIEW.md`) — `async(io){ api.clv() }` launched directly under `viewModelScope.launch` instead of inside a `coroutineScope{}` meant a CLV failure could race past the enclosing `try/catch` instead of being caught by it. Only surfaced because the new "un echec du CLV fait passer l'ecran entier en Error" test exercised that exact path and failed with a raw uncaught `RuntimeException` instead of a clean assertion failure. Fixed the same way as before: wrapped the three `async{}` calls in `coroutineScope{}`.
+- `uploadFile()` (Chat) deliberately NOT tested — needs a real `android.content.Context`, would require Robolectric; out of scope for this pass.
+- **Files involved**: `android/app/src/test/java/com/tennisboss/app/{Chat,Players,PlayerDetail,PlayerCompare,Performance,Edge,Scanner}ViewModelTest.kt` (new), `FakeApi.kt` (extended), `PlayersViewModel.kt`/`PlayerCompareViewModel.kt`/`PlayerDetailViewModel.kt`/`PerformanceViewModel.kt`/`EdgeViewModel.kt`/`ScannerViewModel.kt` (added `io` seam; `EdgeViewModel.kt` also got the `coroutineScope{}` fix)
+- **Verified**: `testDebugUnitTest` — 53/53 pass, confirmed via the JUnit XML reports (not just BUILD SUCCESSFUL).
 
 ### 5. Delete or repurpose confirmed-orphaned backend modules
 - **Priority**: High
@@ -89,8 +92,8 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Low
 - **Estimated time**: 15 min
 - **Dependencies**: None
-- **Status**: Not started
-- **Files involved**: `bot/db.py:230-242` (`connect()` docstring/comment)
+- **Status**: **Done** — warning comment added inside `connect()` documenting the `mcp_feeder.py` incident and the "never call `connect()` inside a loop over many rows" rule.
+- **Files involved**: `bot/db.py:229-242` (`connect()` docstring/comment)
 - **Why it matters**: The `mcp_feeder.py` performance bug (fixed 2026-07-13) happened because this pattern is fine for ~100 low-frequency call sites but a real footgun inside a loop over many rows. A one-line warning comment prevents the next feeder from repeating it — audit confirmed no other instance exists today, so this is purely preventive.
 
 ## Low

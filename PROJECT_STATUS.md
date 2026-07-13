@@ -10,11 +10,11 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 | Backend API (`bot/api.py`) | ~95% | ~45 routes, centralized auth, rate limiting where it matters (odds quota), Swagger/OpenAPI. |
 | Autonomous mode (scheduler/supervisor) | 100% | 7 scheduled jobs, systemd services, all confirmed active. |
 | Android app | ~85% | 13 screens/ViewModels, MVVM, real error/loading states. No Room/offline (deliberately deferred). |
-| Testing | Backend 403 tests passing / Android 23 tests passing | See TEST_REPORT.md — coverage is uneven (7 of 13 Android ViewModels untested). |
+| Testing | Backend 357 tests passing / Android 53 tests passing | See TEST_REPORT.md — 13/13 Android ViewModels now covered (was 6/13). |
 | Deployment (Docker/systemd/CI) | ~95% | Working GitHub Actions CI (backend pytest + Android unit tests), Dockerfile + compose, systemd units, DEPLOYMENT.md. |
 | Documentation hygiene | ~80% | `docs/AUDIT.md` didn't know about the dormant `app/` FastAPI service (see below) until this audit — **since removed**, closing that gap. |
 
-**Overall: ~87% toward a stable, production-usable app.** The gap to "RC1" is concentrated in test coverage (7 of 13 Android ViewModels still untested) and the remaining orphaned backend modules — not in missing core functionality.
+**Overall: ~89% toward a stable, production-usable app.** With Android ViewModel test coverage now complete (13/13), the gap to "RC1" is concentrated in the remaining orphaned backend modules (kept per explicit user decision, not a gap to close autonomously) and lower-priority polish (Compose `testTag`s, accessibility, dependency bumps) — not in missing core functionality.
 
 ## Working features (verified this session, not just claimed)
 

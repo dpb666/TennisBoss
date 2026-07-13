@@ -89,4 +89,17 @@ class LiveViewModelTest {
         val s = vm.state as LiveUiState.Success
         assertEquals(setOf(1L), s.swungEventIds)
     }
+
+    @Test
+    fun `un echec de live fait passer l'ecran entier en Error`() = runTest(dispatcher) {
+        ApiClient.apiOverride = FakeApi(throwError = RuntimeException("panne reseau"))
+        val vm = LiveViewModel()
+
+        vm.loadOnce()
+        advanceUntilIdle()
+
+        val s = vm.state
+        assertTrue(s is LiveUiState.Error)
+        assertTrue((s as LiveUiState.Error).message.contains("panne reseau"))
+    }
 }

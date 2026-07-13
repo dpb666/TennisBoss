@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.ScannerStatus
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -20,6 +21,10 @@ sealed interface ScannerUiState {
 
 class ScannerViewModel : ViewModel() {
 
+    // Overridable en test pour piloter le dispatcher IO avec le TestDispatcher,
+    // comme UpcomingViewModel.io / ValueViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
+
     var state by mutableStateOf<ScannerUiState>(ScannerUiState.Idle)
         private set
 
@@ -30,7 +35,7 @@ class ScannerViewModel : ViewModel() {
         state = ScannerUiState.Loading
         viewModelScope.launch {
             state = try {
-                val data = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                val data = kotlinx.coroutines.withContext(io) {
                     ApiClient.create().scannerStatus()
                 }
                 startCountdown(data)

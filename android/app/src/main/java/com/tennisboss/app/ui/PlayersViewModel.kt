@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.Player
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -15,6 +16,10 @@ import kotlinx.coroutines.withContext
 
 /** Recherche de joueurs avec autocomplete (appel débouncé à /api/players). */
 class PlayersViewModel : ViewModel() {
+
+    // Overridable en test pour piloter le dispatcher IO avec le TestDispatcher,
+    // comme UpcomingViewModel.io / ValueViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
 
     var query by mutableStateOf("")
         private set
@@ -41,7 +46,7 @@ class PlayersViewModel : ViewModel() {
             loading = true
             error = null
             try {
-                val resp = withContext(Dispatchers.IO) {
+                val resp = withContext(io) {
                     ApiClient.create().players(q = q.trim(), limit = 30)
                 }
                 players = resp.players

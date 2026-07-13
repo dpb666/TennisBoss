@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.PlayerDetail
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,6 +22,10 @@ sealed interface PlayerDetailState {
 /** Charge la fiche détaillée d'un joueur (/api/player). */
 class PlayerDetailViewModel : ViewModel() {
 
+    // Overridable en test pour piloter le dispatcher IO avec le TestDispatcher,
+    // comme UpcomingViewModel.io / ValueViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
+
     var state by mutableStateOf<PlayerDetailState>(PlayerDetailState.Idle)
         private set
 
@@ -28,7 +33,7 @@ class PlayerDetailViewModel : ViewModel() {
         state = PlayerDetailState.Loading
         viewModelScope.launch {
             try {
-                val d = withContext(Dispatchers.IO) {
+                val d = withContext(io) {
                     ApiClient.create().player(name = name)
                 }
                 state = PlayerDetailState.Success(d)

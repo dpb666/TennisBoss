@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.CalibrationResponse
 import com.tennisboss.app.data.HistoryResponse
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +32,10 @@ sealed interface HistoryUiState {
 
 class PerformanceViewModel : ViewModel() {
 
+    // Overridable en test pour piloter le dispatcher IO avec le TestDispatcher,
+    // comme UpcomingViewModel.io / ValueViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
+
     var state by mutableStateOf<PerformanceUiState>(PerformanceUiState.Idle)
         private set
 
@@ -41,7 +46,7 @@ class PerformanceViewModel : ViewModel() {
         state = PerformanceUiState.Loading
         viewModelScope.launch {
             state = try {
-                val resp = withContext(Dispatchers.IO) { ApiClient.create().calibration() }
+                val resp = withContext(io) { ApiClient.create().calibration() }
                 PerformanceUiState.Success(resp)
             } catch (e: Exception) {
                 PerformanceUiState.Error("Connexion impossible : ${e.message}")
@@ -54,7 +59,7 @@ class PerformanceViewModel : ViewModel() {
         historyState = HistoryUiState.Loading
         viewModelScope.launch {
             historyState = try {
-                val resp = withContext(Dispatchers.IO) { ApiClient.create().historyDates() }
+                val resp = withContext(io) { ApiClient.create().historyDates() }
                 HistoryUiState.Dates(resp.dates)
             } catch (e: Exception) {
                 HistoryUiState.Error(e.message ?: "Erreur")
@@ -72,7 +77,7 @@ class PerformanceViewModel : ViewModel() {
         historyState = HistoryUiState.DayLoading(currentDates, date)
         viewModelScope.launch {
             historyState = try {
-                val resp = withContext(Dispatchers.IO) { ApiClient.create().historyByDate(date) }
+                val resp = withContext(io) { ApiClient.create().historyByDate(date) }
                 HistoryUiState.DaySuccess(currentDates, date, resp)
             } catch (e: Exception) {
                 HistoryUiState.Error(e.message ?: "Erreur")

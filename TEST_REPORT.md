@@ -17,13 +17,15 @@ _Both suites run fresh on 2026-07-13 for this report — not trusting prior clai
 ## Android (`./gradlew testDebugUnitTest`)
 
 ```
-BUILD SUCCESSFUL in ~25-30s
-23 tests, 0 failures, 0 skipped, 0 errors
+BUILD SUCCESSFUL in ~20-30s
+53 tests, 0 failures, 0 skipped, 0 errors
 ```
 
-**Zero failing tests.** Full file list: `DashboardViewModelTest` (4), `LiveViewModelTest` (2), `MatchDetailViewModelTest` (3), `PredictViewModelTest` (3), `SortForDashboardTest` (4), `SortUpcomingTest` (3), `UpcomingViewModelTest` (2), `ValueViewModelTest` (2).
+**Zero failing tests, 13/13 ViewModels now covered** (up from 6/13). Full file list: `ChatViewModelTest` (6), `DashboardViewModelTest` (4), `EdgeViewModelTest` (3), `LiveViewModelTest` (2), `MatchDetailViewModelTest` (3), `PerformanceViewModelTest` (4), `PlayerCompareViewModelTest` (5), `PlayerDetailViewModelTest` (4), `PlayersViewModelTest` (4), `PredictViewModelTest` (3), `ScannerViewModelTest` (4), `SortForDashboardTest` (4), `SortUpcomingTest` (3), `UpcomingViewModelTest` (2), `ValueViewModelTest` (2).
 
-**Coverage gap (the real finding here)**: 7 of 13 ViewModels have **zero** test files — `PlayersViewModel`, `PlayerCompareViewModel`, `PlayerDetailViewModel`, `PerformanceViewModel`, `EdgeViewModel`, `ScannerViewModel`, `ChatViewModel`. `ChatViewModel` being untested is the most notable gap given the user's repeated emphasis this session on the AI chat feature as a priority. See `MASTER_TODO.md` #4.
+**A real bug was caught in the process, not just coverage added**: writing `EdgeViewModelTest`'s CLV-failure case surfaced a genuine bug in `EdgeViewModel.load()` — `async{}` calls launched directly under `viewModelScope.launch` instead of wrapped in `coroutineScope{}`, the exact same structured-concurrency footgun that `DashboardViewModel`/`MatchDetailViewModel` were already fixed for earlier this session (see `ARCHITECTURE_REVIEW.md`). A CLV failure could race past the enclosing `try/catch`, surfacing as an uncaught exception instead of a clean `EdgeUiState.Error`. Fixed the same way as the earlier two. This is exactly the value of writing the remaining ViewModel tests, not just a coverage-number exercise.
+
+**Also required**: extending `FakeApi.kt` with 6 more configurable endpoint responses, and adding the project's established `internal var io: CoroutineDispatcher` test seam (already used by `PredictViewModel`/`UpcomingViewModel`/`ValueViewModel`) to the 6 ViewModels that previously hardcoded `Dispatchers.IO` — without it, tests raced a real background thread pool against `advanceUntilIdle()` and failed non-deterministically.
 
 **No instrumentation tests** (`androidTest/`) exist at all — everything is JVM unit tests against `FakeApi.kt`, none exercise real Compose UI or a real device/emulator. Combined with the complete absence of `testTag`s (see `UI_REPORT.md`), this means there is currently no automated UI-level regression protection whatsoever — every UI verification this session was manual (screenshots + `uiautomator dump` + hand-computed tap coordinates), which is slow and doesn't scale.
 
@@ -37,6 +39,6 @@ Two jobs: backend (`pytest tests/ -v`, Python 3.12) and android (`./gradlew :app
 
 ## Suggested fixes / next steps, in order of value
 
-1. Write `ChatViewModelTest.kt` first — highest-priority untested surface (`MASTER_TODO.md` #4).
+1. ~~Write `ChatViewModelTest.kt` first~~ — done, and the remaining 6 ViewModel tests are now done too (`MASTER_TODO.md` #4, all 13/13).
 2. Add `pytest-cov` to get a real backend coverage number instead of file-by-file guessing.
 3. Consider one instrumentation/Compose UI test for the critical path (Dashboard → tap a match → MatchDetail) now that `testTag`s would make this tractable (`MASTER_TODO.md` #10) — currently would have to rely on raw text matching, which is what slowed down this session's manual walkthrough.

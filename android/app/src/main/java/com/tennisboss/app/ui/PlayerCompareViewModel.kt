@@ -9,6 +9,7 @@ import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.H2H
 import com.tennisboss.app.data.Player
 import com.tennisboss.app.data.PlayerDetail
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,6 +25,10 @@ data class CompareState(
 )
 
 class PlayerCompareViewModel : ViewModel() {
+
+    // Overridable en test pour piloter le dispatcher IO avec le TestDispatcher,
+    // comme UpcomingViewModel.io / ValueViewModel.io.
+    internal var io: CoroutineDispatcher = Dispatchers.IO
 
     // ── Recherche A ───────────────────────────────────────────────────────────
     var queryA by mutableStateOf("")
@@ -60,7 +65,7 @@ class PlayerCompareViewModel : ViewModel() {
             delay(280)
             loadingA = true
             try {
-                resultsA = withContext(Dispatchers.IO) {
+                resultsA = withContext(io) {
                     ApiClient.create().players(q = q.trim(), limit = 20).players
                 }
             } catch (_: Exception) { resultsA = emptyList() }
@@ -76,7 +81,7 @@ class PlayerCompareViewModel : ViewModel() {
             delay(280)
             loadingB = true
             try {
-                resultsB = withContext(Dispatchers.IO) {
+                resultsB = withContext(io) {
                     ApiClient.create().players(q = q.trim(), limit = 20).players
                 }
             } catch (_: Exception) { resultsB = emptyList() }
@@ -108,11 +113,11 @@ class PlayerCompareViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val api = ApiClient.create()
-                val p1 = withContext(Dispatchers.IO) { api.player(name = a) }
+                val p1 = withContext(io) { api.player(name = a) }
                 compare = compare.copy(p1 = p1)
                 if (b != null) {
-                    val p2 = withContext(Dispatchers.IO) { api.player(name = b) }
-                    val h2h = try { withContext(Dispatchers.IO) { api.h2h(p1 = a, p2 = b) } }
+                    val p2 = withContext(io) { api.player(name = b) }
+                    val h2h = try { withContext(io) { api.h2h(p1 = a, p2 = b) } }
                               catch (_: Exception) { null }
                     compare = compare.copy(p2 = p2, h2h = h2h)
                 }

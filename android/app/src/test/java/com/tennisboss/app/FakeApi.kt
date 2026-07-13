@@ -52,6 +52,12 @@ class FakeApi(
     private val followedPlayersResponse: FollowedPlayersResponse? = null,
     private val chatResponse: ChatResponse? = null,
     private val uploadResponse: ChatResponse? = null,
+    private val playersResponse: PlayersResponse? = null,
+    private val historyDatesResponse: HistoryDatesResponse? = null,
+    private val historyByDateResponse: HistoryResponse? = null,
+    private val intelligenceStatsResponse: IntelligenceStats? = null,
+    private val learnerStatsResponse: LearnerStats? = null,
+    private val scannerStatusResponse: ScannerStatus? = null,
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
@@ -62,8 +68,10 @@ class FakeApi(
         return predictResponse ?: throw NotImplementedError("predictResponse non fourni")
     }
 
-    override suspend fun players(q: String, tour: String?, limit: Int): PlayersResponse =
-        throw NotImplementedError("non utilisé")
+    override suspend fun players(q: String, tour: String?, limit: Int): PlayersResponse {
+        throwError?.let { throw it }
+        return playersResponse ?: PlayersResponse(0, emptyList())
+    }
 
     override suspend fun player(name: String): PlayerDetail {
         throwError?.let { throw it }
@@ -129,14 +137,26 @@ class FakeApi(
         throw NotImplementedError("non utilisé")
     override suspend fun deleteInplayPick(id: Int): InplayPickLogResponse =
         throw NotImplementedError("non utilisé")
-    override suspend fun historyDates(dates: Int): HistoryDatesResponse = throw NotImplementedError("non utilisé")
-    override suspend fun historyByDate(date: String): HistoryResponse = throw NotImplementedError("non utilisé")
+    override suspend fun historyDates(dates: Int): HistoryDatesResponse {
+        throwError?.let { throw it }
+        return historyDatesResponse ?: throw NotImplementedError("historyDatesResponse non fourni")
+    }
+
+    override suspend fun historyByDate(date: String): HistoryResponse {
+        throwError?.let { throw it }
+        return historyByDateResponse ?: throw NotImplementedError("historyByDateResponse non fourni")
+    }
     // RuntimeException (pas NotImplementedError) : DashboardViewModel rattrape
     // l'échec du CLV avec catch (e: Exception) { null }, best-effort.
     override suspend fun clv(): ClvResponse = clvResponse ?: throw RuntimeException("non utilisé")
-    override suspend fun intelligenceStats(): IntelligenceStats = throw NotImplementedError("non utilisé")
-    override suspend fun learnerStats(): LearnerStats = throw NotImplementedError("non utilisé")
-    override suspend fun scannerStatus(): ScannerStatus = throw NotImplementedError("non utilisé")
+    override suspend fun intelligenceStats(): IntelligenceStats =
+        intelligenceStatsResponse ?: throw RuntimeException("non utilisé")
+    override suspend fun learnerStats(): LearnerStats =
+        learnerStatsResponse ?: throw RuntimeException("non utilisé")
+    override suspend fun scannerStatus(): ScannerStatus {
+        throwError?.let { throw it }
+        return scannerStatusResponse ?: throw NotImplementedError("scannerStatusResponse non fourni")
+    }
     override suspend fun valueHistory(limit: Int): ValueHistoryResponse = throw NotImplementedError("non utilisé")
     override suspend fun chat(request: ChatRequest): ChatResponse {
         throwError?.let { throw it }
