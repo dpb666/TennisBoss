@@ -115,7 +115,7 @@ private fun PlayerSearchField(
             trailingIcon = {
                 if (query.isNotBlank()) {
                     IconButton(onClick = onClear, modifier = Modifier.size(20.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = null,
+                        Icon(Icons.Default.Close, contentDescription = "Effacer",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp))
                     }

@@ -27,7 +27,7 @@ Manual `tab: Int` + `AnimatedContent` (no `NavHost`) — verified working correc
 
 ## Accessibility
 
-`contentDescription` used only 5 times across the sampled screens (`DashboardScreen.kt`, `PlayersScreen.kt`, `MatchDetailScreen.kt`), 4 of those 5 explicitly `null`. The bottom nav (`MainActivity.kt:184-187`) is the one place it's done correctly (real label as content description). Icon-heavy areas — signal cards in `PremiumSignalsSection`, badges, chips — are largely unlabeled for screen readers. See `MASTER_TODO.md` #11.
+**Fixed** (see `MASTER_TODO.md` #11). The initial finding — "`contentDescription` used only 5 times, 4 explicitly `null`" — overstated the actual gap: most of those `null`s were already correct, since an `Icon` sitting next to visible text (e.g. `SectionHeader`'s icon+title in `DashboardScreen.kt`, `SignalCard`'s icon+title in `MatchDetailScreen.kt`) should stay `null` to avoid TalkBack double-announcing the same label. The bottom nav (`MainActivity.kt:184-187`) was already correct. The real, confirmed gaps: `PlayersScreen.kt`'s icon-only clear button (fixed: `null` → `"Effacer"`), and `ChatScreen.kt`'s upload/send buttons, which used raw emoji `Text` with **no accessible-label mechanism at all** (fixed: added `Modifier.semantics { contentDescription = "..." }`).
 
 ## Compose performance
 

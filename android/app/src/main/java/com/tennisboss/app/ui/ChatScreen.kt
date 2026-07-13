@@ -38,6 +38,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -149,6 +151,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             IconButton(
                 onClick = { filePicker.launch("*/*") },
                 enabled = !vm.loading,
+                modifier = Modifier.semantics { contentDescription = "Joindre un fichier" },
             ) {
                 Text("📎", fontSize = 20.sp)
             }
@@ -189,6 +192,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     IconButton(
                         onClick = { if (input.isNotBlank()) { vm.send(input); input = "" } },
                         enabled = input.isNotBlank(),
+                        modifier = Modifier.semantics { contentDescription = "Envoyer" },
                     ) {
                         Text("➤", fontSize = 18.sp)
                     }

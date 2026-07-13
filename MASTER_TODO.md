@@ -112,9 +112,9 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Low
 - **Estimated time**: 1-2h
 - **Dependencies**: None
-- **Status**: Not started
-- **Files involved**: `DashboardScreen.kt`, `PlayersScreen.kt`, `MatchDetailScreen.kt` (icon-heavy screens with signal cards, badges, chips)
-- **Why it matters**: Only 5 `contentDescription` usages found across the sampled screens, 4 of them explicitly `null`.
+- **Status**: **Done**. Audited `DashboardScreen.kt`, `PlayersScreen.kt`, `MatchDetailScreen.kt`, `ChatScreen.kt`, `UpcomingScreen.kt` for icon-only actionable elements (not just raw `contentDescription` counts — most `null` usages found were actually *correct*: an `Icon` sitting next to visible text should stay `null` to avoid TalkBack double-announcing the same label, e.g. `SectionHeader`'s icon+title pairs in `DashboardScreen.kt`, `SignalCard`'s icon+title in `MatchDetailScreen.kt`). Found and fixed the real gaps: `PlayersScreen.kt`'s icon-only clear/`Close` `IconButton` (`contentDescription = null` → `"Effacer"`), and `ChatScreen.kt`'s two `IconButton`s that use raw emoji `Text` instead of `Icon` (paperclip upload, send arrow) — these had **no accessible label mechanism at all**, not just a `null` one, since `Text` has no `contentDescription` param. Added `Modifier.semantics { contentDescription = "..." }` directly on those two `IconButton`s ("Joindre un fichier", "Envoyer").
+- **Files involved**: `PlayersScreen.kt`, `ChatScreen.kt`
+- **Verified**: `compileDebugKotlin` + `testDebugUnitTest` (54/54) pass; confirmed visually on-device that Chat/Players screens render unchanged (the fix is semantics-only, no visual change expected).
 
 ### 12. Re-confirm Room/offline is still deliberately out of scope
 - **Priority**: Low
