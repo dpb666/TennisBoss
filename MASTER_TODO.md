@@ -43,9 +43,9 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Medium
 - **Estimated time**: 3-4h (all 7) or ~30min each incrementally
 - **Dependencies**: None — `FakeApi.kt` pattern already established, just extend it
-- **Status**: Not started
-- **Files involved**: `android/app/src/test/java/com/tennisboss/app/` (new: `PlayersViewModelTest.kt`, `PlayerCompareViewModelTest.kt`, `PlayerDetailViewModelTest.kt`, `PerformanceViewModelTest.kt`, `EdgeViewModelTest.kt`, `ScannerViewModelTest.kt`, `ChatViewModelTest.kt`), existing `FakeApi.kt`
-- **Why it matters**: 7 of 13 ViewModels (54%) have zero test coverage. `ChatViewModel` in particular is the "AI booster" feature the user has repeatedly prioritized this session.
+- **Status**: **1 of 7 done** — `ChatViewModelTest.kt` added (6 tests: send success/blank/concurrent-while-loading/network-error/empty-reply, clear), since it was explicitly the highest-priority gap (the "AI booster" feature). Required extending `FakeApi.kt` with configurable `chatResponse`/`uploadResponse` (previously hardcoded to throw `NotImplementedError` unconditionally). `uploadFile()` deliberately NOT tested — it needs a real `android.content.Context` (contentResolver, cacheDir), which would require Robolectric; out of scope for this pass. Remaining 6: `PlayersViewModelTest.kt`, `PlayerCompareViewModelTest.kt`, `PlayerDetailViewModelTest.kt`, `PerformanceViewModelTest.kt`, `EdgeViewModelTest.kt`, `ScannerViewModelTest.kt`.
+- **Files involved**: `android/app/src/test/java/com/tennisboss/app/ChatViewModelTest.kt` (new), `FakeApi.kt` (extended)
+- **Verified**: `testDebugUnitTest` — 6/6 new tests pass (confirmed via the JUnit XML report, not just BUILD SUCCESSFUL).
 
 ### 5. Delete or repurpose confirmed-orphaned backend modules
 - **Priority**: High

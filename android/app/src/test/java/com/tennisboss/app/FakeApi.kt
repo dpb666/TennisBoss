@@ -50,6 +50,8 @@ class FakeApi(
     private val h2hResponse: H2H? = null,
     private val clvResponse: ClvResponse? = null,
     private val followedPlayersResponse: FollowedPlayersResponse? = null,
+    private val chatResponse: ChatResponse? = null,
+    private val uploadResponse: ChatResponse? = null,
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
@@ -136,7 +138,13 @@ class FakeApi(
     override suspend fun learnerStats(): LearnerStats = throw NotImplementedError("non utilisé")
     override suspend fun scannerStatus(): ScannerStatus = throw NotImplementedError("non utilisé")
     override suspend fun valueHistory(limit: Int): ValueHistoryResponse = throw NotImplementedError("non utilisé")
-    override suspend fun chat(request: ChatRequest): ChatResponse = throw NotImplementedError("non utilisé")
-    override suspend fun upload(file: MultipartBody.Part, message: RequestBody): ChatResponse =
-        throw NotImplementedError("non utilisé")
+    override suspend fun chat(request: ChatRequest): ChatResponse {
+        throwError?.let { throw it }
+        return chatResponse ?: throw NotImplementedError("chatResponse non fourni")
+    }
+
+    override suspend fun upload(file: MultipartBody.Part, message: RequestBody): ChatResponse {
+        throwError?.let { throw it }
+        return uploadResponse ?: throw NotImplementedError("uploadResponse non fourni")
+    }
 }
