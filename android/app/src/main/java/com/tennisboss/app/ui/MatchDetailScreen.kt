@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -49,14 +50,14 @@ fun MatchDetailScreen(
             TopAppBar(
                 title = { Text("Analyse Premium", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("matchdetail_back")) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour")
                     }
                 }
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding).testTag("matchdetail_screen")) {
             when (val s = vm.uiState) {
                 is MatchDetailUiState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 is MatchDetailUiState.Error -> Text(s.message, color = WarnColor, modifier = Modifier.padding(16.dp))
