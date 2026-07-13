@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -44,7 +45,10 @@ private val P2Color = Color(0xFF00C2A8)
 @Composable
 fun ValueCard(c: ValueComparison, onClick: (() -> Unit)? = null) {
     Card(
-        modifier = Modifier.fillMaxWidth().let { if (onClick != null) it.clickable { onClick() } else it },
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("value_card_${c.player1}_${c.player2}")
+            .let { if (onClick != null) it.clickable { onClick() } else it },
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(

@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.remember
@@ -127,7 +128,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             // Liste des messages
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("chat_messages"),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -151,14 +152,16 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             IconButton(
                 onClick = { filePicker.launch("*/*") },
                 enabled = !vm.loading,
-                modifier = Modifier.semantics { contentDescription = "Joindre un fichier" },
+                modifier = Modifier
+                    .testTag("chat_upload")
+                    .semantics { contentDescription = "Joindre un fichier" },
             ) {
                 Text("📎", fontSize = 20.sp)
             }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("chat_input"),
                 placeholder = { Text("Ex : Sinner vs Alcaraz sur terre ?") },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = false,
@@ -192,7 +195,9 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                     IconButton(
                         onClick = { if (input.isNotBlank()) { vm.send(input); input = "" } },
                         enabled = input.isNotBlank(),
-                        modifier = Modifier.semantics { contentDescription = "Envoyer" },
+                        modifier = Modifier
+                            .testTag("chat_send")
+                            .semantics { contentDescription = "Envoyer" },
                     ) {
                         Text("➤", fontSize = 18.sp)
                     }

@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -167,19 +168,26 @@ fun AppRoot() {
     Scaffold(
         bottomBar = {
             NavigationBar {
-                data class NavTab(val index: Int, val label: String, val filled: ImageVector, val outlined: ImageVector)
+                data class NavTab(
+                    val index: Int,
+                    val label: String,
+                    val filled: ImageVector,
+                    val outlined: ImageVector,
+                    val tag: String,
+                )
                 val tabs = listOf(
-                    NavTab(0, "Accueil", Icons.Filled.Home, Icons.Outlined.Home),
-                    NavTab(1, "Prédire", Icons.Filled.Insights, Icons.Outlined.Insights),
-                    NavTab(2, "Matchs", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-                    NavTab(3, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond),
-                    NavTab(4, "Chat", Icons.Filled.SmartToy, Icons.Outlined.SmartToy),
+                    NavTab(0, "Accueil", Icons.Filled.Home, Icons.Outlined.Home, "nav_dashboard"),
+                    NavTab(1, "Prédire", Icons.Filled.Insights, Icons.Outlined.Insights, "nav_predict"),
+                    NavTab(2, "Matchs", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth, "nav_matches"),
+                    NavTab(3, "Value", Icons.Filled.Diamond, Icons.Outlined.Diamond, "nav_value"),
+                    NavTab(4, "Chat", Icons.Filled.SmartToy, Icons.Outlined.SmartToy, "nav_chat"),
                 )
                 tabs.forEach { t ->
                     val selected = tab == t.index
                     NavigationBarItem(
                         selected = selected,
                         onClick = { tab = t.index },
+                        modifier = Modifier.testTag(t.tag),
                         icon = {
                             Icon(
                                 imageVector = if (selected) t.filled else t.outlined,
