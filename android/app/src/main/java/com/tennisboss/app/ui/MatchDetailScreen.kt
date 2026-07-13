@@ -153,7 +153,7 @@ private fun PremiumSignalsSection(insight: InsightResponse) {
         }
         insight.rest_days_signals.forEach { r ->
             val label = if (r.flag == "enchainement_rapide") "Enchaînement rapide" else "Retour après coupure"
-            SignalCard(Icons.Default.FitnessCenter, "Repos : ${r.player}", "$label — ${r.rest_days}j depuis le dernier match", WarnColor)
+            SignalCard(Icons.Default.Bedtime, "Repos : ${r.player}", "$label — ${r.rest_days}j depuis le dernier match", WarnColor)
         }
         insight.clutch_signals.forEach { c ->
             val desc = listOfNotNull(
