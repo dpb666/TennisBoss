@@ -10,7 +10,7 @@ import schedule
 import time
 from datetime import date, datetime
 
-from . import (auto_learner, backup, db, mantennisdata_feeder, monitor,
+from . import (auto_learner, backup, db, mantennisdata_feeder, mcp_feeder, monitor,
               push_notifications, recommendations, tennisdata_feeder)
 from .log import log
 
@@ -56,6 +56,20 @@ class TennisBossScheduler:
             self.jobs_run += 1
         except Exception as e:  # noqa: BLE001
             log(f"MTD ingest job failed: {e}", "ERROR")
+
+    def job_mcp_backfill(self):
+        """Enrichit les matchs WTA déjà archivés avec les stats Match Charting
+        Project (serve/return/break points) — voir mcp_feeder.py. Purement
+        additif (COALESCE, jamais d'écrasement) : sûr à rejouer souvent, mais
+        peu de nouveaux matchs chartés par jour -> fréquence basse suffit.
+        """
+        log("=== SCHEDULER: MCP backfill (WTA, stats serve/return/BP) ===", "INFO")
+        try:
+            result = mcp_feeder.backfill()
+            log(f"MCP backfill job complete: {result}", "INFO")
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"MCP backfill job failed: {e}", "ERROR")
 
     def job_monitor(self):
         """Run system health check."""
@@ -105,11 +119,12 @@ class TennisBossScheduler:
         schedule.every(1).hours.do(self.job_learn)
         schedule.every(6).hours.do(self.job_ingest)
         schedule.every(6).hours.do(self.job_mtd_ingest)
+        schedule.every(12).hours.do(self.job_mcp_backfill)
         schedule.every(5).minutes.do(self.job_monitor)
         schedule.every(6).hours.do(self.job_backup)
         schedule.every().day.at("09:00").do(self.job_daily_digest)
-        log("Scheduler: 6 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
-            "monitor 5m, backup 6h, digest 9h/j)", "INFO")
+        log("Scheduler: 7 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+            "mcp_backfill 12h, monitor 5m, backup 6h, digest 9h/j)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()

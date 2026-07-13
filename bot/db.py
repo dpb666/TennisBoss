@@ -15,7 +15,7 @@ import difflib
 import json
 import sqlite3
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import config, features, predictor
 from .log import log
@@ -375,6 +375,76 @@ def delete_players(names: List[str]) -> int:
         for n in names:
             total += conn.execute("DELETE FROM players WHERE name=?", (n,)).rowcount
     return total
+
+
+def matches_index_by_date(tour: str) -> Dict[str, List[sqlite3.Row]]:
+    """Toutes les lignes matches d'un tour, groupées par date compacte
+    (YYYYMMDD) — UNE SEULE requête. Sert de base à un enrichissement en
+    masse (bot/mcp_feeder.py) : interroger la DB une fois par match candidat
+    (des milliers de connexions sqlite individuelles) s'est avéré beaucoup
+    trop lent sur /mnt/c (WSL sur NTFS) — un run réel a dépassé 15 minutes
+    sans terminer. Cet index se construit en une passe, en mémoire.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, date, winner, loser FROM matches WHERE tour=?", (tour,)
+        ).fetchall()
+    index: Dict[str, List[sqlite3.Row]] = {}
+    for r in rows:
+        index.setdefault(r["date"].replace("-", ""), []).append(r)
+    return index
+
+
+def _apply_backfill(conn: sqlite3.Connection, match_id: str,
+                    winner_stats: Dict[str, float], loser_stats: Dict[str, float]) -> bool:
+    cur = conn.execute(
+        "UPDATE matches SET "
+        "w_serve=COALESCE(w_serve, ?), w_return1=COALESCE(w_return1, ?), "
+        "w_return2=COALESCE(w_return2, ?), "
+        "l_serve=COALESCE(l_serve, ?), l_return1=COALESCE(l_return1, ?), "
+        "l_return2=COALESCE(l_return2, ?), "
+        "w_bp_saved=COALESCE(w_bp_saved, ?), w_bp_faced=COALESCE(w_bp_faced, ?), "
+        "l_bp_saved=COALESCE(l_bp_saved, ?), l_bp_faced=COALESCE(l_bp_faced, ?) "
+        "WHERE id=?",
+        (
+            winner_stats.get("serve"), winner_stats.get("return1"), winner_stats.get("return2"),
+            loser_stats.get("serve"), loser_stats.get("return1"), loser_stats.get("return2"),
+            winner_stats.get("bp_saved"), winner_stats.get("bp_faced"),
+            loser_stats.get("bp_saved"), loser_stats.get("bp_faced"),
+            match_id,
+        ),
+    )
+    return cur.rowcount > 0
+
+
+def backfill_match_stats(match_id: str, winner_stats: Dict[str, float],
+                         loser_stats: Dict[str, float]) -> bool:
+    """Complète les colonnes serve/return/clutch d'un match déjà archivé,
+    SEULEMENT si elles sont actuellement NULL (COALESCE) — n'écrase jamais
+    une valeur déjà présente, plus fiable qu'un enrichissement a posteriori.
+    Renvoie True si la ligne existe (que quelque chose ait changé ou non).
+
+    Un seul match -> une seule connexion. Pour un lot, voir
+    backfill_match_stats_bulk (une connexion pour tout le lot).
+    """
+    with connect() as conn:
+        return _apply_backfill(conn, match_id, winner_stats, loser_stats)
+
+
+def backfill_match_stats_bulk(
+    updates: List[Tuple[str, Dict[str, float], Dict[str, float]]],
+) -> int:
+    """Comme backfill_match_stats, mais pour tout un lot EN UNE SEULE
+    connexion/transaction — voir matches_index_by_date pour le contexte
+    (évite des milliers de connexions individuelles)."""
+    if not updates:
+        return 0
+    updated = 0
+    with connect() as conn:
+        for match_id, winner_stats, loser_stats in updates:
+            if _apply_backfill(conn, match_id, winner_stats, loser_stats):
+                updated += 1
+    return updated
 
 
 def archive_historical_odds(rows: List[Dict]) -> int:
