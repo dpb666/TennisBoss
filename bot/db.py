@@ -231,6 +231,15 @@ def connect() -> Iterator[sqlite3.Connection]:
     # timeout=15s : 3 process (quant, bot, supervisor) écrivent en concurrence
     # sur /mnt/c — laisse le temps d'acquérir le verrou plutôt que "database is
     # locked". synchronous=NORMAL est sûr et rapide EN MODE WAL (établi par init).
+    #
+    # ATTENTION : n'appelez JAMAIS connect() à l'intérieur d'une boucle sur de
+    # nombreuses lignes (ex. `for row in big_query: with connect() as c: ...`).
+    # bot/mcp_feeder.py le faisait (~3 connexions x ~4000 itérations) et un run
+    # réel a dépassé 15 minutes sans terminer sur /mnt/c (WSL sur NTFS, lent
+    # pour beaucoup de petits appels système) — corrigé le 2026-07-13 en
+    # chargeant tout l'index en UNE requête puis en appliquant le lot dans UNE
+    # transaction (voir db.matches_index_by_date / backfill_match_stats_bulk).
+    # Une seule connexion par requête HTTP / tick de boucle de fond reste fine.
     conn = sqlite3.connect(config.DB_FILE, timeout=15.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=15000")
