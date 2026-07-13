@@ -105,7 +105,13 @@ fun ValueCard(c: ValueComparison, onClick: (() -> Unit)? = null) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 c.honeypot?.let { hp ->
                     if (hp.flag) {
-                        SignalChip("⚠️ HONEYPOT +${String.format("%.1f", hp.edge_pct)}%", Color(0xFFFFD600))
+                        // Rebaptisé le 2026-07-13 : ce signal veut dire "conditions
+                        // (météo/surface/foule) favorisent ce joueur de +X%, à vérifier
+                        // si le marché ne l'a pas déjà pricé" (bot/weather_profile.py) —
+                        // PAS forcément un piège/désaccord avec le pick recommandé. Le
+                        // libellé "⚠️ HONEYPOT" se lisait comme un avertissement même
+                        // quand le signal allait dans le même sens que "Bon pari".
+                        SignalChip("🌤️ Conditions +${String.format("%.1f", hp.edge_pct)}%", Color(0xFFFFD600))
                     }
                 }
                 c.steam_move?.let { sm ->

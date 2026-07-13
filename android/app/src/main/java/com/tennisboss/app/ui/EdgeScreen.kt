@@ -222,7 +222,9 @@ private fun RecentRow(r: ClvRecent) {
                 r.honeypot?.let { hp ->
                     if (hp.flag) {
                         val b = hp.player.substringAfterLast(" ")
-                        SignalChip("⚠️ HONEYPOT $b +${String.format("%.1f", hp.edge_pct)}%",
+                        // Voir note dans ValueCard.kt : signal "conditions favorisent
+                        // ce joueur", pas un avertissement de piège/désaccord.
+                        SignalChip("🌤️ Conditions $b +${String.format("%.1f", hp.edge_pct)}%",
                             Color(0xFFFFD600), bold = true)
                     }
                 }

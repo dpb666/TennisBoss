@@ -14,8 +14,8 @@ _Based on a live, hands-on emulator walkthrough this session (Dashboard → Pred
 
 ## Bugs found (real, observed on-device — not inferred)
 
-1. **Contradictory tag combination** on the Dashboard's featured match card: `bonne` (good) + `Pas de value` (no value) + `HONEYPOT +23.0%` warning, all shown simultaneously on the same card. A real user cannot tell from this whether the app is recommending or warning against this match. See `MASTER_TODO.md` #3 for the fix approach. **Screenshot-verified, not a hypothetical.**
-2. **`SurfaceBadge` name collision** — see `CLEANUP_REPORT.md`/`MASTER_TODO.md` #2. Not yet a visibly wrong badge on any screen sampled, but the collision exists in the code and is a live risk for the next change to either file.
+1. **Contradictory tag combination** on the Dashboard/Matchs cards: `bonne` (bare, no qualifier) + `Pas de value` + `⚠️ HONEYPOT +23.0%` shown simultaneously, reading as "good bet" contradicted by two warnings. **Fixed**: traced the real semantics (see `MASTER_TODO.md` #3) — `bonne` is model *confidence*, not bet quality, and "HONEYPOT" was a neutral conditions-edge signal mislabeled with alarm-style wording. Relabeled to "Confiance : bonne" and "🌤️ Conditions +X%"; verified live on emulator.
+2. **`SurfaceBadge` name collision** — **Fixed**, see `CLEANUP_REPORT.md`/`MASTER_TODO.md` #2. Turned out to be a live bug, not just a risk: the local shadowing function was actually being called with real surface data, degrading the badge's rendering. Verified live on emulator post-fix.
 
 ## Navigation
 

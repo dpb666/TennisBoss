@@ -522,7 +522,9 @@ private fun MatchCard(m: UpcomingMatch, onClick: () -> Unit) {
                                 "p2" -> m.player2_raw.substringAfterLast(" ")
                                 else -> hp.player.substringAfterLast(" ")
                             }
-                            SignalChip("⚠️ HONEYPOT $b +${String.format("%.1f", hp.edge_pct)}%",
+                            // Voir note dans ValueCard.kt : signal "conditions favorisent
+                            // ce joueur", pas un avertissement de piège/désaccord.
+                            SignalChip("🌤️ Conditions $b +${String.format("%.1f", hp.edge_pct)}%",
                                 Color(0xFFFFD600), bold = true)
                         }
                     }
@@ -891,7 +893,7 @@ fun WeatherAnalysisCard(wa: WeatherAnalysis, p1Name: String, p2Name: String) {
             Surface(color = Color(0xFFFFD600).copy(alpha = 0.12f),
                 shape = MaterialTheme.shapes.small) {
                 Text(
-                    "⚠️ HONEYPOT +${String.format("%.1f", hp.edge_pct)}% → $b" +
+                    "🌤️ Conditions +${String.format("%.1f", hp.edge_pct)}% → $b" +
                     "\n${hp.note}",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold, color = Color(0xFFFFD600),

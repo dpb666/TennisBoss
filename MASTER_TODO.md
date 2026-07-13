@@ -19,22 +19,24 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Low
 - **Estimated time**: 20 min
 - **Dependencies**: None
-- **Status**: Not started
-- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/components/SurfaceBadge.kt`, `android/app/src/main/java/com/tennisboss/app/ui/UpcomingScreen.kt:905`
-- **Why it matters**: Two Composables with the identical name and different signatures/logic (one keyed on surface type, one on tournament-name substring) compile today only because of package scoping. A future import of the wrong one silently produces wrong colors/badges with no compiler error.
+- **Status**: **Done** — imported the correct `ui.components.SurfaceBadge` in `UpcomingScreen.kt`, removed the shadowing local variant (it had zero legitimate callers once the bug was fixed). Verified live on emulator: the "Terre" badge now renders with proper emoji styling in the Matchs tab.
+- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/components/SurfaceBadge.kt`, `android/app/src/main/java/com/tennisboss/app/ui/UpcomingScreen.kt`
+- **Why it matters**: Two Composables with the identical name and different signatures/logic (one keyed on surface type, one on tournament-name substring) compiled today only because of package scoping — and the bug already existed live: `UpcomingScreen.kt:381` passed a real surface value into the wrong function, silently degrading the rendered badge.
 - **Fix**: rename one (e.g. `TournamentSurfaceBadge` for the `UpcomingScreen.kt` variant) and update its call site.
 
 ## High
 
-### 3. Fix the contradictory tag combination on Dashboard "Meilleures opportunités" card
+### 3. Fix the contradictory tag combination on Dashboard/Matchs cards
 - **Priority**: High
-- **Difficulty**: Low-Medium (needs a product decision on the copy/logic, not just a code fix)
+- **Difficulty**: Low-Medium (needed a product-semantics read, not just a code fix)
 - **Estimated time**: 1h
 - **Dependencies**: None
-- **Status**: Not started
-- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/DashboardScreen.kt` (`ValueCard`/`EdgeIndicator` usage), `bot/api.py` (wherever `bet_tag`/`bet_label`/honeypot classification is computed for `/api/upcoming`)
-- **Why it matters**: Observed live on-device: a card shows `bonne` (good bet tag) + `Pas de value` (no value) + `HONEYPOT +23.0%` warning simultaneously — a real user cannot tell if this is a good bet or a trap. Confirmed via screenshot this session, not a hypothetical.
-- **Fix**: clarify precedence — if honeypot/no-value flags are set, they should probably suppress or visually dominate over a "bonne" tag, or the "bonne" tag's meaning needs to be relabeled to avoid implying "good bet" when it means something narrower (e.g. "modèle confiant" vs "bon pari").
+- **Status**: **Done**, pure-copy fix (no backend logic changed):
+  1. Traced the actual semantics: `"bonne"` is `predictor.confidence_label` (model confidence, `bot/predictor.py:203-210`) — an axis totally independent of betting value. Fixed by prefixing it "Confiance : bonne" (`ConfidenceBadge.kt`), matching wording already used elsewhere (`LiveScreen.kt:1214`).
+  2. Traced "HONEYPOT": it's `weather_profile.py`'s conditions-edge signal ("weather+surface+crowd favor player X by N%, check if the market already reflects it") — **not** a warning that opposes the pick. In the observed screenshot, the honeypot beneficiary was the SAME player the model+market already favored (reinforcing, not contradicting) — the alarming "⚠️ HONEYPOT" wording was the actual bug. Relabeled to "🌤️ Conditions +X%" across all 4 render sites (`ValueCard.kt`, `EdgeScreen.kt`, `UpcomingScreen.kt` x2).
+- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/components/ConfidenceBadge.kt`, `ValueCard.kt`, `android/app/src/main/java/com/tennisboss/app/ui/EdgeScreen.kt`, `UpcomingScreen.kt`, `bot/predictor.py` (read, not modified), `bot/weather_profile.py` (read, not modified)
+- **Verified**: `compileDebugKotlin` + `testDebugUnitTest` pass, confirmed live on emulator — cards now read "Confiance : élevée" / "🌤️ Conditions +10.5%" instead of the ambiguous "bonne" / "⚠️ HONEYPOT".
+- **Note**: this fixed the *labeling*, which was the actual defect (the underlying signals were correct all along, just mislabeled in a way that read as contradictory). If a real disagreement case exists (honeypot beneficiary opposite the model/market favorite), that would still show two amber-ish chips that don't visually resolve to a single verdict — worth a follow-up if that combination is ever observed live.
 
 ### 4. Add unit tests for the 7 untested Android ViewModels
 - **Priority**: High

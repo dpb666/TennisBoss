@@ -29,7 +29,14 @@ fun ConfidenceBadge(label: String, confidence: Double = 0.0) {
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) {
         Text(
-            text = label,
+            // Préfixe "Confiance : " ajouté le 2026-07-13 : ce badge décrit la
+            // confiance du MODÈLE dans sa prédiction (predictor.confidence_label,
+            // 0.65-0.80 -> "bonne"), un axe indépendant de la valeur du pari
+            // (EdgeIndicator "Pas de value" / HONEYPOT). Affiché seul, "bonne"
+            // à côté de "Pas de value" + un avertissement HONEYPOT se lisait
+            // comme un "bon pari" contradictoire avec les deux autres tags —
+            // trouvé en test manuel sur émulateur (Dashboard et Matchs à venir).
+            text = "Confiance : $label",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = fg,
