@@ -18,9 +18,9 @@ Correction from an earlier draft of this report: I initially assumed `bot/telegr
 
 | Composable | Locations | Status |
 |---|---|---|
-| `StatCard` | `EdgeScreen.kt:183`, `PerformanceScreen.kt:320` | Byte-for-byte identical — extract to `ui/components/StatCard.kt` |
-| `RecentRow` | `EdgeScreen.kt:218`, `PerformanceScreen.kt:344` | Same name/shape, not yet diffed line-by-line — verify then extract |
-| `SurfaceBadge` | `ui/components/SurfaceBadge.kt`, `UpcomingScreen.kt:905` | **Not duplication — a name COLLISION** with different signatures/logic. See `MASTER_TODO.md` #2, this is the higher-severity finding. |
+| `StatCard` | was `EdgeScreen.kt:183`, `PerformanceScreen.kt:320` | Byte-for-byte identical — **fixed**: extracted to `ui/components/StatCard.kt`, both call sites updated. |
+| `RecentRow` | `EdgeScreen.kt:218` (`ClvRecent`), `PerformanceScreen.kt:344` (`SettledRecent`) | **Verified NOT a duplicate** — diffed both bodies: they render different data types (CLV/honeypot info vs. settled-match correctness) with genuinely different logic, and both are already file-`private`, so there's no collision risk either. Same name, coincidence, not a bug. No action needed. |
+| `SurfaceBadge` | `ui/components/SurfaceBadge.kt`, `UpcomingScreen.kt:905` | **Fixed** — was a name COLLISION (not simple duplication) with different signatures/logic that caused a real live bug (wrong badge style rendered in the Matchs tab). See `MASTER_TODO.md` #2. |
 
 Already-completed extractions from earlier this session (for reference, not re-flagging): `ValueCard.kt`, `EdgeIndicator.kt` were pulled out of `DashboardScreen.kt`/`ValueScreen.kt` duplication.
 

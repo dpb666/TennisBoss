@@ -34,6 +34,7 @@ import com.tennisboss.app.data.ClvResponse
 import com.tennisboss.app.data.IntelligenceStats
 import com.tennisboss.app.data.LearnerStats
 import com.tennisboss.app.ui.components.SkeletonList
+import com.tennisboss.app.ui.components.StatCard
 
 private val GoodColor = Color(0xFF00E5A0)
 private val BadColor = Color(0xFFFF5C7A)
@@ -176,23 +177,6 @@ private fun VerdictBanner(verdict: String, label: String) {
             fontWeight = FontWeight.Bold,
             color = c,
         )
-    }
-}
-
-@Composable
-private fun StatCard(label: String, value: String, color: Color,
-                     modifier: Modifier = Modifier, sub: String = "") {
-    Card(modifier = modifier) {
-        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold, color = color)
-            if (sub.isNotBlank()) {
-                Text(sub, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline)
-            }
-        }
     }
 }
 

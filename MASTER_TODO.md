@@ -61,9 +61,9 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Low
 - **Estimated time**: 30 min
 - **Dependencies**: None
-- **Status**: Not started
-- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/EdgeScreen.kt:183` and `PerformanceScreen.kt:320` (`StatCard`, byte-for-byte identical), same two files for `RecentRow` (likely duplicated, needs verification)
-- **Fix**: move both into `ui/components/`, following the precedent already set by `ValueCard.kt`/`EdgeIndicator.kt` extraction earlier this session.
+- **Status**: **Done** — `StatCard` extracted to `android/app/src/main/java/com/tennisboss/app/ui/components/StatCard.kt`, both `EdgeScreen.kt`/`PerformanceScreen.kt` call sites updated. `RecentRow` investigated and found NOT to be a duplicate (different data types `ClvRecent`/`SettledRecent`, both already file-private, no collision risk) — no action needed, see `CLEANUP_REPORT.md`.
+- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/components/StatCard.kt` (new), `EdgeScreen.kt`, `PerformanceScreen.kt`
+- **Verified**: `compileDebugKotlin` + `testDebugUnitTest` pass (BUILD SUCCESSFUL, 23/23 tests).
 
 ### 7. Reduce silent exception swallowing in `bot/api.py`
 - **Priority**: Medium
