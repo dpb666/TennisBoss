@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +61,7 @@ fun PlayersScreen(
                 results = vm.resultsA,
                 color = P1Color,
                 modifier = Modifier.weight(1f),
+                tag = "players_search_a",
                 onQueryChange = vm::onQueryA,
                 onSelect = { vm.selectA(it); onPlayerClick(it) },
                 onClear = vm::clearA,
@@ -72,6 +74,7 @@ fun PlayersScreen(
                 results = vm.resultsB,
                 color = P2Color,
                 modifier = Modifier.weight(1f),
+                tag = "players_search_b",
                 onQueryChange = vm::onQueryB,
                 onSelect = { vm.selectB(it); onPlayerClick(it) },
                 onClear = vm::clearB,
@@ -101,6 +104,7 @@ private fun PlayerSearchField(
     results: List<Player>,
     color: Color,
     modifier: Modifier,
+    tag: String,
     onQueryChange: (String) -> Unit,
     onSelect: (String) -> Unit,
     onClear: () -> Unit,
@@ -111,7 +115,7 @@ private fun PlayerSearchField(
             onValueChange = onQueryChange,
             label = { Text(label, style = MaterialTheme.typography.labelSmall) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(tag),
             trailingIcon = {
                 if (query.isNotBlank()) {
                     IconButton(onClick = onClear, modifier = Modifier.size(20.dp)) {
@@ -133,6 +137,7 @@ private fun PlayerSearchField(
                     items(results) { p ->
                         Row(
                             modifier = Modifier.fillMaxWidth()
+                                .testTag("${tag}_result_${p.name}")
                                 .clickable { onSelect(p.name) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -279,6 +284,7 @@ private fun FollowButton(player: PlayerDetail) {
                 }
             }
         },
+        modifier = Modifier.testTag("players_follow_button"),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = if (followed) AccentColor.copy(alpha = 0.2f)
                              else MaterialTheme.colorScheme.surfaceVariant,
