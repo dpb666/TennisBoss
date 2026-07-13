@@ -115,10 +115,15 @@ et dans les docstrings de `db.py`.
 1bis. **Ingestion ATP feature-complète : résolue le 12/07 après incident.** Les
    repos GitHub de Jeff Sackmann ont disparu (~mai-juin 2026) ; restaurée côté
    ATP via `bot/mantennisdata_feeder.py` (nouvelle source, câblée dans le
-   scheduler). **Gap WTA restant** : aucune source gratuite de stats
-   serve/return/BP/TB féminines identifiée — les nouveaux matchs WTA
-   n'alimentent plus que l'ELO/classement (stats neutres) depuis la même
-   date. Voir [[tennisboss-sackmann-incident]] en mémoire ; à surveiller.
+   scheduler). **Gap WTA clutch (BP) : comblé le 12/07** via
+   `bot/mcp_feeder.py` (enrichissement post-hoc depuis
+   github.com/JeffSackmann/tennis_MatchChartingProject, actif et à jour
+   malgré la disparition de tennis_wta — 923 matchs WTA déjà enrichis).
+   **Limite persistante** : c'est un projet crowdsourcé (~200 matchs WTA/an
+   chartés, grands tournois/joueuses connues) — pas une couverture
+   exhaustive, et serve/return1/return2 restent neutres (0.5) même après
+   enrichissement (voir docstring de mcp_feeder.py). Seul le signal clutch
+   (BP sauvées) en profite réellement pour l'instant.
 2. **Pas d'edge prouvé à ce stade** : la couche CLV est en place pour le
    mesurer, mais l'échantillon de picks réglés est encore petit. Le
    positionnement Google Play (« aide à la décision », pas « prédicteur
