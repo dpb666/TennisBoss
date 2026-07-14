@@ -62,6 +62,16 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/UpcomingScreen.kt`
 - **Verified**: `compileDebugKotlin` + `testDebugUnitTest` (54/54) pass, confirmed on the real device that the bug no longer reproduces.
 
+### 3c. Fix stale live odds cache — "matchs introuvables sur Bet365"
+- **Priority**: High (live production bug, user-reported)
+- **Difficulty**: Low
+- **Estimated time**: 20 min
+- **Dependencies**: None
+- **Status**: **Done**, commit `4031e51`, deployed to production (service restarted 2026-07-14, user-confirmed go-ahead). `odds_api.fetch_match_winner()` used a flat 10-minute cache (`TTL_ODDS = 600`) for every call, including 4 live-context sites: the digest loop, `/api/inplay/best`, `/api/inplay/markets` (feeds the Android Live tab directly), and manual-pick odds enrichment. 10 minutes is fine pre-match (odds barely move), but Bet365 suspends/changes in-play markets within seconds during live points — so the app could show a price or a match that no longer existed on the book by the time the user checked, even though the Android Live tab already refreshes every 30s (`LiveViewModel.kt`) on its own.
+- **Fix**: added an optional `ttl` parameter to `fetch_match_winner()` (default `TTL_ODDS`, so all pre-match call sites — `/api/upcoming`, closing-line updates, the pre-match value scanner — are unchanged), and passed `ttl=60` explicitly at the 4 confirmed live-context sites, matching the convention already established by `fetch_live_events()`/`fetch_live_game_markets()` for other live data.
+- **Files involved**: `bot/odds_api.py`, `bot/api.py` (4 call sites: lines ~1145, ~1316, ~1455, ~2567)
+- **Verified**: `python3 -m pytest` 357/357 passed (WSL), `tennisboss-bot.service` restarted cleanly, `/health` responds `200 ok` post-restart.
+
 ### 4. Add unit tests for the 7 untested Android ViewModels
 - **Priority**: High
 - **Difficulty**: Medium
