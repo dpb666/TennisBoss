@@ -4,16 +4,20 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 
 ## Critical
 
-### 0. Decide: core library desugaring vs raise minSdk to 26 (release blocker)
+### 0. Core library desugaring for java.time on minSdk 24-25 (release blocker)
 - **Priority**: Critical
-- **Difficulty**: Low (desugaring) — but it's a support-policy decision, not a mechanical fix
-- **Estimated time**: 15 min once decided
+- **Difficulty**: Low
+- **Estimated time**: 15 min
 - **Dependencies**: None
-- **Status**: **Not started — decision required.** Found during `RELEASE_AUDIT.md` (Phase 11, 2026-07-14): `lintDebug` reports 44 `NewApi` errors — `java.time.*` (`LocalDate`, `ZonedDateTime`, `DateTimeFormatter`, `ZoneId`) used throughout `DateUtils.kt` and `UpcomingScreen.kt` requires API 26, but `minSdk = 24` with no core library desugaring configured. This is a **guaranteed crash** (`NoClassDefFoundError`) on real Android 7.0/7.1 devices the moment Dashboard/Upcoming/MatchDetail render a date — not a probabilistic risk.
-- **Why not auto-fixed**: doesn't block `assembleRelease` (not in the `lintVital` subset that gates the release build — confirmed `assembleRelease` succeeds despite these 44 errors), so per this phase's explicit rule ("fix only if necessary for the release build, no architecture change without validation") this was left for a decision rather than silently patched.
-- **Options**: (A, recommended) enable `coreLibraryDesugaring` — ~15 min, one dependency + one `compileOptions` flag, zero behavior change on API 26+, no minSdk drop. (B) raise `minSdk` to 26 — trivial but silently drops official support for API 24-25 devices, real-world impact unassessed. (C) do nothing — not viable for a real release, this is a live crash bug.
-- **Files involved**: `android/app/build.gradle.kts` (fix site), `android/app/src/main/java/com/tennisboss/app/ui/DateUtils.kt`, `UpcomingScreen.kt` (crash sites, not modified)
-- **Why it matters**: this is the current release blocker. `assembleRelease` succeeding is necessary but not sufficient for "release ready" — see `RELEASE_AUDIT.md`.
+- **Status**: **Done — closed 2026-07-14.** Decision made: enable core library desugaring (option A), `minSdk` stays at 24. Found during `RELEASE_AUDIT.md` (Phase 11): `lintDebug` reported 44 `NewApi` errors — `java.time.*` (`LocalDate`, `ZonedDateTime`, `DateTimeFormatter`, `ZoneId`) used throughout `DateUtils.kt` and `UpcomingScreen.kt` requires API 26, but `minSdk = 24` had no desugaring configured — a guaranteed crash on real Android 7.0/7.1 devices the moment Dashboard/Upcoming/MatchDetail render a date.
+- **Fix applied** (`android/app/build.gradle.kts`): `compileOptions { isCoreLibraryDesugaringEnabled = true }` + `coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")` (latest stable, verified via `maven.google.com`, compatible with AGP 9.2.1). Zero changes to `DateUtils.kt`/`UpcomingScreen.kt` — the whole point of desugaring is that the existing `java.time.*` code works as-is.
+- **Verified**:
+  - `lintDebug`: **0 errors** (was 45 errors), 102 warnings + 1 hint unchanged (pre-existing, unrelated, non-blocking).
+  - `compileDebugKotlin`, `assembleDebug`, `assembleRelease`, `bundleRelease`: all `BUILD SUCCESSFUL`.
+  - `testDebugUnitTest`: 54/54 pass (forced fresh run, not cached).
+  - On-device: installed the desugared APK, exercised Dashboard, MatchDetail, Matchs (À venir — including the `DayPicker`'s French day-name formatting, the exact code path that was crashing), Value (4 sub-tabs), Chat — all render correctly, zero visual regression, zero crash in logcat across the full pass.
+- **Files involved**: `android/app/build.gradle.kts`
+- **Why it matters**: this was the last real release blocker. With this closed, `PROJECT_STATUS.md`'s "Release readiness: NOT READY" should be re-evaluated (see there).
 
 ### 1. Decide the fate of the dormant `app/` FastAPI package
 - **Priority**: Critical

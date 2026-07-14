@@ -61,6 +61,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Permet à java.time.* (utilisé dans DateUtils.kt/UpcomingScreen.kt) de
+        // fonctionner sur minSdk 24-25 sans lever minSdk — voir MASTER_TODO.md #0
+        // (44 erreurs lint NewApi, crash garanti sur Android 7.0/7.1 sans ceci).
+        isCoreLibraryDesugaringEnabled = true
     }
 }
 
@@ -105,4 +109,9 @@ dependencies {
     // Tests unitaires (JVM)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+
+    // Core library desugaring : shim java.time.* etc. pour minSdk 24-25 (voir
+    // compileOptions ci-dessus et MASTER_TODO.md #0). Version verifiee via
+    // maven.google.com — derniere stable, compatible AGP 9.2.1.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

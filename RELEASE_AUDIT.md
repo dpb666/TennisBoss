@@ -177,21 +177,21 @@ Aucun ralentissement visuel observé pendant le parcours (transitions, scroll, c
 
 ## Conclusion
 
-### État global : **NOT READY**
+### État global : **READY** (mis à jour 2026-07-14, suite à la fermeture de MASTER_TODO #0)
 
-Raison : le build release fonctionne maintenant (corrigé), mais l'app contient un crash garanti et reproductible pour toute la tranche Android 7.0/7.1 que `minSdk=24` promet de supporter. Publier en l'état sur le Play Store avec `minSdk=24` affiché serait publier une app cassée pour une partie de son public déclaré. Ce n'est pas un jugement esthétique — `assembleRelease` réussit techniquement, mais "le build passe" ≠ "prêt pour release" quand un crash connu et non résolu touche des écrans cœur de l'app (Dashboard, Upcoming, MatchDetail).
+Les deux bloqueurs identifiés dans cette phase sont maintenant résolus :
 
-### Problèmes restants (par ordre de priorité)
+1. `assembleRelease`/`bundleRelease` cassés → **corrigé** (commit `cf46a5e`, pin `fragment-ktx:1.8.9`).
+2. 44 erreurs `NewApi` (`java.time.*` sur minSdk 24-25 sans desugaring, crash garanti) → **corrigé** (`MASTER_TODO.md` #0) via **core library desugaring** (`coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")`), `minSdk` conservé à 24 comme demandé. Vérifié : `lintDebug` 0 erreurs (était 45), `compileDebugKotlin`/`assembleDebug`/`assembleRelease`/`bundleRelease`/`testDebugUnitTest` (54/54) tous verts, aucune régression visuelle ou fonctionnelle constatée sur device (Dashboard, MatchDetail, Matchs — y compris le `DayPicker` qui utilise exactement les APIs `java.time` concernées —, Value, Chat).
 
-1. **[Critique — décision requise]** 44 erreurs `NewApi` (`java.time.*` sur minSdk 24 sans desugaring) — crash garanti sur API 24-25. Voir 1.3 pour les 3 options. **Recommandation : option A (core library desugaring)** — la plus sûre, la moins invasive, ne change aucun comportement sur les appareils qui fonctionnent déjà.
-2. **[Moyen — décision différée]** `security-crypto` alpha → stable disponible (1.1.0) — explicitement hors scope de cette phase, mais maintenant qu'une version stable existe, ça vaut le coup de le noter pour `MASTER_TODO.md` #8.
-3. **[Bas — décision différée]** `isMinifyEnabled = false` en release — le shrinking R8 n'est pas exercé malgré des règles ProGuard configurées. Activer nécessiterait de valider ces règles (risque Gson/Retrofit), pas fait cette phase.
-4. **[Bas — informationnel]** Release APK non signé (attendu à ce stade — un vrai déploiement Play Store nécessitera une configuration de signature, absente du repo, ce qui est correct : aucun keystore ne doit être commité).
-5. **[Bas — informationnel]** 102 avertissements lint non bloquants (`DefaultLocale`, dépendances datées, style), voir 1.3 pour le détail complet.
-6. **[Bas — informationnel]** Démarrage à froid ~7-8s sur émulateur — piste identifiée (`TokenManager.initialize()` synchrone), non modifiée (choix architectural déjà documenté, touche au stockage des tokens).
+### Problèmes restants (aucun n'est un bloqueur de release)
+
+1. **[Moyen — décision différée]** `security-crypto` alpha → stable disponible (1.1.0) — explicitement hors scope, non touché.
+2. **[Bas — décision différée]** `isMinifyEnabled = false` en release — le shrinking R8 n'est pas exercé malgré des règles ProGuard configurées. Activer nécessiterait de valider ces règles (risque Gson/Retrofit), pas fait.
+3. **[Bas — informationnel]** Release APK non signé (attendu à ce stade — un vrai déploiement Play Store nécessitera une configuration de signature, absente du repo, ce qui est correct : aucun keystore ne doit être commité).
+4. **[Bas — informationnel]** 102 avertissements lint non bloquants (`DefaultLocale`, dépendances datées, style), inchangés par le fix de desugaring — voir 1.3 pour le détail complet.
+5. **[Bas — informationnel]** Démarrage à froid ~7-8s sur émulateur — piste identifiée (`TokenManager.initialize()` synchrone), non modifiée (choix architectural déjà documenté, touche au stockage des tokens).
 
 ### Hash du dernier commit
 
-```
-cf46a5e Fix: assembleRelease etait casse - fragment transitif trop vieux
-```
+Voir le commit de clôture de MASTER_TODO #0 (`Fix: enable Core Library Desugaring (MASTER_TODO #0)`), postérieur à `cf46a5e`.

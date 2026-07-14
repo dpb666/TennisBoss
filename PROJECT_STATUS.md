@@ -11,11 +11,11 @@ _Audit date: 2026-07-14. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 | Autonomous mode (scheduler/supervisor) | 100% | 7 scheduled jobs, systemd services, all confirmed active. |
 | Android app | ~85% | 13 screens/ViewModels, MVVM, real error/loading states. No Room/offline (deliberately deferred). |
 | Testing | Backend 357 tests passing / Android 54 tests passing | See TEST_REPORT.md — 13/13 Android ViewModels covered. |
-| Release readiness | **NOT READY** | See `RELEASE_AUDIT.md` (2026-07-14, Phase 11). `assembleRelease` was broken (fixed, commit `cf46a5e`) but a real crash-on-launch bug remains for Android 7.0/7.1 (API 24-25) devices — `minSdk=24` promises support the code doesn't deliver (`java.time.*` used without core library desugaring). Decision required before shipping: enable desugaring, or raise `minSdk` to 26. |
+| Release readiness | **READY** | See `RELEASE_AUDIT.md` (2026-07-14, Phase 11) + `MASTER_TODO.md` #0. Both release blockers found this phase are now resolved: `assembleRelease` was broken (fixed, commit `cf46a5e`), and the `java.time.*`/minSdk 24-25 crash bug is fixed via core library desugaring (`minSdk` unchanged at 24) — `lintDebug` now reports 0 errors (was 45), `assembleRelease`/`bundleRelease`/`testDebugUnitTest` (54/54) all pass, verified crash-free on-device across Dashboard/MatchDetail/Matchs/Value/Chat. |
 | Deployment (Docker/systemd/CI) | ~95% | Working GitHub Actions CI (backend pytest + Android unit tests), Dockerfile + compose, systemd units, DEPLOYMENT.md. |
 | Documentation hygiene | ~80% | `docs/AUDIT.md` didn't know about the dormant `app/` FastAPI service (see below) until this audit — **since removed**, closing that gap. |
 
-**Overall: ~89% toward a stable, production-usable app**, but **not release-ready as of 2026-07-14** — see `RELEASE_AUDIT.md` for the specific blocker and the 3 options to resolve it. With Android ViewModel test coverage complete (13/13) and the highest-traffic `testTag` coverage done, the remaining gap to RC1 is now concentrated in one real correctness decision (minSdk/desugaring), not missing functionality.
+**Overall: ~90% toward a stable, production-usable app — release-ready as of 2026-07-14.** Both blockers surfaced by `RELEASE_AUDIT.md` (broken `assembleRelease`, and the `java.time.*` crash on API 24-25) are now fixed and verified. Remaining lower-priority items (`security-crypto` alpha, R8 shrinking disabled, dependency staleness, 102 non-blocking lint warnings) are documented but explicitly deferred, not gaps to close before shipping.
 
 ## Working features (verified this session, not just claimed)
 
@@ -73,7 +73,7 @@ _Audit date: 2026-07-14. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 
 - `assembleDebug`, `compileDebugKotlin`, `testDebugUnitTest` all succeed cleanly. Backend test suite (357 tests, post-`app/`-removal) passes in ~30s.
 - ~~`assembleRelease`/`bundleRelease` were completely broken~~ — **fixed 2026-07-14** (commit `cf46a5e`): `lintVitalRelease` failed on `InvalidFragmentVersionForActivityResult` (Google Play Services transitively pulls `androidx.fragment:1.1.0`, too old for the `ActivityResult` APIs used in `MainActivity.kt`). Fixed by pinning `androidx.fragment:fragment-ktx:1.8.9` as a direct dependency. Verified: `assembleRelease` now succeeds (confirmed it failed before the fix, and succeeds after, twice).
-- **Full `lintDebug` reveals a real crash bug, separate from the above**: 44 `NewApi` errors — `java.time.*` (used throughout `DateUtils.kt`/`UpcomingScreen.kt`, critical-path date formatting on Dashboard/Upcoming/MatchDetail) requires API 26, but `minSdk=24` with no core library desugaring configured. This crashes immediately on real Android 7.0/7.1 devices. Does not block `assembleRelease` (not in the `lintVital` subset), so left for explicit decision rather than silently fixed — see `RELEASE_AUDIT.md` for the 3 options (desugaring recommended). This is the current release blocker.
+- ~~Full `lintDebug` revealed a real crash bug~~ — **fixed 2026-07-14** (`MASTER_TODO.md` #0): 44 `NewApi` errors, `java.time.*` (used throughout `DateUtils.kt`/`UpcomingScreen.kt`) requiring API 26 on a `minSdk=24` app with no desugaring — guaranteed crash on Android 7.0/7.1. Fixed via `coreLibraryDesugaring` (`desugar_jdk_libs:2.1.5`), `minSdk` unchanged. `lintDebug` now reports 0 errors. Verified crash-free on-device.
 
 ---
 See `MASTER_TODO.md` for the prioritized, file-referenced action list derived from this audit.
