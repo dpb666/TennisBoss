@@ -419,8 +419,17 @@ def build_time_index(events: List[Dict[str, Any]]) -> Dict[frozenset, str]:
 
 
 def fetch_match_winner(event_id: Any,
-                       bookmakers: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                       bookmakers: Optional[str] = None,
+                       ttl: float = TTL_ODDS) -> Optional[Dict[str, Any]]:
     """Cotes "ML" (vainqueur de match) -> probabilités implicites SANS vig.
+
+    ttl=TTL_ODDS (10min) par défaut, pensé pour le pré-match où les cotes
+    bougent peu. Les appelants en contexte live (event déjà en cours,
+    marchés qui bougent/se suspendent en quelques secondes sur Bet365)
+    doivent passer un ttl plus court (ex. 60s, cf. fetch_live_events) —
+    sinon les cotes/picks affichés peuvent référencer un prix ou un marché
+    qui n'existe déjà plus chez le book au moment où l'utilisateur regarde
+    ("match introuvable sur bet365").
 
     Renvoie {home_prob, away_prob, home_odds, away_odds, books} ou None.
     """
@@ -430,7 +439,7 @@ def fetch_match_winner(event_id: Any,
         bookmakers = _bookmakers()
     sharp = _sharp_book()
     data = _get("/odds", {"eventId": event_id, "bookmakers": bookmakers},
-                ttl=TTL_ODDS)
+                ttl=ttl)
     if not isinstance(data, dict):
         return None
 

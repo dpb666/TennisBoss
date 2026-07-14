@@ -1142,7 +1142,7 @@ def api_live():
         _lg_n = (_ev.get("league") or {}).get("name", "") if isinstance(_ev.get("league"), dict) else str(_ev.get("league", ""))
         if "ATP" in _lg_n or "WTA" in _lg_n:
             try:
-                _mw = odds_api.fetch_match_winner(_ev["id"])
+                _mw = odds_api.fetch_match_winner(_ev["id"], ttl=60)
                 if _mw:
                     _odds_fetched[str(_ev["id"])] = _mw
                     _odds_budget -= 1
@@ -1313,7 +1313,7 @@ def api_inplay_best():
         live_mw = None
         if len(candidates) < 20:
             try:
-                live_mw = odds_api.fetch_match_winner(e["id"])
+                live_mw = odds_api.fetch_match_winner(e["id"], ttl=60)
             except Exception as exc:
                 log(f"fetch_match_winner échoué pour event {e.get('id')} (inplay/best) ({exc}) — ignoré.", "WARN")
 
@@ -1452,7 +1452,7 @@ def api_inplay_markets():
             else:
                 mw_name, mw_prob = n2, 1.0 - _mw_pm1
             mw_conf = "Forte" if mw_prob > 0.70 else "Moyenne" if mw_prob > 0.57 else "Faible"
-            live_mw = odds_api.fetch_match_winner(event_id) if event_id else None
+            live_mw = odds_api.fetch_match_winner(event_id, ttl=60) if event_id else None
             mw_odds = None
             if live_mw and live_mw.get("home_odds") and live_mw.get("away_odds"):
                 mw_odds = live_mw["home_odds"] if mw_name == n1 else live_mw["away_odds"]
@@ -2564,7 +2564,7 @@ def api_inplay_picks_log():
     if not odds_home and eid:
         # 2. Fallback : appel direct odds-api.io Betfair Exchange
         try:
-            mw = odds_api.fetch_match_winner(eid)
+            mw = odds_api.fetch_match_winner(eid, ttl=60)
             if mw and mw.get("home_odds"):
                 odds_home = mw["home_odds"]
                 odds_away = mw["away_odds"]
