@@ -1,6 +1,6 @@
 # TennisBoss — Project Status
 
-_Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose (`android/`). This supersedes nothing in `docs/AUDIT.md` (2026-07-11) or `android/ANDROID_AUDIT.md` — it verifies both against the current repo state and adds what they missed._
+_Audit date: 2026-07-14. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose (`android/`). This supersedes nothing in `docs/AUDIT.md` (2026-07-11) or `android/ANDROID_AUDIT.md` — it verifies both against the current repo state and adds what they missed._
 
 ## Completion estimate
 
@@ -10,11 +10,12 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 | Backend API (`bot/api.py`) | ~95% | ~45 routes, centralized auth, rate limiting where it matters (odds quota), Swagger/OpenAPI. |
 | Autonomous mode (scheduler/supervisor) | 100% | 7 scheduled jobs, systemd services, all confirmed active. |
 | Android app | ~85% | 13 screens/ViewModels, MVVM, real error/loading states. No Room/offline (deliberately deferred). |
-| Testing | Backend 357 tests passing / Android 53 tests passing | See TEST_REPORT.md — 13/13 Android ViewModels now covered (was 6/13). |
+| Testing | Backend 357 tests passing / Android 54 tests passing | See TEST_REPORT.md — 13/13 Android ViewModels covered. |
+| Release readiness | **NOT READY** | See `RELEASE_AUDIT.md` (2026-07-14, Phase 11). `assembleRelease` was broken (fixed, commit `cf46a5e`) but a real crash-on-launch bug remains for Android 7.0/7.1 (API 24-25) devices — `minSdk=24` promises support the code doesn't deliver (`java.time.*` used without core library desugaring). Decision required before shipping: enable desugaring, or raise `minSdk` to 26. |
 | Deployment (Docker/systemd/CI) | ~95% | Working GitHub Actions CI (backend pytest + Android unit tests), Dockerfile + compose, systemd units, DEPLOYMENT.md. |
 | Documentation hygiene | ~80% | `docs/AUDIT.md` didn't know about the dormant `app/` FastAPI service (see below) until this audit — **since removed**, closing that gap. |
 
-**Overall: ~89% toward a stable, production-usable app.** With Android ViewModel test coverage now complete (13/13), the gap to "RC1" is concentrated in the remaining orphaned backend modules (kept per explicit user decision, not a gap to close autonomously) and lower-priority polish (Compose `testTag`s, accessibility, dependency bumps) — not in missing core functionality.
+**Overall: ~89% toward a stable, production-usable app**, but **not release-ready as of 2026-07-14** — see `RELEASE_AUDIT.md` for the specific blocker and the 3 options to resolve it. With Android ViewModel test coverage complete (13/13) and the highest-traffic `testTag` coverage done, the remaining gap to RC1 is now concentrated in one real correctness decision (minSdk/desugaring), not missing functionality.
 
 ## Working features (verified this session, not just claimed)
 
@@ -70,7 +71,9 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 
 ## Build issues
 
-- None. `./gradlew assembleDebug`, `compileDebugKotlin`, and `testDebugUnitTest` all succeed cleanly as of this audit. Backend test suite (403 tests) passes in ~30s.
+- `assembleDebug`, `compileDebugKotlin`, `testDebugUnitTest` all succeed cleanly. Backend test suite (357 tests, post-`app/`-removal) passes in ~30s.
+- ~~`assembleRelease`/`bundleRelease` were completely broken~~ — **fixed 2026-07-14** (commit `cf46a5e`): `lintVitalRelease` failed on `InvalidFragmentVersionForActivityResult` (Google Play Services transitively pulls `androidx.fragment:1.1.0`, too old for the `ActivityResult` APIs used in `MainActivity.kt`). Fixed by pinning `androidx.fragment:fragment-ktx:1.8.9` as a direct dependency. Verified: `assembleRelease` now succeeds (confirmed it failed before the fix, and succeeds after, twice).
+- **Full `lintDebug` reveals a real crash bug, separate from the above**: 44 `NewApi` errors — `java.time.*` (used throughout `DateUtils.kt`/`UpcomingScreen.kt`, critical-path date formatting on Dashboard/Upcoming/MatchDetail) requires API 26, but `minSdk=24` with no core library desugaring configured. This crashes immediately on real Android 7.0/7.1 devices. Does not block `assembleRelease` (not in the `lintVital` subset), so left for explicit decision rather than silently fixed — see `RELEASE_AUDIT.md` for the 3 options (desugaring recommended). This is the current release blocker.
 
 ---
 See `MASTER_TODO.md` for the prioritized, file-referenced action list derived from this audit.

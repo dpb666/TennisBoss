@@ -4,6 +4,17 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 
 ## Critical
 
+### 0. Decide: core library desugaring vs raise minSdk to 26 (release blocker)
+- **Priority**: Critical
+- **Difficulty**: Low (desugaring) — but it's a support-policy decision, not a mechanical fix
+- **Estimated time**: 15 min once decided
+- **Dependencies**: None
+- **Status**: **Not started — decision required.** Found during `RELEASE_AUDIT.md` (Phase 11, 2026-07-14): `lintDebug` reports 44 `NewApi` errors — `java.time.*` (`LocalDate`, `ZonedDateTime`, `DateTimeFormatter`, `ZoneId`) used throughout `DateUtils.kt` and `UpcomingScreen.kt` requires API 26, but `minSdk = 24` with no core library desugaring configured. This is a **guaranteed crash** (`NoClassDefFoundError`) on real Android 7.0/7.1 devices the moment Dashboard/Upcoming/MatchDetail render a date — not a probabilistic risk.
+- **Why not auto-fixed**: doesn't block `assembleRelease` (not in the `lintVital` subset that gates the release build — confirmed `assembleRelease` succeeds despite these 44 errors), so per this phase's explicit rule ("fix only if necessary for the release build, no architecture change without validation") this was left for a decision rather than silently patched.
+- **Options**: (A, recommended) enable `coreLibraryDesugaring` — ~15 min, one dependency + one `compileOptions` flag, zero behavior change on API 26+, no minSdk drop. (B) raise `minSdk` to 26 — trivial but silently drops official support for API 24-25 devices, real-world impact unassessed. (C) do nothing — not viable for a real release, this is a live crash bug.
+- **Files involved**: `android/app/build.gradle.kts` (fix site), `android/app/src/main/java/com/tennisboss/app/ui/DateUtils.kt`, `UpcomingScreen.kt` (crash sites, not modified)
+- **Why it matters**: this is the current release blocker. `assembleRelease` succeeding is necessary but not sufficient for "release ready" — see `RELEASE_AUDIT.md`.
+
 ### 1. Decide the fate of the dormant `app/` FastAPI package
 - **Priority**: Critical
 - **Status**: **Done — removed**, with explicit user sign-off (2026-07-13).
