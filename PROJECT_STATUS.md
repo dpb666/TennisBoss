@@ -41,7 +41,7 @@ _Audit date: 2026-07-13. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 - ~~Heavy `except Exception: pass` silent-swallow pattern in `bot/api.py` (31 occurrences)~~ — **fixed this session**: 26 now log a specific `WARN` message, 3 left intentionally silent with a documented reason (see `MASTER_TODO.md` #7). Not yet deployed to the live service (needs a restart).
 - Android: `StatCard` duplicated byte-for-byte in `EdgeScreen.kt:183` and `PerformanceScreen.kt:320`; `RecentRow` likely duplicated the same way.
 - `androidx.security:security-crypto:1.1.0-alpha06` — still alpha, used for token storage (`TokenManager.kt`) in what is otherwise a production app.
-- Compose BOM (`2024.09.03`) is over a year old relative to today; likely several releases behind.
+- ~~Compose BOM (`2024.09.03`) is over a year old~~ — **bumped to `2026.06.01` 2026-07-14**, verified against real Maven Google metadata, zero compile errors, confirmed on-device with no visual regression.
 - Zero Compose `testTag`/semantics anywhere in the Android UI — makes any future UI-automation testing fragile (confirmed hands-on this session: every interaction had to be located by raw text or hand-computed pixel coordinates via `uiautomator dump`).
 
 ## Risks

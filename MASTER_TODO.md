@@ -83,9 +83,11 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Low (bump) / Medium (crypto lib — needs testing token storage still works)
 - **Estimated time**: 1h
 - **Dependencies**: None
-- **Status**: Not started
-- **Files involved**: `android/app/build.gradle.kts`, `android/app/src/main/java/com/tennisboss/app/TokenManager.kt`
-- **Why it matters**: Shipping an alpha-versioned crypto library (`androidx.security:security-crypto:1.1.0-alpha06`) for token storage in a production app is a stability risk if Google ships a breaking change; Compose BOM is over a year stale.
+- **Status**: **Compose BOM bump done** (`2024.09.03` → `2026.06.01`, verified against the real Maven Google metadata — a session-earlier attempt to do this was deferred for lack of a way to verify an exact version without network access; confirmed network access was actually available and fetched the real version list this time). `security-crypto` alpha dependency **left alone** — that's the higher-blast-radius half (touches token storage), still needs explicit approval per this session's standing convention on higher-risk dependency swaps.
+- **What changed**: `android/app/build.gradle.kts`'s `compose-bom` version only. No source changes needed — the huge version gap (18 months of releases) produced zero compile errors, only new deprecation warnings (`TabRow` → `PrimaryTabRow`/`SecondaryTabRow` in 4 files: `NavGroups.kt` x3, `PerformanceScreen.kt`, `ValueScreen.kt`) which were **not** auto-fixed since `PrimaryTabRow` changes the default visual style — that's a UI decision, not a mechanical rename.
+- **Verified**: `compileDebugKotlin` + `testDebugUnitTest` (54/54) + `assembleDebug` all pass; confirmed on-device (Dashboard, Value screen with its `TabRow` sub-tabs) — no visual regression, no crash.
+- **Files involved**: `android/app/build.gradle.kts`, `android/app/src/main/java/com/tennisboss/app/TokenManager.kt` (crypto swap still pending, not touched)
+- **Why it matters**: Shipping an alpha-versioned crypto library (`androidx.security:security-crypto:1.1.0-alpha06`) for token storage in a production app is a stability risk if Google ships a breaking change; the Compose BOM staleness is now resolved.
 
 ### 9. Document the `db.connect()`-per-call convention
 - **Priority**: Medium
