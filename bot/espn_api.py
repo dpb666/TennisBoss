@@ -141,6 +141,7 @@ def fetch_upcoming(days_ahead: int = 3) -> List[Dict]:
     Même format que live_api._parse_fixture().
     """
     import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     cutoff = (_dt.datetime.utcnow() + _dt.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
     atp = _fetch_tour("atp", "atp")
@@ -153,6 +154,13 @@ def fetch_upcoming(days_ahead: int = 3) -> List[Dict]:
         if status not in LIVE_STATUSES and status not in UPCOMING_STATUSES:
             continue
         if f["date"] > cutoff:
+            continue
+        # Filet de sécurité : un fixture "scheduled"/"upcoming" côté ESPN avec
+        # une date déjà passée (report non reflété, retard de statut) ne doit
+        # pas apparaître dans "à venir" — constaté en prod : des matchs de la
+        # veille affichés sur le Dashboard. Les matchs LIVE gardent une date du
+        # jour par définition, donc ce filtre ne les affecte pas en pratique.
+        if f["date"] < today:
             continue
         out.append(f)
 
