@@ -450,7 +450,12 @@ private fun MatchCard(m: UpcomingMatch, onClick: () -> Unit) {
                         barColor = Color(0xFF00E5A0),
                     )
                 }
-                if (pred.target_160 && pred.fair_odds != null) {
+                // pred.favorite est null quand le match est trop serré pour trancher
+                // (écart de proba < 4%, voir bot/predictor.py) — target_160/fair_odds
+                // restent calculés dans ce cas, donc il faut aussi garder favorite
+                // non-null ici, sinon la ligne affiche littéralement "null" (constaté
+                // en prod : "1er set jouable : null @ cote juste 1.99").
+                if (pred.target_160 && pred.fair_odds != null && pred.favorite != null) {
                     Text(
                         "🎯 1er set jouable : ${pred.favorite} @ cote juste ${pred.fair_odds} (≥1.60)",
                         style = MaterialTheme.typography.bodySmall,
