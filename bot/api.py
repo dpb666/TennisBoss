@@ -841,6 +841,7 @@ _UPCOMING_TTL = 270  # 4.5 min — ESPN change rarement plus vite
 @limiter.limit("20 per minute")  # protège le quota odds-api.io partagé (100 req/h)
 def api_upcoming():
     import time as _t
+    import datetime as _dt
     days = min(int(request.args.get("days", 2)), 7)
     limit = min(int(request.args.get("limit", 25)), 100)
     want_odds = request.args.get("odds", "false").lower() == "true"
@@ -932,6 +933,20 @@ def api_upcoming():
                 log(f"Inplay inject: {added_live} matchs live ITF/UTR ajoutés à upcoming.", "INFO")
         except Exception as exc:
             log(f"Inplay inject (matchs live ITF/UTR) échoué ({exc}) — ignoré.", "WARN")
+
+    # Filet de sécurité global : quelle que soit la source (API-Tennis, ESPN,
+    # odds-api.io, OddsPapi, injection live), un fixture non-live daté d'avant
+    # aujourd'hui ne doit jamais atteindre l'app — c'est ce qui produisait des
+    # matchs de la veille sur le Dashboard (2026-07-14, voir MASTER_TODO.md
+    # #3d). Chaque source a déjà été corrigée individuellement ; ce filtre est
+    # une seconde ligne de défense pour qu'une future source avec le même bug
+    # ne puisse plus reproduire le symptôme en prod.
+    _today_str = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    _before = len(fixtures)
+    fixtures = [f for f in fixtures if f.get("live") or f.get("date", "") >= _today_str]
+    if len(fixtures) < _before:
+        log(f"Filet de sécurité upcoming : {_before - len(fixtures)} fixture(s) daté(s) "
+            f"avant aujourd'hui écarté(s) (source non identifiée individuellement).", "WARN")
 
     # Priorité ATP/WTA avant Challenger/ITF/UTR dans l'ordre de troncature :
     # le cap `limit` (défaut 100) coupe la liste avant la fin, et le volume

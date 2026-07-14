@@ -264,6 +264,47 @@ def test_upcoming_prioritizes_atp_wta_over_challenger_when_truncated():
     assert ("Atp1", "AtpA") in pairs
 
 
+def test_upcoming_global_safety_filter_drops_stale_dated_fixtures():
+    """Filet de sécurité (MASTER_TODO.md #3d) : même si une source individuelle
+    a un bug et renvoie un fixture non-live daté d'avant aujourd'hui,
+    api_upcoming() doit l'écarter avant de répondre — quelle que soit la
+    source. Régression du bug "matchs de la veille sur le Dashboard"
+    (2026-07-14), qui avait 2 root causes distinctes (ESPN + odds-api.io) déjà
+    corrigées individuellement ; ce test couvre la seconde ligne de défense,
+    pas les fixes eux-mêmes (voir test_espn_api.py / test_live_api_upcoming.py)."""
+    import datetime as _dt
+    yesterday = (_dt.datetime.utcnow() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    espn_fixtures = [
+        {  # simule une source individuelle qui a laissé fuiter un match d'hier
+            "player1": "Stale", "player2": "Yesterday", "tournament": "X",
+            "round": "", "date": yesterday, "time": "10:00", "live": False,
+            "event_key": "stale1", "is_doubles": False, "tour": "atp",
+        },
+        {
+            "player1": "Fresh", "player2": "Today", "tournament": "X",
+            "round": "", "date": today, "time": "10:00", "live": False,
+            "event_key": "fresh1", "is_doubles": False, "tour": "atp",
+        },
+        {  # un match live daté d'hier reste légitime (commencé hier, en cours)
+            "player1": "Live", "player2": "StillGoing", "tournament": "X",
+            "round": "", "date": yesterday, "time": "23:00", "live": True,
+            "event_key": "live1", "is_doubles": False, "tour": "atp",
+        },
+    ]
+    with patch.object(api.live_api, "fetch_upcoming", return_value=[]), \
+         patch.object(api.espn_api, "fetch_upcoming", return_value=espn_fixtures), \
+         patch.object(api.odds_api, "is_enabled", return_value=False), \
+         patch.object(api.oddspapi_feeder, "is_enabled", return_value=False):
+        resp = _client().get("/api/upcoming?days=1&limit=95")  # cache key unique
+    data = resp.get_json()
+    assert resp.status_code == 200
+    pairs = {(m["player1_raw"], m["player2_raw"]) for m in data["matches"]}
+    assert ("Stale", "Yesterday") not in pairs
+    assert ("Fresh", "Today") in pairs
+    assert ("Live", "StillGoing") in pairs
+
+
 # ─── settlement/run ───────────────────────────────────────────────────────────
 
 def test_settlement_run_returns_summary_and_calibration():
