@@ -72,6 +72,18 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Files involved**: `bot/odds_api.py`, `bot/api.py` (4 call sites: lines ~1145, ~1316, ~1455, ~2567)
 - **Verified**: `python3 -m pytest` 357/357 passed (WSL), `tennisboss-bot.service` restarted cleanly, `/health` responds `200 ok` post-restart.
 
+### 3d. Fix stale matches from the previous day leaking into "Matchs à venir" (Dashboard)
+- **Priority**: High (live production bug, user-reported)
+- **Difficulty**: Low
+- **Estimated time**: 30 min (2 root causes, same bug class in 2 places)
+- **Dependencies**: None
+- **Status**: **Done**, commits `e02db9a` + `42e84b6`, deployed to production (2 service restarts, user-confirmed each time). User reported the Dashboard/"Matchs à venir" showing matches dated the 13th on the 14th. Confirmed live via `/api/upcoming?days=1`: 2 WTA matches dated `2026-07-13` mixed into the response.
+- **Root cause 1** (`bot/espn_api.py::fetch_upcoming`): only filtered the *future* cutoff (`f["date"] > cutoff: continue`), never excluded fixtures dated *before* today. A fixture ESPN still marks `scheduled`/`live` with a stale past date (postponement not reflected, status lag) passed straight through. Since API-Tennis is currently inactive in production, ESPN is the de facto primary fixture source, so this bug was fully live.
+- **Root cause 2** (`bot/live_api.py::_fetch_upcoming_oddsapi`) — found because the fix above didn't fully resolve the symptom; the 2 leaking matches turned out to have `"source": "odds-api.io"`, not ESPN. `_parse_oddsapi_fixture()` derives the fixture's `date` from the event's own `commence_time`, not from the `date=` query parameter sent to odds-api.io — so requesting "today's matches" doesn't guarantee the returned events are actually dated today once re-parsed. Same missing-lower-bound-filter bug, one layer deeper.
+- **Fix**: added a matching lower-bound date check (`f["date"] < today`) at both sites, using the same UTC date-string reference frame already used by each function's existing upper-bound check — no new timezone inconsistency introduced. Live-status fixtures are exempted from the check (a match starting on the prior calendar day but still live into today is legitimate).
+- **Files involved**: `bot/espn_api.py`, `bot/live_api.py`
+- **Verified**: isolated test with mocked fixtures (past match excluded, today/tomorrow kept) + `python3 -m pytest` 357/357 passed (WSL), both fixes deployed and confirmed live — `/api/upcoming?days=1` and `?days=3` both return zero stale matches post-deploy.
+
 ### 4. Add unit tests for the 7 untested Android ViewModels
 - **Priority**: High
 - **Difficulty**: Medium
