@@ -52,6 +52,16 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Verified**: `compileDebugKotlin` + `testDebugUnitTest` pass, confirmed live on emulator — cards now read "Confiance : élevée" / "🌤️ Conditions +10.5%" instead of the ambiguous "bonne" / "⚠️ HONEYPOT".
 - **Note**: this fixed the *labeling*, which was the actual defect (the underlying signals were correct all along, just mislabeled in a way that read as contradictory). If a real disagreement case exists (honeypot beneficiary opposite the model/market favorite), that would still show two amber-ish chips that don't visually resolve to a single verdict — worth a follow-up if that combination is ever observed live.
 
+### 3b. Fix `"1er set jouable : null"` in Matchs à venir
+- **Priority**: High (found live on a real device in production, not a hypothetical)
+- **Difficulty**: Low
+- **Estimated time**: 10 min
+- **Dependencies**: None
+- **Status**: **Done**, commit `b96e478`. `pred.favorite` (`String?`) is intentionally `null` for near-50/50 matches (`abs(p1-p2) < 0.04`, `bot/predictor.py:229-231`) — a genuine "too close to call" signal, not a bug. But `target_160`/`fair_odds` are computed independently and stay set in that case, and `UpcomingScreen.kt:455`'s "🎯 1er set jouable" line interpolated `pred.favorite` without checking it was non-null first — so it rendered the literal string `"null"` in production (`"1er set jouable : null @ cote juste 1.99 (≥1.60)"`). Fixed by adding `&& pred.favorite != null` to the guard, matching the convention already used correctly for the same field in `LiveScreen.kt` (`pred.favorite ?: return`).
+- **Follow-up scan**: dispatched a targeted search across every nullable field in `data/ApiModels.kt` against every `Text(...)`/string-interpolation site in `ui/*.kt` and `ui/components/*.kt` for the same unguarded-null pattern. **No other instances found** — every other nullable-field interpolation in the codebase is already correctly guarded (`?.let{}`, `?:`, or an enclosing `if (x != null)`). This was an isolated miss, not a systemic pattern.
+- **Files involved**: `android/app/src/main/java/com/tennisboss/app/ui/UpcomingScreen.kt`
+- **Verified**: `compileDebugKotlin` + `testDebugUnitTest` (54/54) pass, confirmed on the real device that the bug no longer reproduces.
+
 ### 4. Add unit tests for the 7 untested Android ViewModels
 - **Priority**: High
 - **Difficulty**: Medium

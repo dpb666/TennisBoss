@@ -27,9 +27,10 @@ _Audit date: 2026-07-14. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose
 
 ## Broken / genuinely risky
 
-1. **`SurfaceBadge` name collision** (Android) — two different Composables named identically: `ui/components/SurfaceBadge.kt` (keyed on surface: clay/hard/grass) vs. `ui/UpcomingScreen.kt:905` (keyed on tournament-name substring). Compiles fine today because of package scoping, but importing the wrong one silently gives wrong colors/logic. **Real bug risk, not yet a confirmed live bug.**
-2. **Dashboard "Meilleures opportunités" card shows contradictory tags** — observed live on-device: a match tagged `bonne` (good) sits next to `Pas de value` (no value) and a `HONEYPOT +23.0%` warning on the same card. Confusing to a real user; needs a UX/copy decision, not just a bug fix (see UI_REPORT.md).
+1. ~~`SurfaceBadge` name collision~~ — **fixed** (`MASTER_TODO.md` #2).
+2. ~~Dashboard "Meilleures opportunités" card shows contradictory tags~~ — **fixed** (`MASTER_TODO.md` #3).
 3. ~~Undocumented dormant `app/` FastAPI package~~ — **removed 2026-07-13** with user sign-off, after confirming no reachable code depended on it (`bot/clv.py`'s import already had a working fallback; the two `bot/` files with hard imports were themselves dead code). Restore point: git tag `pre-app-removal-backup`. See MASTER_TODO.md #1.
+4. **`"1er set jouable : null"` displayed in Matchs à venir** — found live in production 2026-07-14: `pred.favorite` (nullable, intentionally `None` for near-50/50 matches per `bot/predictor.py`) was interpolated into a `Text(...)` without a null-guard. **Fixed** (commit `b96e478`) — a targeted follow-up scan of every other nullable-field interpolation across the Android UI found no other instances of this bug class (all other sites already correctly guarded).
 
 ## Missing features (deliberately deferred, not bugs)
 
