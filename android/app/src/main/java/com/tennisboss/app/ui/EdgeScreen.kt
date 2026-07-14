@@ -17,6 +17,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,7 +52,7 @@ fun EdgeScreen(vm: EdgeViewModel = viewModel()) {
     LaunchedEffect(Unit) { vm.load() }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp).testTag("edge_screen"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("💰 Edge — Closing Line Value", style = MaterialTheme.typography.headlineSmall,
