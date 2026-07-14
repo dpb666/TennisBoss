@@ -223,6 +223,7 @@ def _fetch_upcoming_oddsapi(days_ahead: int = 2) -> List[Dict]:
             if f:
                 out.append(f)
         # Matchs par date (aujourd'hui + N jours)
+        today_str = _dt.date.today().isoformat()
         for d in range(days_ahead + 1):
             date = (_dt.date.today() + _dt.timedelta(days=d)).isoformat()
             events = _oa._get("/events", {"sport": "tennis", "date": date}, ttl=TTL_FIXTURES) or []
@@ -230,8 +231,16 @@ def _fetch_upcoming_oddsapi(days_ahead: int = 2) -> List[Dict]:
                 if e.get("status") in ("settled", "canceled"):
                     continue
                 f = _parse_oddsapi_fixture(e, live=False)
-                if f:
-                    out.append(f)
+                if not f:
+                    continue
+                # Le paramètre `date` envoyé à odds-api.io ne garantit pas que
+                # l'event renvoyé a bien cette date une fois son propre
+                # commence_time reparsé (cf. _parse_oddsapi_fixture) — constaté
+                # en prod : des matchs de la veille (déjà joués) remontaient
+                # dans "à venir" alors qu'on ne demandait que today/today+N.
+                if f["date"] < today_str:
+                    continue
+                out.append(f)
         seen: set = set()
         deduped = []
         for f in out:
