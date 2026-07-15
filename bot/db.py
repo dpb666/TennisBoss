@@ -164,6 +164,17 @@ CREATE TABLE IF NOT EXISTS followed_players (
     name        TEXT PRIMARY KEY,   -- nom résolu (même convention que predictions.player1/2)
     followed_ts TEXT
 );
+CREATE TABLE IF NOT EXISTS followed_matches (
+    event_key        TEXT PRIMARY KEY,   -- id odds-api ou clé composite p1|p2|date
+    player1          TEXT,
+    player2          TEXT,
+    match_date       TEXT,
+    tournament       TEXT,
+    followed_ts      TEXT,
+    last_odds_home   REAL,               -- dernière cote vue (refresh prioritaire)
+    last_odds_away   REAL,
+    last_refresh_ts  TEXT
+);
 CREATE TABLE IF NOT EXISTS live_prob_snapshots (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     event_key  TEXT,            -- id événement live (regroupe les points d'un même match)
@@ -215,6 +226,25 @@ CREATE TABLE IF NOT EXISTS historical_odds (
 );
 CREATE INDEX IF NOT EXISTS idx_hist_odds_date ON historical_odds(date);
 CREATE INDEX IF NOT EXISTS idx_inplay_ts ON inplay_picks(ts);
+CREATE TABLE IF NOT EXISTS bet_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key      TEXT,
+    player1        TEXT,
+    player2        TEXT,
+    date           TEXT,
+    prediction     REAL,
+    pick_side      TEXT,
+    odds           REAL,
+    confidence     REAL,
+    result         INTEGER,
+    profit_loss    REAL,
+    clv_pct        REAL,
+    surface        TEXT,
+    model_version  TEXT,
+    ts             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bet_history_date ON bet_history(date);
+CREATE INDEX IF NOT EXISTS idx_bet_history_event ON bet_history(event_key);
 CREATE INDEX IF NOT EXISTS idx_clv_date ON clv_log(date);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
@@ -1183,6 +1213,268 @@ def list_clv(limit: int = 100000, since: str = "") -> List[sqlite3.Row]:
             (limit,)).fetchall()
 
 
+# --- Bet history (performance tracking unifié) ------------------------------
+def log_bet_history(row: Dict[str, Any]) -> int:
+    """Enregistre un pari réglé dans bet_history (ignore les doublons event_key)."""
+    import datetime as _dt
+    event_key = str(row.get("event_key") or "")
+    with connect() as conn:
+        if event_key:
+            existing = conn.execute(
+                "SELECT 1 FROM bet_history WHERE event_key=?", (event_key,)).fetchone()
+            if existing:
+                return 0
+        cur = conn.execute(
+            "INSERT INTO bet_history "
+            "(event_key,player1,player2,date,prediction,pick_side,odds,confidence,"
+            " result,profit_loss,clv_pct,surface,model_version,ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                event_key or None,
+                str(row.get("player1") or ""),
+                str(row.get("player2") or ""),
+                str(row.get("date") or ""),
+                row.get("prediction"),
+                str(row.get("pick_side") or ""),
+                row.get("odds"),
+                row.get("confidence"),
+                row.get("result"),
+                row.get("profit_loss"),
+                row.get("clv_pct"),
+                str(row.get("surface") or ""),
+                str(row.get("model_version") or ""),
+                row.get("ts") or _dt.datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        return int(cur.lastrowid or 0)
+
+
+def _bet_history_model_version() -> str:
+    raw = get_meta("metrics")
+    if raw:
+        try:
+            m = json.loads(raw)
+            if m.get("updated"):
+                return str(m["updated"])[:10]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return "default"
+
+
+def sync_bet_history_on_settle(p1: str, p2: str, winner_name: str,
+                               event_key: Optional[str] = None) -> bool:
+    """Auto-log après settlement CLV ou value pick (un seul point d'appel).
+
+    Priorité : ligne clv_log réglée pour cette paire, sinon value_pick réglé.
+    """
+    if not winner_name:
+        return False
+
+    p1_vars = set(_name_variants(p1))
+    p2_vars = set(_name_variants(p2))
+    winner_vars = set(_name_variants(winner_name))
+
+    with connect() as conn:
+        clv_row = None
+        if event_key:
+            clv_row = conn.execute(
+                "SELECT * FROM clv_log WHERE event_key=? AND result IS NOT NULL",
+                (event_key,)).fetchone()
+        if clv_row is None:
+            for r in conn.execute(
+                "SELECT * FROM clv_log WHERE result IS NOT NULL ORDER BY settled_ts DESC"
+            ).fetchall():
+                r1 = set(_name_variants(r["player1"]))
+                r2 = set(_name_variants(r["player2"]))
+                if (r1 & p1_vars and r2 & p2_vars) or (r1 & p2_vars and r2 & p1_vars):
+                    if event_key and r["event_key"] != event_key:
+                        continue
+                    clv_row = r
+                    break
+
+        vp_row = None
+        vp_settled = None
+        for a in p1_vars:
+            for b in p2_vars:
+                vp_settled = conn.execute(
+                    "SELECT * FROM value_picks "
+                    "WHERE result IN (0,1) AND ((player1=? AND player2=?) OR (player1=? AND player2=?)) "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (a, b, b, a),
+                ).fetchone()
+                vp_row = vp_settled or conn.execute(
+                    "SELECT * FROM value_picks "
+                    "WHERE ((player1=? AND player2=?) OR (player1=? AND player2=?)) "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (a, b, b, a),
+                ).fetchone()
+                if vp_row:
+                    break
+            if vp_row:
+                break
+
+        if clv_row is None and vp_settled is None:
+            return False
+
+        ek = (clv_row["event_key"] if clv_row else None) or event_key or ""
+        if ek:
+            if conn.execute(
+                "SELECT 1 FROM bet_history WHERE event_key=?", (ek,)
+            ).fetchone():
+                return False
+
+        if clv_row:
+            pick_side = clv_row["pick_side"]
+            return log_bet_history({
+                "event_key": ek,
+                "player1": clv_row["player1"],
+                "player2": clv_row["player2"],
+                "date": clv_row["date"],
+                "prediction": clv_row["pick_prob"],
+                "pick_side": pick_side,
+                "odds": clv_row["pick_odds"],
+                "confidence": clv_row["confidence"],
+                "result": clv_row["result"],
+                "profit_loss": clv_row["pnl_flat"],
+                "clv_pct": clv_row["clv_pct"],
+                "surface": (vp_row["surface"] if vp_row else "") or "",
+                "model_version": _bet_history_model_version(),
+                "ts": clv_row["settled_ts"],
+            }) > 0
+
+        side = vp_settled["side"]
+        won = bool(set(_name_variants(side)) & winner_vars)
+        if not ek:
+            dup = conn.execute(
+                "SELECT 1 FROM bet_history WHERE player1=? AND player2=? AND date=?",
+                (vp_settled["player1"], vp_settled["player2"], vp_settled["date"]),
+            ).fetchone()
+            if dup:
+                return False
+        pnl = vp_settled["pnl"]
+        if pnl is None:
+            odds = float(vp_settled["odds"] or 0)
+            pnl = round((odds - 1.0) if won else -1.0, 4) if odds > 1 else None
+        return log_bet_history({
+            "event_key": ek or None,
+            "player1": vp_settled["player1"],
+            "player2": vp_settled["player2"],
+            "date": vp_settled["date"],
+            "prediction": None,
+            "pick_side": side,
+            "odds": vp_settled["odds"],
+            "confidence": None,
+            "result": vp_settled["result"],
+            "profit_loss": pnl,
+            "clv_pct": None,
+            "surface": vp_settled["surface"] or "",
+            "model_version": _bet_history_model_version(),
+        }) > 0
+
+
+def list_bet_history(limit: int = 50, days: Optional[int] = None) -> List[sqlite3.Row]:
+    """Historique des paris réglés, du plus récent au plus ancien."""
+    with connect() as conn:
+        if days is not None and days > 0:
+            import datetime as _dt
+            since = (_dt.date.today() - _dt.timedelta(days=days - 1)).isoformat()
+            return conn.execute(
+                "SELECT * FROM bet_history WHERE date >= ? "
+                "ORDER BY ts DESC, id DESC LIMIT ?",
+                (since, limit),
+            ).fetchall()
+        return conn.execute(
+            "SELECT * FROM bet_history ORDER BY ts DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+
+def _bet_history_calibration_bins(rows: List[sqlite3.Row], n_bins: int = 5) -> List[Dict[str, Any]]:
+    """Bins de calibration sur la confiance (observé vs prédit implicite)."""
+    bins = [{"lo": i / n_bins, "hi": (i + 1) / n_bins, "n": 0,
+             "sum_conf": 0.0, "sum_outcome": 0.0} for i in range(n_bins)]
+    for r in rows:
+        conf = r["confidence"]
+        if conf is None or r["result"] not in (0, 1):
+            continue
+        idx = min(int(float(conf) * n_bins), n_bins - 1)
+        if float(conf) >= 1.0:
+            idx = n_bins - 1
+        b = bins[idx]
+        b["n"] += 1
+        b["sum_conf"] += float(conf)
+        b["sum_outcome"] += float(r["result"])
+    out = []
+    for b in bins:
+        if b["n"] == 0:
+            out.append({"bin": f"{b['lo']:.0%}-{b['hi']:.0%}", "n": 0,
+                        "mean_confidence": None, "observed_rate": None})
+        else:
+            out.append({
+                "bin": f"{b['lo']:.0%}-{b['hi']:.0%}",
+                "n": b["n"],
+                "mean_confidence": round(b["sum_conf"] / b["n"], 3),
+                "observed_rate": round(b["sum_outcome"] / b["n"], 3),
+            })
+    return out
+
+
+def _bet_history_surface_stats(rows: List[sqlite3.Row]) -> Dict[str, Dict[str, Any]]:
+    by_surf: Dict[str, List[sqlite3.Row]] = {}
+    for r in rows:
+        surf = (r["surface"] or "unknown").lower() or "unknown"
+        by_surf.setdefault(surf, []).append(r)
+    out: Dict[str, Dict[str, Any]] = {}
+    for surf, pool in by_surf.items():
+        settled = [x for x in pool if x["result"] in (0, 1)]
+        n = len(settled)
+        if n == 0:
+            out[surf] = {"n": 0, "win_rate": None, "roi": None}
+            continue
+        wins = sum(1 for x in settled if x["result"] == 1)
+        pnls = [x["profit_loss"] for x in settled if x["profit_loss"] is not None]
+        out[surf] = {
+            "n": n,
+            "wins": wins,
+            "win_rate": round(wins / n, 3),
+            "roi": round(sum(pnls) / len(pnls), 4) if pnls else None,
+        }
+    return out
+
+
+def bet_history_stats(days: int = 30) -> Dict[str, Any]:
+    """ROI, win rate, bins de calibration et performance par surface."""
+    rows = list_bet_history(limit=100000, days=days)
+    settled = [r for r in rows if r["result"] in (0, 1)]
+    n = len(settled)
+    if n == 0:
+        return {
+            "days": days,
+            "n": 0,
+            "wins": 0,
+            "win_rate": None,
+            "roi": None,
+            "total_pnl": 0.0,
+            "calibration_bins": _bet_history_calibration_bins([]),
+            "by_surface": {},
+            "avg_clv_pct": None,
+        }
+    wins = sum(1 for r in settled if r["result"] == 1)
+    pnls = [r["profit_loss"] for r in settled if r["profit_loss"] is not None]
+    clvs = [r["clv_pct"] for r in settled if r["clv_pct"] is not None]
+    return {
+        "days": days,
+        "n": n,
+        "wins": wins,
+        "win_rate": round(wins / n, 3),
+        "roi": round(sum(pnls) / len(pnls), 4) if pnls else None,
+        "total_pnl": round(sum(pnls), 2) if pnls else 0.0,
+        "calibration_bins": _bet_history_calibration_bins(settled),
+        "by_surface": _bet_history_surface_stats(settled),
+        "avg_clv_pct": round(sum(clvs) / len(clvs), 2) if clvs else None,
+    }
+
+
 # --- Market snapshots (mouvement de ligne / sharp money) --------------------
 def record_market_snapshot(event_key: str, p1: str, p2: str,
                            odds_home: float, odds_away: float,
@@ -1256,6 +1548,64 @@ def is_player_followed(name: str) -> bool:
     with connect() as conn:
         row = conn.execute("SELECT 1 FROM followed_players WHERE name=?", (name,)).fetchone()
     return row is not None
+
+
+def _match_event_key(event_key: Optional[str], p1: str, p2: str, date: str) -> str:
+    if event_key:
+        return str(event_key)
+    return f"{p1.lower()}|{p2.lower()}|{date}"
+
+
+def follow_match(event_key: Optional[str], p1: str, p2: str,
+                 match_date: str = "", tournament: str = "") -> str:
+    """Suit un match (INSERT OR IGNORE). Retourne la clé utilisée."""
+    import datetime as _dt
+    key = _match_event_key(event_key, p1, p2, match_date)
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO followed_matches "
+            "(event_key, player1, player2, match_date, tournament, followed_ts) "
+            "VALUES (?,?,?,?,?,?)",
+            (key, p1, p2, match_date, tournament,
+             _dt.datetime.now().isoformat(timespec="seconds")),
+        )
+    return key
+
+
+def unfollow_match(event_key: Optional[str], p1: str = "", p2: str = "",
+                   match_date: str = "") -> None:
+    key = event_key or _match_event_key(None, p1, p2, match_date)
+    with connect() as conn:
+        conn.execute("DELETE FROM followed_matches WHERE event_key=?", (key,))
+
+
+def list_followed_matches() -> List[sqlite3.Row]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM followed_matches ORDER BY followed_ts DESC"
+        ).fetchall()
+
+
+def is_match_followed(event_key: Optional[str], p1: str = "", p2: str = "",
+                      match_date: str = "") -> bool:
+    key = event_key or _match_event_key(None, p1, p2, match_date)
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM followed_matches WHERE event_key=?", (key,)
+        ).fetchone()
+    return row is not None
+
+
+def update_followed_match_odds(event_key: str, odds_home: float,
+                               odds_away: float) -> None:
+    import datetime as _dt
+    with connect() as conn:
+        conn.execute(
+            "UPDATE followed_matches SET last_odds_home=?, last_odds_away=?, "
+            "last_refresh_ts=? WHERE event_key=?",
+            (odds_home, odds_away,
+             _dt.datetime.now().isoformat(timespec="seconds"), event_key),
+        )
 
 
 def line_movement(event_key: str) -> Optional[Dict[str, Any]]:

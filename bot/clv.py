@@ -114,6 +114,10 @@ def settle(p1: str, p2: str, winner_name: str) -> bool:
             row = r
             break
     if row is None:
+        try:
+            db.sync_bet_history_on_settle(p1, p2, winner_name)
+        except Exception:  # noqa: BLE001
+            pass
         return False
     event_key = row["event_key"]
 
@@ -133,6 +137,10 @@ def settle(p1: str, p2: str, winner_name: str) -> bool:
     pnl_kelly = frac * (pick_odds - 1.0) if won else -frac
 
     db.update_clv_result(event_key, won, round(pnl_flat, 4), round(pnl_kelly, 5))
+    try:
+        db.sync_bet_history_on_settle(p1, p2, winner_name, event_key=event_key)
+    except Exception:  # noqa: BLE001
+        pass
     return True
 
 
@@ -166,6 +174,56 @@ def _agg(rows: List[Any]) -> Dict[str, Any]:
         out["pnl_kelly_units"] = round(sum(r["pnl_kelly"] for r in settled), 3)
         out["win_rate_pct"] = round(sum(r["result"] for r in settled) / n * 100, 1)
     return out
+
+
+def weekly_stats(days: int = 7) -> Dict[str, Any]:
+    """CLV agrégé sur les N derniers jours (rapport hebdo / paper trading)."""
+    import datetime as _dt
+
+    days = max(1, int(days))
+    period_end = _dt.date.today()
+    period_start = period_end - _dt.timedelta(days=days - 1)
+    since = period_start.isoformat()
+
+    rows = db.list_clv(since=since)
+    SCANNER_CUTOFF = "2026-07-03"
+    scanner_rows = [r for r in rows if (r["pick_ts"] or "") >= SCANNER_CUTOFF]
+
+    def tier(pool: List[Any], lo: float, hi: float) -> List[Any]:
+        return [r for r in pool if r["confidence"] is not None
+                and lo <= r["confidence"] < hi]
+
+    by_day: Dict[str, List[Any]] = {}
+    for r in rows:
+        day = (r["pick_ts"] or r["date"] or "")[:10]
+        by_day.setdefault(day, []).append(r)
+
+    glob = _agg(rows)
+    scanner = _agg(scanner_rows)
+    verdict_src = scanner if scanner.get("n_clv", 0) >= 10 else glob
+    verdict, label = _verdict(verdict_src)
+
+    return {
+        "period_days": days,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "global": glob,
+        "scanner": scanner,
+        "by_confidence": {
+            "high": _agg(tier(scanner_rows, 0.75, 1.01)),
+            "medium": _agg(tier(scanner_rows, 0.60, 0.75)),
+            "low": _agg(tier(scanner_rows, 0.0, 0.60)),
+        },
+        "by_day": {
+            d: _agg(by_day[d]) for d in sorted(by_day.keys(), reverse=True)
+        },
+        "verdict": verdict,
+        "verdict_label": label,
+        "n_new_picks": sum(1 for r in rows if r["result"] is None),
+        "n_settled": sum(1 for r in rows if r["result"] is not None),
+        "note": (f"Période glissante {days}j — CLV% moyen et beat-closing% "
+                 "sur les picks semés depuis le début de la fenêtre."),
+    }
 
 
 def stats() -> Dict[str, Any]:

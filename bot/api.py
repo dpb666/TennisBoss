@@ -674,6 +674,76 @@ def api_players_followed():
     return jsonify({"count": len(names), "players": players})
 
 
+def _followed_match_payload(row: Any) -> Dict[str, Any]:
+    """Sérialise une ligne followed_matches pour l'API."""
+    key = row["event_key"]
+    mv = db.line_movement(key)
+    return {
+        "event_key": key,
+        "player1": row["player1"],
+        "player2": row["player2"],
+        "match_date": row["match_date"],
+        "tournament": row["tournament"],
+        "followed": True,
+        "last_odds_home": row["last_odds_home"],
+        "last_odds_away": row["last_odds_away"],
+        "last_refresh_ts": row["last_refresh_ts"],
+        "line_movement": mv,
+    }
+
+
+@app.route("/api/match/follow", methods=["POST"])
+def api_match_follow():
+    """Suit un match — refresh odds prioritaire (watchlist parieur).
+
+    Corps JSON : event_key (optionnel), player1, player2, match_date, tournament.
+    """
+    body = request.get_json(silent=True) or {}
+    p1 = (body.get("player1") or "").strip()
+    p2 = (body.get("player2") or "").strip()
+    if not p1 or not p2:
+        return jsonify({"error": "paramètres requis: player1, player2"}), 400
+    r1 = _resolve(p1) or p1
+    r2 = _resolve(p2) or p2
+    key = db.follow_match(
+        body.get("event_key"),
+        r1,
+        r2,
+        match_date=(body.get("match_date") or "").strip(),
+        tournament=(body.get("tournament") or "").strip(),
+    )
+    return jsonify({
+        "event_key": key,
+        "player1": r1,
+        "player2": r2,
+        "followed": True,
+    })
+
+
+@app.route("/api/match/unfollow", methods=["POST"])
+def api_match_unfollow():
+    body = request.get_json(silent=True) or {}
+    p1 = (body.get("player1") or "").strip()
+    p2 = (body.get("player2") or "").strip()
+    if not body.get("event_key") and (not p1 or not p2):
+        return jsonify({"error": "paramètres requis: event_key ou player1+player2"}), 400
+    db.unfollow_match(
+        body.get("event_key"),
+        _resolve(p1) or p1 if p1 else "",
+        _resolve(p2) or p2 if p2 else "",
+        match_date=(body.get("match_date") or "").strip(),
+    )
+    return jsonify({"followed": False})
+
+
+@app.get("/api/matches/followed")
+def api_matches_followed():
+    """Matchs suivis avec dernières cotes et mouvement de ligne."""
+    rows = db.list_followed_matches()
+    matches = [_followed_match_payload(r) for r in rows]
+    return jsonify({"count": len(matches), "matches": matches})
+
+
 def _set_to_match_prob(p_set: float) -> float:
     """Proba set -> proba match (centralisée dans predictor)."""
     return predictor.set_to_match_prob(p_set)
@@ -830,35 +900,25 @@ def api_insight():
         surface=surface, event_id=event_id, include_sentiment=include_sentiment,
     )
 
-    # Phase 12a — TIS (extension non-breaking de /api/insight).
-    try:
-        odds_data = _tis_odds_data(event_id)
-        insight["match_intelligence"] = match_intelligence.compute_tis(
-            n1, n2, surface=surface, odds_data=odds_data,
-            mem=_MEM, event_key=event_id, explain=explain, prediction=r,
-        )
-    except Exception as exc:  # noqa: BLE001
-        log(f"TIS compute échoué pour {n1} vs {n2} ({exc}) — insight sans TIS.", "WARN")
+    # Phase 12a — Tennis Intelligence Score (TIS), extension non-breaking.
+    odds_data = None
+    if event_id and odds_api.is_enabled():
+        try:
+            mw = odds_api.fetch_match_winner(str(event_id), ttl=120)
+            if mw:
+                odds_data = {
+                    "home_odds": mw["home_odds"],
+                    "away_odds": mw["away_odds"],
+                    "home_prob": mw.get("home_prob"),
+                    "away_prob": mw.get("away_prob"),
+                }
+        except Exception as exc:  # noqa: BLE001
+            log(f"TIS: fetch_match_winner échoué pour {event_id} ({exc}) — ignoré.", "WARN")
+    insight["match_intelligence"] = match_intelligence.compute_tis(
+        n1, n2, surface=surface, odds_data=odds_data,
+        mem=_MEM, event_key=event_id, explain=explain, prediction=r,
+    )
     return jsonify(insight)
-
-
-def _tis_odds_data(event_key: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Récupère les cotes pour le TIS si event_key fourni et odds-api activée."""
-    if not event_key or not odds_api.is_enabled():
-        return None
-    try:
-        mw = odds_api.fetch_match_winner(str(event_key), ttl=120)
-    except Exception as exc:  # noqa: BLE001
-        log(f"TIS: fetch_match_winner échoué pour {event_key} ({exc}) — ignoré.", "WARN")
-        return None
-    if not mw:
-        return None
-    return {
-        "home_odds": mw["home_odds"],
-        "away_odds": mw["away_odds"],
-        "home_prob": mw.get("home_prob"),
-        "away_prob": mw.get("away_prob"),
-    }
 
 
 @app.get("/api/match/intelligence")
@@ -881,8 +941,22 @@ def api_match_intelligence():
     r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
     explain = _explain(n1, f1, n2, f2)
 
+    odds_data = None
+    if event_key and odds_api.is_enabled():
+        try:
+            mw = odds_api.fetch_match_winner(str(event_key), ttl=120)
+            if mw:
+                odds_data = {
+                    "home_odds": mw["home_odds"],
+                    "away_odds": mw["away_odds"],
+                    "home_prob": mw.get("home_prob"),
+                    "away_prob": mw.get("away_prob"),
+                }
+        except Exception as exc:  # noqa: BLE001
+            log(f"/api/match/intelligence: fetch odds échoué ({exc}) — ignoré.", "WARN")
+
     payload = match_intelligence.compute_tis(
-        n1, n2, surface=surface, odds_data=_tis_odds_data(event_key),
+        n1, n2, surface=surface, odds_data=odds_data,
         mem=_MEM, event_key=event_key, explain=explain, prediction=r,
     )
     payload["player1"] = n1
@@ -2364,6 +2438,53 @@ def api_clv():
     return jsonify({**stats, "recent": recent})
 
 
+@app.get("/api/clv/weekly")
+def api_clv_weekly():
+    """Rapport CLV sur les 7 derniers jours (validation paper trading).
+
+    Query : ?days=7 (défaut), max 90.
+    """
+    days = min(90, max(1, int(request.args.get("days", 7))))
+    return jsonify(clv.weekly_stats(days=days))
+
+
+@app.get("/api/bet-history/stats")
+def api_bet_history_stats():
+    """Performance agrégée des paris réglés (ROI, calibration, surface).
+
+    Query : ?days=30 (défaut), max 365.
+    """
+    days = min(365, max(1, int(request.args.get("days", 30))))
+    return jsonify(db.bet_history_stats(days=days))
+
+
+@app.get("/api/bet-history/recent")
+def api_bet_history_recent():
+    """Derniers paris réglés enregistrés dans bet_history.
+
+    Query : ?limit=50 (défaut), max 500.
+    """
+    limit = min(500, max(1, int(request.args.get("limit", 50))))
+    rows = db.list_bet_history(limit=limit)
+    bets = [{
+        "event_key": r["event_key"],
+        "date": _fmt_date(r["date"]),
+        "player1": r["player1"],
+        "player2": r["player2"],
+        "prediction": r["prediction"],
+        "pick_side": r["pick_side"],
+        "odds": r["odds"],
+        "confidence": r["confidence"],
+        "result": r["result"],
+        "profit_loss": r["profit_loss"],
+        "clv_pct": r["clv_pct"],
+        "surface": r["surface"],
+        "model_version": r["model_version"],
+        "ts": r["ts"],
+    } for r in rows]
+    return jsonify({"count": len(bets), "bets": bets})
+
+
 @app.get("/api/line-movement")
 def api_line_movement():
     """Diagnostic : mouvement de ligne capté par le scanner pour un match.
@@ -3052,6 +3173,62 @@ def _value_scanner_loop(interval: int = 90) -> None:
         _t.sleep(interval)
 
 
+def _followed_matches_refresh_loop() -> None:
+    """Refresh odds prioritaire pour les matchs suivis (watchlist parieur).
+
+    TTL 30s sur les matchs de la watchlist vs 10min pour le reste — budget
+    odds-api.io concentré sur ce que l'utilisateur suit activement.
+    """
+    import time as _t
+    from .log import log
+
+    _LIVE_TTL = 30
+    _t.sleep(45)
+    while True:
+        try:
+            watched = db.list_followed_matches()
+            if not watched or not odds_api.is_enabled() or not odds_api._current_key():
+                _t.sleep(60)
+                continue
+
+            all_events = odds_api.fetch_tennis_events(upcoming_only=False)
+            idx = odds_api.build_event_index(all_events)
+            refreshed = 0
+
+            for row in watched:
+                p1, p2 = row["player1"], row["player2"]
+                ev = odds_api.find_event(idx, p1, p2)
+                if not ev:
+                    continue
+                eid = ev.get("id") or row["event_key"]
+                is_live = ev.get("status") in {"live", "inplay"}
+                ttl = _LIVE_TTL if is_live else 60
+                mw = odds_api.fetch_match_winner(eid, ttl=ttl)
+                if not mw:
+                    continue
+
+                home_odds = float(mw["home_odds"])
+                away_odds = float(mw["away_odds"])
+                prev_h = row["last_odds_home"]
+                prev_a = row["last_odds_away"]
+                db.update_followed_match_odds(str(eid), home_odds, away_odds)
+                db.record_market_snapshot(str(eid), p1, p2, home_odds, away_odds)
+
+                from . import realtime_alerts as _ra
+                if prev_h and prev_h > 1.0 and abs(home_odds - prev_h) / prev_h >= 0.03:
+                    _ra.on_odds_move(p1, p2, p1, float(prev_h), home_odds)
+                if prev_a and prev_a > 1.0 and abs(away_odds - prev_a) / prev_a >= 0.03:
+                    _ra.on_odds_move(p1, p2, p2, float(prev_a), away_odds)
+
+                refreshed += 1
+
+            if refreshed:
+                log(f"Watchlist: {refreshed}/{len(watched)} match(s) odds MAJ.")
+        except Exception as exc:
+            log(f"Watchlist refresh échoué ({exc}).", "WARN")
+        _t.sleep(60)
+
+
 def _clv_closing_loop() -> None:
     """Snapshote les cotes pré-match pour les picks CLV ouverts (toutes les 10min).
 
@@ -3285,6 +3462,10 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     _th_clv.Thread(target=_clv_closing_loop, daemon=True).start()
     log("CLV closing snapshot démarré (20min).")
 
+    import threading as _th_watch
+    _th_watch.Thread(target=_followed_matches_refresh_loop, daemon=True).start()
+    log("Watchlist odds refresh démarré (60s, TTL 30s live).")
+
     # Scanner temps réel — détecte les value picks dès l'ouverture des cotes
     _scan_interval = int(os.environ.get("SCANNER_INTERVAL_S", "90"))
     if _scan_interval > 0 and odds_api.is_enabled():
@@ -3336,6 +3517,7 @@ def _digest_loop() -> None:
     import time as _time
     sent_date: str = ""
     all_settled_notified: str = ""
+    weekly_sent_week: str = ""
 
     while True:
         _time.sleep(60)
@@ -3348,6 +3530,11 @@ def _digest_loop() -> None:
                 from . import digest as _digest
                 _digest.send_daily_digest(today)
                 sent_date = today
+                # 1b. Rapport CLV hebdo — en même temps que le digest du dimanche
+                iso_week = now.strftime("%G-W%V")
+                if now.weekday() == 6 and weekly_sent_week != iso_week:
+                    _digest.send_weekly_clv_digest()
+                    weekly_sent_week = iso_week
 
             # 2. Alerte "tous settlés" dès que plus aucun pick du jour n'est ouvert
             if all_settled_notified != today and now.hour >= 14:
@@ -3450,6 +3637,9 @@ def _tg_poll_loop() -> None:
             elif text.startswith("/clv"):
                 from . import digest as _dig
                 _send(chat_id, _dig.build_clv_report())
+            elif text.startswith("/clv-weekly"):
+                from . import digest as _dig
+                _send(chat_id, _dig.build_weekly_clv_report())
             elif text.startswith("/digest"):
                 from . import digest as _dig
                 _send(chat_id, _dig.build_digest())
@@ -3471,6 +3661,7 @@ def _tg_poll_loop() -> None:
                     "/picks — picks du jour\n"
                     "/value — picks ouverts\n"
                     "/clv — Closing Line Value\n"
+                    "/clv-weekly — CLV des 7 derniers jours\n"
                     "/roi — ROI par tranche EV\n"
                     "/intel — cerveau IA (blacklist, zones)\n"
                     "/scanner — état du scanner 90s\n"
