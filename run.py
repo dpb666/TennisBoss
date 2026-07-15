@@ -450,6 +450,44 @@ def cmd_clv_weekly(args) -> None:
     print(json.dumps(stats, indent=2, ensure_ascii=True, default=str))
 
 
+def cmd_validate_tis(args) -> None:
+    from bot import validate_tis
+    db.init()
+    rep = validate_tis.run_validation(limit=args.limit, write_report=True)
+    print(json.dumps(rep, indent=2, ensure_ascii=True, default=str))
+
+
+def cmd_calibration_report(args) -> None:
+    from bot import calibration_report
+    db.init()
+    path, report = calibration_report.generate(days=args.days, write_file=True)
+    print(f"Rapport écrit : {path}")
+    if isinstance(report, dict):
+        print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
+
+
+def cmd_data_quality(args) -> None:
+    from bot import data_quality
+    data_quality.print_report(active_days=args.days)
+
+
+def cmd_ingest_rankings(args) -> None:
+    from bot import ranking_feeder
+    rep = ranking_feeder.ingest(
+        years=args.years,
+        tours=args.tours,
+        live=not args.no_live,
+        live_limit=args.limit,
+    )
+    print(json.dumps(rep, indent=2, ensure_ascii=True, default=str))
+
+
+def cmd_backfill_bet_history(args) -> None:
+    db.init()
+    n = db.backfill_bet_history_from_clv(limit=args.limit)
+    print(f"bet_history : {n} lignes backfillées depuis clv_log")
+
+
 def cmd_dedupe_players(args) -> None:
     """Fusionne les profils joueurs dupliqués par variation de format de nom
     (ex. "Andreeva M." / "Mirra Andreeva" — voir bot/dedupe_players.py pour
@@ -551,6 +589,29 @@ def main() -> None:
     p_clv = sub.add_parser("clv-weekly", help="Rapport CLV des N derniers jours")
     p_clv.add_argument("--days", type=int, default=7, help="Fenêtre glissante (défaut 7)")
     p_clv.set_defaults(func=cmd_clv_weekly)
+
+    p_vtis = sub.add_parser("validate-tis", help="Validation Tennis Intelligence Score")
+    p_vtis.add_argument("--limit", type=int, default=50, help="Nb de paires à tester")
+    p_vtis.set_defaults(func=cmd_validate_tis)
+
+    p_cal = sub.add_parser("calibration-report", help="Rapport calibration modèle")
+    p_cal.add_argument("--days", type=int, default=90, help="Fenêtre en jours")
+    p_cal.set_defaults(func=cmd_calibration_report)
+
+    p_dq = sub.add_parser("data-quality", help="Couverture WTA serve + rankings")
+    p_dq.add_argument("--days", type=int, default=365, help="Fenêtre joueurs actifs")
+    p_dq.set_defaults(func=cmd_data_quality)
+
+    p_rank = sub.add_parser("ingest-rankings", help="Ingestion classements ATP/WTA")
+    p_rank.add_argument("--years", nargs="+", type=int, help="Années tennis-data")
+    p_rank.add_argument("--tours", nargs="+", choices=["atp", "wta"])
+    p_rank.add_argument("--no-live", action="store_true", help="Sans scrape live top-N")
+    p_rank.add_argument("--limit", type=int, default=1000, help="Top N live par page")
+    p_rank.set_defaults(func=cmd_ingest_rankings)
+
+    p_bh = sub.add_parser("backfill-bet-history", help="Remplit bet_history depuis clv_log")
+    p_bh.add_argument("--limit", type=int, default=5000, help="Max lignes clv_log")
+    p_bh.set_defaults(func=cmd_backfill_bet_history)
 
     p_dedupe = sub.add_parser("dedupe-players",
                               help="Fusionne les profils joueurs dupliqués (ex. 'Andreeva M.' / 'Mirra Andreeva')")

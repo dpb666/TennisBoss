@@ -60,8 +60,9 @@ class TennisBossScheduler:
     def job_mcp_backfill(self):
         """Enrichit les matchs WTA déjà archivés avec les stats Match Charting
         Project (serve/return/break points) — voir mcp_feeder.py. Purement
-        additif (COALESCE, jamais d'écrasement) : sûr à rejouer souvent, mais
-        peu de nouveaux matchs chartés par jour -> fréquence basse suffit.
+        additif (MCP remplace 0.5 neutre pour serve/return ; BP en COALESCE) :
+        sûr à rejouer souvent, mais peu de nouveaux matchs chartés par jour ->
+        fréquence basse suffit.
         """
         log("=== SCHEDULER: MCP backfill (WTA, stats serve/return/BP) ===", "INFO")
         try:

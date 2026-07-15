@@ -200,6 +200,8 @@ def ingest(years: List[int] = None, tours: List[str] = None) -> Dict[str, Any]:
     # Archiver les matchs en DB — features neutres (pas de serve/return dans ce CSV)
     _neutral = {"serve": 0.5, "return1": 0.5, "return2": 0.5}
     db_matches = []
+    rank_rows: List[Dict[str, Any]] = []
+    rank_updates: List[tuple] = []
     for m in matches:
         db_matches.append({
             "id": m["id"],
@@ -211,8 +213,26 @@ def ingest(years: List[int] = None, tours: List[str] = None) -> Dict[str, Any]:
             "loser": _neutral,
             "surface": m["surface"],
             "margin": None,
+            "w_rank": m.get("w_rank"),
+            "l_rank": m.get("l_rank"),
         })
+        rank_updates.append((m["id"], m.get("w_rank"), m.get("l_rank")))
+        for player, rank_key, tour in [
+            (m["winner"], m.get("w_rank"), m.get("tour", "atp")),
+            (m["loser"], m.get("l_rank"), m.get("tour", "atp")),
+        ]:
+            if player and rank_key:
+                rank_rows.append({
+                    "name": player,
+                    "tour": tour,
+                    "rank": rank_key,
+                    "as_of": m["date"],
+                    "source": "tennisdata",
+                })
     added = db.archive_matches(db_matches)
+    ranks_updated = db.backfill_match_ranks_bulk(rank_updates)
+    ranks_upserted = db.upsert_player_rankings_bulk(rank_rows)
+    db.rebuild_player_rankings_from_matches()
 
     # Archiver les cotes historiques (CLV proxy sur grands tournois 2022-2026).
     odds_rows = [
@@ -243,10 +263,13 @@ def ingest(years: List[int] = None, tours: List[str] = None) -> Dict[str, Any]:
     new_players = len(new_names)
 
     log(f"tennisdata ingest: {added} nouveaux matchs, {odds_added} cotes historiques, "
-        f"{new_players} nouveaux joueurs")
+        f"{new_players} nouveaux joueurs, {ranks_updated} rangs matchs, "
+        f"{ranks_upserted} profils ranking")
     return {
         "inserted": added,
         "odds_inserted": odds_added,
+        "ranks_match_updated": ranks_updated,
+        "ranks_players_upserted": ranks_upserted,
         "total_fetched": len(matches),
         "new_players": new_players,
         "players_total": len(mem["players"]),

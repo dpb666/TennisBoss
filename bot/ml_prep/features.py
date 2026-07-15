@@ -35,27 +35,49 @@ def orient_players(winner: str, loser: str) -> Tuple[str, str, int]:
     return p1, p2, y
 
 
-def load_rankings(mem: Optional[Mapping[str, Any]] = None) -> Dict[str, float]:
-    """Charge les rankings moyens depuis memory.json (champ `rank` par joueur).
+def _elo_fallback_ranks(mem: Mapping[str, Any]) -> Dict[str, float]:
+    """Rang synthétique depuis Elo global (1=meilleur) pour joueurs sans classement officiel."""
+    elo = (mem or {}).get("elo") or {}
+    if not elo:
+        return {}
+    ordered = sorted(elo.items(), key=lambda kv: -float(kv[1]))
+    return {name: float(i + 1) for i, (name, _) in enumerate(ordered)}
 
-    Retourne un dict vide si la mémoire est absente — les features ranking
-    seront alors NaN jusqu'à ce qu'Agent 4 alimente une source dédiée.
+
+def load_rankings(mem: Optional[Mapping[str, Any]] = None) -> Dict[str, float]:
+    """Charge les rankings depuis player_rankings (DB) puis memory.json.
+
+    La table player_rankings (ranking_feeder) prime sur le ranking moyen
+    historique en memory.json. Les joueurs sans classement officiel reçoivent
+    un rang Elo synthétique (fallback) pour ranking_diff.
     """
+    out: Dict[str, float] = {}
+    try:
+        from bot import db
+        db.init()
+        for name, rank in db.get_all_player_rankings().items():
+            out[name] = float(rank)
+    except Exception:
+        pass
     if mem is None:
         try:
             from bot import memory
             mem = memory.load()
         except Exception:
-            return {}
+            mem = {}
     players = (mem or {}).get("players") or {}
-    out: Dict[str, float] = {}
     for name, prof in players.items():
+        if name in out:
+            continue
         rank = prof.get("rank")
         if rank is not None:
             try:
                 out[name] = float(rank)
             except (TypeError, ValueError):
                 pass
+    for name, rank in _elo_fallback_ranks(mem).items():
+        if name not in out:
+            out[name] = rank
     return out
 
 
