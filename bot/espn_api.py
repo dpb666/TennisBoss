@@ -141,12 +141,17 @@ def fetch_upcoming(days_ahead: int = 3) -> List[Dict]:
     Même format que live_api._parse_fixture().
     """
     import datetime as _dt
+    from concurrent.futures import ThreadPoolExecutor
+
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     cutoff = (_dt.datetime.utcnow() + _dt.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
-    atp = _fetch_tour("atp", "atp")
-    wta = _fetch_tour("wta", "wta")
-    all_fixtures = atp + wta
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        atp, wta = pool.map(
+            lambda args: _fetch_tour(args[0], args[1]),
+            (("atp", "atp"), ("wta", "wta")),
+        )
+    all_fixtures = list(atp) + list(wta)
 
     out = []
     for f in all_fixtures:

@@ -918,8 +918,30 @@ _tis_response_cache: Dict[str, tuple] = {}  # key -> (expiry_ts, payload)
 _MATCH_INTEL_TTL = 60
 _engineer_today_cache: Dict[str, tuple] = {}
 _ENGINEER_TODAY_TTL = 90
-_ENGINEER_MAX_FIXTURES = 40  # cap TIS — évite N×~10 requêtes DB sur tout le tableau ESPN
+_ENGINEER_MAX_SCAN = 80       # fixtures filtrées max (scan cheap, sans TIS)
+_ENGINEER_TIS_LIMIT = 15      # compute_tis complet — top candidats après heuristique Elo
 _SLOW_ENDPOINT_WARN_MS = 5000.0
+
+
+def _engineer_quick_score(
+    n1: str, n2: str, surface: Optional[str], mem: Dict[str, Any], *, live: bool = False,
+) -> float:
+    """Heuristique O(1) Elo pour pré-trier avant compute_tis (SQLite batch)."""
+    elo = mem.get("elo") or {}
+    e1 = predictor._lookup_elo(elo, n1)
+    e2 = predictor._lookup_elo(elo, n2)
+    if surface:
+        surf_elo = (mem.get("elo_surface") or {}).get(surface, {})
+        if surf_elo:
+            e1 = predictor._lookup_elo(surf_elo, n1)
+            e2 = predictor._lookup_elo(surf_elo, n2)
+    avg = (e1 + e2) / 2.0
+    diff = abs(e1 - e2)
+    # Favorise matchs de haut niveau et relativement compétitifs (proxy TIS sans DB).
+    score = avg + max(0.0, 220.0 - diff) * 0.3
+    if live:
+        score += 200.0
+    return score
 
 
 def _record_endpoint_timing(name: str, elapsed_ms: float) -> None:
@@ -1040,14 +1062,16 @@ def api_engineer_today():
         _record_endpoint_timing("engineer/today", (_t.time() - t0) * 1000)
         return jsonify(cached)
 
+    t_espn = _t.time()
     fixtures = espn_api.fetch_upcoming(days_ahead=1)
+    espn_ms = (_t.time() - t_espn) * 1000
     _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     known_players = _MEM.get("players") or {}
-    candidates: List[Dict[str, Any]] = []
-    batch_names: List[str] = []
-    batch_pairs: List[tuple] = []
+    scanned: List[tuple] = []
 
     for f in fixtures:
+        if len(scanned) >= _ENGINEER_MAX_SCAN:
+            break
         if f.get("is_doubles"):
             continue
         if not (f.get("live") or f.get("date", "") >= _today):
@@ -1062,16 +1086,25 @@ def api_engineer_today():
         t2 = known_players.get(n2, {}).get("tour", "")
         if t1 and t2 and {t1, t2} == {"atp", "wta"}:
             continue
-        candidates.append((f, n1, n2))
+        surface = f.get("surface") or config.surface_from_league(f.get("tournament", ""))
+        qscore = _engineer_quick_score(n1, n2, surface, _MEM, live=bool(f.get("live")))
+        scanned.append((qscore, f, n1, n2, surface))
+
+    tis_cap = _ENGINEER_TIS_LIMIT
+    candidates = [
+        (f, n1, n2, surface)
+        for _, f, n1, n2, surface in sorted(scanned, key=lambda x: x[0], reverse=True)[:tis_cap]
+    ]
+    batch_names: List[str] = []
+    batch_pairs: List[tuple] = []
+    for f, n1, n2, surface in candidates:
         batch_names.extend([n1, n2])
         batch_pairs.append((n1, n2))
-        if len(candidates) >= _ENGINEER_MAX_FIXTURES:
-            break
 
     rows: List[Dict[str, Any]] = []
+    t_tis = _t.time()
     with intelligence_layer.intel_batch(batch_names, batch_pairs):
-        for f, n1, n2 in candidates:
-            surface = f.get("surface") or config.surface_from_league(f.get("tournament", ""))
+        for f, n1, n2, surface in candidates:
             try:
                 tis = match_intelligence.compute_tis(
                     n1, n2, surface=surface, mem=_MEM, calibrate_match_prob=_calib,
@@ -1101,11 +1134,19 @@ def api_engineer_today():
                 "time": f.get("time", ""),
             })
 
+    tis_ms = (_t.time() - t_tis) * 1000
     rows.sort(key=lambda r: (r["tis"], r.get("ev_pct", 0)), reverse=True)
     top = rows[:limit]
     result = {"count": len(top), "matches": top}
     _tis_cache_set(_engineer_today_cache, cache_key, result, _ENGINEER_TODAY_TTL)
-    _record_endpoint_timing("engineer/today", (_t.time() - t0) * 1000)
+    total_ms = (_t.time() - t0) * 1000
+    if total_ms >= 2000:
+        log(
+            f"engineer/today cold breakdown: espn={espn_ms:.0f}ms "
+            f"tis({len(candidates)})={tis_ms:.0f}ms total={total_ms:.0f}ms",
+            "INFO",
+        )
+    _record_endpoint_timing("engineer/today", total_ms)
     return jsonify(result)
 
 

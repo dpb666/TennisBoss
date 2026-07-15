@@ -166,6 +166,15 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"bet_history backfill job failed: {e}", "ERROR")
 
+    def job_espn_warm(self):
+        """Prefetch ESPN scoreboards — garde le cache chaud pour engineer/today."""
+        try:
+            from . import espn_api
+            espn_api.fetch_upcoming(days_ahead=1)
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"ESPN warm job failed: {e}", "ERROR")
+
     def job_calibration_report(self):
         """Rapport calibration hebdo → reports/calibration_report.md + meta summary.
 
@@ -206,17 +215,19 @@ class TennisBossScheduler:
         schedule.every(6).hours.do(self.job_mtd_ingest)
         schedule.every(12).hours.do(self.job_mcp_backfill)
         schedule.every(5).minutes.do(self.job_monitor)
+        schedule.every(2).minutes.do(self.job_espn_warm)
         schedule.every(6).hours.do(self.job_backup)
         schedule.every().day.at("09:00").do(self.job_daily_digest)
         schedule.every().day.at("04:30").do(self.job_bet_history_backfill)
         schedule.every().monday.at("03:00").do(self.job_rankings)
         schedule.every().sunday.at("22:00").do(self.job_calibration_report)
-        log("Scheduler: 10 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
-            "mcp_backfill 12h, monitor 5m, backup 6h, digest 9h/j, "
+        log("Scheduler: 11 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+            "mcp_backfill 12h, monitor 5m, espn_warm 2m, backup 6h, digest 9h/j, "
             "bet_history 4h30/j, rankings Mon 3h, calibration Sun 22h)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()
+        self.job_espn_warm()
 
     def run_loop(self):
         """Run scheduler loop forever."""
