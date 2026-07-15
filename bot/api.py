@@ -2552,6 +2552,16 @@ def api_bet_history_recent():
     return jsonify({"count": len(bets), "bets": bets})
 
 
+@app.get("/api/bet-history/calibration")
+def api_bet_history_calibration():
+    """Calibration modèle : bins 50-55% … 75%+ (prédit vs observé).
+
+    Query : ?days=90 (défaut), max 365.
+    """
+    days = min(365, max(1, int(request.args.get("days", 90))))
+    return jsonify(db.bet_history_calibration(days=days))
+
+
 @app.get("/api/line-movement")
 def api_line_movement():
     """Diagnostic : mouvement de ligne capté par le scanner pour un match.

@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS bet_history (
     clv_pct        REAL,
     surface        TEXT,
     model_version  TEXT,
+    bookmaker      TEXT,
     ts             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_bet_history_date ON bet_history(date);
@@ -314,6 +315,7 @@ def init() -> None:
             ("honeypot_beneficiary", "ALTER TABLE clv_log ADD COLUMN honeypot_beneficiary TEXT"),
             ("honeypot_player", "ALTER TABLE clv_log ADD COLUMN honeypot_player TEXT"),
             ("honeypot_edge_pct", "ALTER TABLE clv_log ADD COLUMN honeypot_edge_pct REAL"),
+            ("bookmaker", "ALTER TABLE bet_history ADD COLUMN bookmaker TEXT"),
         ):
             try:
                 conn.execute(ddl)
@@ -1227,8 +1229,8 @@ def log_bet_history(row: Dict[str, Any]) -> int:
         cur = conn.execute(
             "INSERT INTO bet_history "
             "(event_key,player1,player2,date,prediction,pick_side,odds,confidence,"
-            " result,profit_loss,clv_pct,surface,model_version,ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " result,profit_loss,clv_pct,surface,model_version,bookmaker,ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 event_key or None,
                 str(row.get("player1") or ""),
@@ -1243,6 +1245,7 @@ def log_bet_history(row: Dict[str, Any]) -> int:
                 row.get("clv_pct"),
                 str(row.get("surface") or ""),
                 str(row.get("model_version") or ""),
+                str(row.get("bookmaker") or "") or None,
                 row.get("ts") or _dt.datetime.now().isoformat(timespec="seconds"),
             ),
         )
@@ -1339,6 +1342,7 @@ def sync_bet_history_on_settle(p1: str, p2: str, winner_name: str,
                 "clv_pct": clv_row["clv_pct"],
                 "surface": (vp_row["surface"] if vp_row else "") or "",
                 "model_version": _bet_history_model_version(),
+                "bookmaker": clv_row["closing_src"] or "",
                 "ts": clv_row["settled_ts"],
             }) > 0
 
@@ -1442,6 +1446,70 @@ def _bet_history_surface_stats(rows: List[sqlite3.Row]) -> Dict[str, Dict[str, A
     return out
 
 
+def _bet_history_bookmaker_stats(rows: List[sqlite3.Row]) -> Dict[str, Dict[str, Any]]:
+    """Performance par source de closing line (proxy bookmaker)."""
+    by_bk: Dict[str, List[sqlite3.Row]] = {}
+    for r in rows:
+        bk = (r["bookmaker"] if "bookmaker" in r.keys() else None) or "unknown"
+        by_bk.setdefault(str(bk), []).append(r)
+    out: Dict[str, Dict[str, Any]] = {}
+    for bk, pool in by_bk.items():
+        settled = [x for x in pool if x["result"] in (0, 1)]
+        n = len(settled)
+        if n == 0:
+            out[bk] = {"n": 0}
+            continue
+        wins = sum(1 for x in settled if x["result"] == 1)
+        pnls = [x["profit_loss"] for x in settled if x["profit_loss"] is not None]
+        clvs = [x["clv_pct"] for x in settled if x["clv_pct"] is not None]
+        out[bk] = {
+            "n": n,
+            "win_rate": round(wins / n, 3),
+            "yield_pct": round(sum(pnls) / len(pnls) * 100, 1) if pnls else None,
+            "avg_clv_pct": round(sum(clvs) / len(clvs), 2) if clvs else None,
+        }
+    return out
+
+
+def bet_history_calibration(days: int = 90) -> Dict[str, Any]:
+    """Bins 50-55%, 55-60%, … 75%+ : probabilité modèle vs taux de victoire réel."""
+    rows = list_bet_history(limit=100000, days=days)
+    settled = [r for r in rows if r["result"] in (0, 1) and r["prediction"] is not None]
+    bins_def = [
+        (0.50, 0.55), (0.55, 0.60), (0.60, 0.65), (0.65, 0.70),
+        (0.70, 0.75), (0.75, 1.01),
+    ]
+    bins_out: List[Dict[str, Any]] = []
+    for lo, hi in bins_def:
+        pool = [r for r in settled if lo <= float(r["prediction"]) < hi]
+        if not pool:
+            bins_out.append({
+                "bin": f"{int(lo*100)}-{int(min(hi, 1)*100)}%",
+                "n": 0, "predicted": None, "observed": None, "gap": None,
+            })
+            continue
+        pred_mean = sum(float(r["prediction"]) for r in pool) / len(pool)
+        obs = sum(int(r["result"]) for r in pool) / len(pool)
+        bins_out.append({
+            "bin": f"{int(lo*100)}-{int(min(hi, 1)*100)}%",
+            "n": len(pool),
+            "predicted": round(pred_mean, 3),
+            "observed": round(obs, 3),
+            "gap": round(obs - pred_mean, 3),
+        })
+    brier = None
+    if settled:
+        brier = sum(
+            (float(r["prediction"]) - int(r["result"])) ** 2 for r in settled
+        ) / len(settled)
+    return {
+        "days": days,
+        "n_settled": len(settled),
+        "brier_score": round(brier, 4) if brier is not None else None,
+        "bins": bins_out,
+    }
+
+
 def bet_history_stats(days: int = 30) -> Dict[str, Any]:
     """ROI, win rate, bins de calibration et performance par surface."""
     rows = list_bet_history(limit=100000, days=days)
@@ -1457,7 +1525,9 @@ def bet_history_stats(days: int = 30) -> Dict[str, Any]:
             "total_pnl": 0.0,
             "calibration_bins": _bet_history_calibration_bins([]),
             "by_surface": {},
+            "by_bookmaker": {},
             "avg_clv_pct": None,
+            "yield_pct": None,
         }
     wins = sum(1 for r in settled if r["result"] == 1)
     pnls = [r["profit_loss"] for r in settled if r["profit_loss"] is not None]

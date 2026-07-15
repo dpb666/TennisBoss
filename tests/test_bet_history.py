@@ -54,22 +54,50 @@ class TestBetHistoryDb(BetHistoryTestCase):
             "event_key": "w1", "player1": "A", "player2": "B",
             "date": "2026-07-10", "pick_side": "A", "odds": 2.0,
             "confidence": 0.80, "result": 1, "profit_loss": 1.0,
-            "surface": "hard", "model_version": "v1",
+            "surface": "hard", "model_version": "v1", "bookmaker": "bet365",
+            "clv_pct": 4.0, "prediction": 0.62,
         })
         db.log_bet_history({
             "event_key": "w2", "player1": "C", "player2": "D",
             "date": "2026-07-11", "pick_side": "C", "odds": 1.90,
             "confidence": 0.65, "result": 0, "profit_loss": -1.0,
-            "surface": "clay", "model_version": "v1",
+            "surface": "clay", "model_version": "v1", "bookmaker": "pinnacle",
+            "clv_pct": -1.0, "prediction": 0.58,
         })
         stats = db.bet_history_stats(days=30)
         self.assertEqual(stats["n"], 2)
         self.assertEqual(stats["wins"], 1)
         self.assertEqual(stats["win_rate"], 0.5)
         self.assertEqual(stats["roi"], 0.0)
+        self.assertEqual(stats["yield_pct"], 0.0)
+        self.assertAlmostEqual(stats["avg_clv_pct"], 1.5)
         self.assertIn("hard", stats["by_surface"])
         self.assertIn("clay", stats["by_surface"])
+        self.assertIn("bet365", stats["by_bookmaker"])
         self.assertEqual(len(stats["calibration_bins"]), 5)
+
+    def test_bet_history_calibration_bins(self):
+        db.log_bet_history({
+            "event_key": "c1", "player1": "A", "player2": "B",
+            "date": "2026-07-12", "pick_side": "A", "odds": 1.80,
+            "prediction": 0.62, "result": 1, "profit_loss": 0.80,
+        })
+        db.log_bet_history({
+            "event_key": "c2", "player1": "C", "player2": "D",
+            "date": "2026-07-12", "pick_side": "C", "odds": 2.00,
+            "prediction": 0.72, "result": 0, "profit_loss": -1.0,
+        })
+        cal = db.bet_history_calibration(days=30)
+        self.assertEqual(cal["n_settled"], 2)
+        self.assertEqual(len(cal["bins"]), 6)
+        self.assertIsNotNone(cal["brier_score"])
+
+    def test_backfill_bet_history_from_clv(self):
+        clv.seed_pick("bf1", "2026-07-10", "A", "B", "A", 2.0, 0.60, 0.70)
+        clv.refresh_closing("bf1", "A", "A", 1.90, 2.1)
+        clv.settle("A", "B", "A")
+        added = db.backfill_bet_history_from_clv(limit=10)
+        self.assertGreaterEqual(added, 0)
 
     def test_sync_from_clv_settle_hook(self):
         clv.seed_pick("hook1", "2026-07-12", "A", "B", "A", 2.0, 0.58, 0.70)
@@ -137,6 +165,19 @@ class TestBetHistoryApi(BetHistoryTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(data["count"], 1)
         self.assertEqual(data["bets"][0]["player1"], "C")
+
+    def test_api_bet_history_calibration(self):
+        db.log_bet_history({
+            "event_key": "cal1", "player1": "A", "player2": "B",
+            "date": "2026-07-14", "pick_side": "A", "odds": 1.85,
+            "prediction": 0.65, "result": 1, "profit_loss": 0.85,
+        })
+        resp = self.client.get("/api/bet-history/calibration?days=90")
+        data = resp.get_json()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(data["n_settled"], 1)
+        self.assertEqual(len(data["bins"]), 6)
+        self.assertIn("brier_score", data)
 
 
 if __name__ == "__main__":
