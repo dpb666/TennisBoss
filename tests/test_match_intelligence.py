@@ -118,6 +118,18 @@ class TestComputeTis:
             assert any("sur-listé" in r for r in result["risks"])
             assert result["risk_score"] > 20.0
 
+    def test_calibration_callback_changes_model_prob(self):
+        patches = _patch_signals()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
+            raw = match_intelligence.compute_tis(
+                "Jannik Sinner", "Carlos Alcaraz", surface="hard", mem=_fake_mem(),
+            )
+            cal = match_intelligence.compute_tis(
+                "Jannik Sinner", "Carlos Alcaraz", surface="hard", mem=_fake_mem(),
+                calibrate_match_prob=lambda p: min(0.99, p * 0.85),
+            )
+        assert cal["model_prob"] != raw["model_prob"]
+
 
 class TestApiMatchIntelligence:
     def test_endpoint_requires_players(self):

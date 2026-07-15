@@ -46,7 +46,7 @@ Réponse JSON (forme pour Agent 2 / app Android) ::
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import config, elo, features, intelligence_layer, predictor, weather_profile
 
@@ -425,6 +425,7 @@ def compute_tis(
     event_key: Optional[str] = None,
     explain: Optional[Dict[str, Any]] = None,
     prediction: Optional[Dict[str, Any]] = None,
+    calibrate_match_prob: Optional[Callable[[float], float]] = None,
 ) -> Dict[str, Any]:
     """Calcule le Tennis Intelligence Score (0-100) et la recommandation.
 
@@ -432,6 +433,7 @@ def compute_tis(
     `mem` : état mémoire (profils, ELO, poids) — requis.
     `event_key` : id odds-api pour steam move / line movement.
     `explain` / `prediction` : optionnels, recalculés si absents.
+    `calibrate_match_prob` : applique Platt/temperature (comme api._calib).
     """
     f1 = features.feature_vector(features.get_profile(mem, p1))
     f2 = features.feature_vector(features.get_profile(mem, p2))
@@ -445,6 +447,8 @@ def compute_tis(
     confidence = float(prediction.get("confidence", 0.0))
     p_set = prob1_pct / 100.0
     p_match_p1 = predictor.set_to_match_prob(p_set)
+    if calibrate_match_prob is not None:
+        p_match_p1 = calibrate_match_prob(p_match_p1)
     model_prob_fav = p_match_p1 if favorite == p1 else (1.0 - p_match_p1)
 
     model_health = intelligence_layer._model_health(p1, p2, surface)  # noqa: SLF001
