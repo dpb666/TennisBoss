@@ -1,6 +1,41 @@
-# 📲 Tester l'app sur un Google Pixel 9 Pro
+# 📲 Tester l'app TennisBoss
 
-Votre projet est sur `C:\Users\donpa\TennisBoss`, le serveur tourne dans **WSL2**.
+Votre projet est sur `C:\Users\donpa\TennisBoss`, le serveur tourne dans **WSL2** ou Windows.
+
+---
+
+## Émulateur Android (3 étapes) — `AVD TennisBoss`
+
+L'émulateur **ne peut pas** utiliser `localhost` : ça pointe vers l'émulateur lui-même.
+L'app debug utilise automatiquement **`http://10.0.2.2:8000/`** (`ApiClient.EMULATOR_BASE_URL`).
+
+### 1. Démarrer le backend sur le PC
+```powershell
+cd C:\Users\donpa\TennisBoss
+python run.py serve --host 0.0.0.0 --port 8000
+```
+Vérifier : `curl http://127.0.0.1:8000/health` → `200` + JSON.
+
+### 2. Lancer émulateur + installer l'app
+```powershell
+cd C:\Users\donpa\TennisBoss\android
+.\run-emulator.ps1
+```
+(Émulateur `TennisBoss`, build debug, lance `MainActivity`.)
+
+### 3. Tester dans l'app
+Ouvrir **Accueil** ou **Prédire** — les données doivent charger sans « failed to connect to localhost ».
+
+| Problème | Solution |
+|---|---|
+| `failed to connect to localhost` | APK ancien → relancer `.\run-emulator.ps1` (rebuild) |
+| Connexion impossible | Backend arrêté ou pas sur `0.0.0.0:8000` |
+| `adb` introuvable | Le script `run-emulator.ps1` configure le PATH SDK |
+
+---
+
+## Téléphone réel (Google Pixel, USB)
+
 La méthode recommandée pour relier le téléphone au serveur est **`adb reverse`
 par câble USB** (simple, fiable, pas de pare-feu ni d'IP à gérer).
 

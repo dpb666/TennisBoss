@@ -15,8 +15,9 @@ import java.util.concurrent.TimeUnit
  * (l'en-tête X-API-Token est alors ajouté à chaque requête).
  */
 object ApiClient {
-    // localhost:8000 fonctionne sur émulateur via `adb reverse tcp:8000 tcp:8000`
-    const val EMULATOR_BASE_URL = "http://localhost:8000/"
+    // 10.0.2.2 = loopback de la machine hôte vue depuis l'émulateur Android
+    // (localhost dans l'émulateur = l'émulateur lui-même, pas ton PC).
+    const val EMULATOR_BASE_URL = "http://10.0.2.2:8000/"
     // Worker Cloudflare (pas api.tennisboss.online directement) : le Worker injecte
     // X-API-Token côté serveur, donc les vrais appareils n'ont jamais besoin de connaître
     // le secret. Un token compilé dans BuildConfig serait extractible de l'APK public

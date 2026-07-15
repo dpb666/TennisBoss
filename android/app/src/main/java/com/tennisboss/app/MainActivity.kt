@@ -144,7 +144,7 @@ fun AppRoot() {
 
     // Le token est chargé dans MainActivity.onCreate() (avant setContent{}), pour être
     // déjà en place lorsque les ViewModel se construisent — voir le commentaire là-bas.
-    // baseUrl est déjà auto-détecté (localhost:8000 émulateur, ngrok sinon).
+    // baseUrl est déjà auto-détecté (10.0.2.2:8000 émulateur, Worker sinon).
     LaunchedEffect(Unit) {
         // Ré-enregistre le token FCM à chaque démarrage : couvre le cas où le
         // token existait déjà avant l'ajout de cette fonctionnalité (onNewToken
