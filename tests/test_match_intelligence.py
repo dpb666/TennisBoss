@@ -132,7 +132,8 @@ class TestApiMatchIntelligence:
         api._MEM = _fake_mem()
         api.app.testing = True
         patches = _patch_signals()
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], \
+             patch.object(api.odds_api, "is_enabled", return_value=False):
             resp = api.app.test_client().get(
                 "/api/match/intelligence?p1=Jannik+Sinner&p2=Carlos+Alcaraz&surface=hard"
             )
@@ -151,7 +152,8 @@ class TestInsightExtension:
         api._MEM = _fake_mem()
         api.app.testing = True
         patches = _patch_signals()
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], \
+             patch.object(api.odds_api, "is_enabled", return_value=False):
             resp = api.app.test_client().get(
                 "/api/insight?p1=Jannik+Sinner&p2=Carlos+Alcaraz&surface=hard"
             )
