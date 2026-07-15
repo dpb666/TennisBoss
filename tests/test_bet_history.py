@@ -124,6 +124,36 @@ class TestBetHistoryDb(BetHistoryTestCase):
         self.assertEqual(rows[0]["pick_side"], "X")
         self.assertEqual(rows[0]["result"], 1)
 
+    def test_resolve_surface_from_archive_when_value_pick_empty(self):
+        db.archive_matches([{
+            "id": 1, "date": "20260710", "tour": "atp",
+            "winner_name": "A", "loser_name": "B",
+            "winner": {"serve": 0.5, "return1": 0.5, "return2": 0.5},
+            "loser": {"serve": 0.5, "return1": 0.5, "return2": 0.5},
+            "surface": "clay", "margin": 2,
+        }])
+        surf = db.resolve_bet_surface("A", "B", "2026-07-10")
+        self.assertEqual(surf, "clay")
+
+    def test_backfill_surface_from_matches_archive(self):
+        db.archive_matches([{
+            "id": 2, "date": "20260711", "tour": "atp",
+            "winner_name": "C", "loser_name": "D",
+            "winner": {"serve": 0.5, "return1": 0.5, "return2": 0.5},
+            "loser": {"serve": 0.5, "return1": 0.5, "return2": 0.5},
+            "surface": "grass", "margin": 2,
+        }])
+        db.log_bet_history({
+            "event_key": "arch1", "player1": "C", "player2": "D",
+            "date": "2026-07-11", "pick_side": "C", "odds": 2.0,
+            "prediction": 0.6, "result": 1, "profit_loss": 1.0,
+            "surface": "",
+        })
+        result = db.backfill_bet_history_surface_from_matches()
+        self.assertEqual(result["patched"], 1)
+        rows = db.list_bet_history()
+        self.assertEqual(rows[0]["surface"], "grass")
+
 
 class TestBetHistoryApi(BetHistoryTestCase):
     def setUp(self):
