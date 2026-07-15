@@ -122,6 +122,44 @@ class TestJobBetHistoryBackfill(unittest.TestCase):
         self.assertEqual(self.scheduler.jobs_run, 1)
 
 
+class TestJobMonitor(unittest.TestCase):
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        self._save = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+        self.scheduler = sched_mod.TennisBossScheduler()
+
+    def tearDown(self):
+        config.DB_FILE = self._save
+        os.close(self._fd)
+        os.remove(self._path)
+
+    def test_monitor_persists_last_check(self):
+        fake_result = {
+            "timestamp": "2026-07-15T18:00:00",
+            "checks": {"database": {"status": "ok"}},
+            "alerts": ["bet_history sparse: 97 settled (need 200+ for calibration)"],
+            "overall_status": "warning",
+        }
+        with patch("bot.scheduler.monitor.SystemMonitor") as MockMon:
+            MockMon.return_value.run_full_check.return_value = fake_result
+            self.scheduler.job_monitor()
+
+        raw = db.get_meta("last_monitor_check")
+        self.assertIsNotNone(raw)
+        import json as _json
+        persisted = _json.loads(raw)
+        self.assertEqual(persisted["overall_status"], "warning")
+        self.assertEqual(self.scheduler.jobs_run, 1)
+
+    def test_monitor_failure_does_not_persist(self):
+        with patch("bot.scheduler.monitor.SystemMonitor") as MockMon:
+            MockMon.return_value.run_full_check.side_effect = RuntimeError("boom")
+            self.scheduler.job_monitor()
+        self.assertIsNone(db.get_meta("last_monitor_check"))
+
+
 class TestJobCalibrationReport(unittest.TestCase):
     def setUp(self):
         self._fd, self._path = tempfile.mkstemp(suffix=".db")

@@ -10,6 +10,7 @@ Runs continuously with these jobs:
 - Weekly Sun 22:00: Calibration report → reports/calibration_report.md
 """
 
+import json
 import schedule
 import time
 from datetime import date, datetime
@@ -82,6 +83,7 @@ class TennisBossScheduler:
         try:
             mon = monitor.SystemMonitor()
             result = mon.run_full_check()
+            db.set_meta("last_monitor_check", json.dumps(result))
             status = result.get("overall_status", "unknown")
             alerts = len(result.get("alerts", []))
             log(f"Monitor job complete: {status} ({alerts} alerts)", "INFO" if status == "ok" else "WARN")
