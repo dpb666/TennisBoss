@@ -15,7 +15,8 @@ import difflib
 import json
 import sqlite3
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 from . import config, features, predictor
 from .log import log
@@ -246,6 +247,7 @@ CREATE TABLE IF NOT EXISTS bet_history (
 );
 CREATE INDEX IF NOT EXISTS idx_bet_history_date ON bet_history(date);
 CREATE INDEX IF NOT EXISTS idx_bet_history_event ON bet_history(event_key);
+CREATE INDEX IF NOT EXISTS idx_bet_history_surface ON bet_history(surface);
 CREATE TABLE IF NOT EXISTS player_rankings (
     name        TEXT PRIMARY KEY,
     tour        TEXT,
@@ -1081,6 +1083,150 @@ def player_recent_opponents(name: str, limit: int) -> List[sqlite3.Row]:
             "ORDER BY REPLACE(date,'-','') DESC LIMIT ?",
             (name, name, limit),
         ).fetchall()
+
+
+@dataclass
+class PlayerIntelCache:
+    """Prefetch en une connexion pour intelligence_layer (engineer/today batch)."""
+    records: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    recent_counts: Dict[str, int] = field(default_factory=dict)
+    last_dates: Dict[str, Optional[str]] = field(default_factory=dict)
+    opponents: Dict[str, List[sqlite3.Row]] = field(default_factory=dict)
+    clutch: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    h2h: Dict[Tuple[str, str], List[sqlite3.Row]] = field(default_factory=dict)
+
+
+_EMPTY_CLUTCH: Dict[str, float] = {
+    "bp_saved": 0.0, "bp_faced": 0.0, "bp_converted": 0.0,
+    "bp_chances": 0.0, "tb_won": 0.0, "tb_played": 0.0, "n_matches": 0.0,
+}
+
+
+def prefetch_player_intel(
+    names: Sequence[str],
+    pairs: Sequence[Tuple[str, str]],
+    *,
+    fatigue_cutoff: str,
+    opp_limit: int = 10,
+    clutch_limit: int = 20,
+) -> PlayerIntelCache:
+    """Charge en UNE transaction les données lues par intelligence_layer.
+
+    Évite N×~8 connexions SQLite par match sur /api/engineer/today (cold ~36s).
+    """
+    unique = sorted({n for n in names if n})
+    cache = PlayerIntelCache()
+    if not unique:
+        return cache
+
+    ph = ",".join("?" * len(unique))
+    params = tuple(unique)
+
+    with connect() as conn:
+        for row in conn.execute(
+            f"SELECT winner, COUNT(*) AS c FROM matches WHERE winner IN ({ph}) GROUP BY winner",
+            params,
+        ).fetchall():
+            cache.records.setdefault(row["winner"], {"wins": 0, "losses": 0})["wins"] = int(row["c"])
+        for row in conn.execute(
+            f"SELECT loser, COUNT(*) AS c FROM matches WHERE loser IN ({ph}) GROUP BY loser",
+            params,
+        ).fetchall():
+            cache.records.setdefault(row["loser"], {"wins": 0, "losses": 0})["losses"] = int(row["c"])
+        for n in unique:
+            cache.records.setdefault(n, {"wins": 0, "losses": 0})
+
+        for row in conn.execute(
+            f"SELECT player, COUNT(*) AS c FROM ("
+            f"  SELECT winner AS player FROM matches WHERE winner IN ({ph}) "
+            f"    AND REPLACE(date,'-','') >= ? "
+            f"  UNION ALL "
+            f"  SELECT loser AS player FROM matches WHERE loser IN ({ph}) "
+            f"    AND REPLACE(date,'-','') >= ?"
+            f") GROUP BY player",
+            params + (fatigue_cutoff,) + params + (fatigue_cutoff,),
+        ).fetchall():
+            cache.recent_counts[row["player"]] = int(row["c"])
+
+        for row in conn.execute(
+            f"SELECT player, MAX(d) AS d FROM ("
+            f"  SELECT winner AS player, REPLACE(date,'-','') AS d FROM matches "
+            f"    WHERE winner IN ({ph}) "
+            f"  UNION ALL "
+            f"  SELECT loser AS player, REPLACE(date,'-','') AS d FROM matches "
+            f"    WHERE loser IN ({ph})"
+            f") GROUP BY player",
+            params + params,
+        ).fetchall():
+            cache.last_dates[row["player"]] = row["d"]
+
+        opp_rows = conn.execute(
+            f"SELECT player, winner, loser, d FROM ("
+            f"  SELECT winner AS player, winner, loser, REPLACE(date,'-','') AS d "
+            f"    FROM matches WHERE winner IN ({ph}) "
+            f"  UNION ALL "
+            f"  SELECT loser AS player, winner, loser, REPLACE(date,'-','') AS d "
+            f"    FROM matches WHERE loser IN ({ph})"
+            f") ORDER BY player, d DESC",
+            params + params,
+        ).fetchall()
+        for row in opp_rows:
+            lst = cache.opponents.setdefault(row["player"], [])
+            if len(lst) < opp_limit:
+                lst.append(row)
+
+        clutch_rows = conn.execute(
+            f"SELECT winner, loser, w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced, "
+            f"       w_tb_won, l_tb_won, player, d FROM ("
+            f"  SELECT winner, loser, w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced, "
+            f"         w_tb_won, l_tb_won, winner AS player, REPLACE(date,'-','') AS d "
+            f"    FROM matches WHERE winner IN ({ph}) AND w_bp_faced IS NOT NULL "
+            f"  UNION ALL "
+            f"  SELECT winner, loser, w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced, "
+            f"         w_tb_won, l_tb_won, loser AS player, REPLACE(date,'-','') AS d "
+            f"    FROM matches WHERE loser IN ({ph}) AND w_bp_faced IS NOT NULL"
+            f") ORDER BY player, d DESC",
+            params + params,
+        ).fetchall()
+        clutch_acc: Dict[str, Dict[str, float]] = {}
+        clutch_n: Dict[str, int] = {}
+        for row in clutch_rows:
+            pname = row["player"]
+            if clutch_n.get(pname, 0) >= clutch_limit:
+                continue
+            out = clutch_acc.setdefault(pname, dict(_EMPTY_CLUTCH))
+            if row["winner"] == pname:
+                own_s, own_f = row["w_bp_saved"], row["w_bp_faced"]
+                opp_s, opp_f = row["l_bp_saved"], row["l_bp_faced"]
+                own_tb, opp_tb = row["w_tb_won"], row["l_tb_won"]
+            else:
+                own_s, own_f = row["l_bp_saved"], row["l_bp_faced"]
+                opp_s, opp_f = row["w_bp_saved"], row["w_bp_faced"]
+                own_tb, opp_tb = row["l_tb_won"], row["w_tb_won"]
+            out["bp_saved"] += own_s or 0.0
+            out["bp_faced"] += own_f or 0.0
+            out["bp_converted"] += (opp_f or 0.0) - (opp_s or 0.0)
+            out["bp_chances"] += opp_f or 0.0
+            out["tb_won"] += own_tb or 0
+            out["tb_played"] += (own_tb or 0) + (opp_tb or 0)
+            clutch_n[pname] = clutch_n.get(pname, 0) + 1
+            out["n_matches"] = float(clutch_n[pname])
+        cache.clutch = clutch_acc
+
+        seen_pairs: Set[Tuple[str, str]] = set()
+        for n1, n2 in pairs:
+            key = (n1, n2)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            cache.h2h[key] = conn.execute(
+                "SELECT date,tour,winner,loser FROM matches "
+                "WHERE (winner=? AND loser=?) OR (winner=? AND loser=?) "
+                "ORDER BY REPLACE(date,'-','') DESC, id DESC",
+                (n1, n2, n2, n1),
+            ).fetchall()
+
+    return cache
 
 
 def counts() -> Dict[str, int]:

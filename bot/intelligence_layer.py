@@ -41,10 +41,83 @@ normalise les deux formats avant comparaison.
 """
 from __future__ import annotations
 
+import contextvars
 import datetime as _dt
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from . import db, intelligence, sentiment
+
+# Cache requête-scopé (prefetch batch pour engineer/today).
+_intel_cache: contextvars.ContextVar[Optional[db.PlayerIntelCache]] = contextvars.ContextVar(
+    "intel_cache", default=None,
+)
+
+
+@contextmanager
+def intel_batch(
+    names: Sequence[str],
+    pairs: Sequence[Tuple[str, str]],
+) -> Iterator[None]:
+    """Prefetch SQLite pour une série de compute_tis (une connexion vs N×8)."""
+    cutoff = (_dt.date.today() - _dt.timedelta(days=FATIGUE_WINDOW_DAYS)).strftime("%Y%m%d")
+    cache = db.prefetch_player_intel(
+        names, pairs,
+        fatigue_cutoff=cutoff,
+        opp_limit=OPPONENT_QUALITY_WINDOW,
+        clutch_limit=CLUTCH_WINDOW_MATCHES,
+    )
+    token = _intel_cache.set(cache)
+    try:
+        yield
+    finally:
+        _intel_cache.reset(token)
+
+
+def _cached_record(name: str) -> Dict[str, int]:
+    cache = _intel_cache.get()
+    if cache is not None:
+        return cache.records.get(name, {"wins": 0, "losses": 0})
+    return db.player_record(name)
+
+
+def _cached_recent_count(name: str, cutoff: str) -> int:
+    cache = _intel_cache.get()
+    if cache is not None:
+        return cache.recent_counts.get(name, 0)
+    return db.player_recent_match_count(name, cutoff)
+
+
+def _cached_last_date(name: str) -> Optional[str]:
+    cache = _intel_cache.get()
+    if cache is not None:
+        return cache.last_dates.get(name)
+    return db.player_last_match_date(name)
+
+
+def _cached_opponents(name: str, limit: int) -> List[Any]:
+    cache = _intel_cache.get()
+    if cache is not None:
+        return cache.opponents.get(name, [])[:limit]
+    return db.player_recent_opponents(name, limit)
+
+
+def _cached_clutch(name: str, limit: int) -> Dict[str, float]:
+    cache = _intel_cache.get()
+    if cache is not None:
+        empty = {
+            "bp_saved": 0.0, "bp_faced": 0.0, "bp_converted": 0.0,
+            "bp_chances": 0.0, "tb_won": 0.0, "tb_played": 0.0, "n_matches": 0.0,
+        }
+        return cache.clutch.get(name, empty)
+    return db.player_clutch_stats(name, limit)
+
+
+def _cached_h2h(n1: str, n2: str) -> List[Any]:
+    cache = _intel_cache.get()
+    if cache is not None:
+        return cache.h2h.get((n1, n2), [])
+    return db.head_to_head(n1, n2)
 
 # Écart (points de %) entre forme récente (EMA) et bilan carrière pour
 # déclencher un signal de bascule de forme. En dessous, c'est du bruit normal
@@ -98,7 +171,7 @@ def _form_signal(name: str, prof: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     n = int(prof.get("n", 0))
     if n < FORM_SWING_MIN_MATCHES:
         return None
-    record = db.player_record(name)
+    record = _cached_record(name)
     total = record["wins"] + record["losses"]
     if total < FORM_SWING_MIN_MATCHES:
         return None
@@ -132,7 +205,7 @@ def _fatigue_signal(name: str) -> Optional[Dict[str, Any]]:
     Voir note en tête de fichier pour le piège de format de date.
     """
     cutoff = (_dt.date.today() - _dt.timedelta(days=FATIGUE_WINDOW_DAYS)).strftime("%Y%m%d")
-    n = db.player_recent_match_count(name, cutoff)
+    n = _cached_recent_count(name, cutoff)
     if n < FATIGUE_MATCH_THRESHOLD:
         return None
     return {
@@ -157,7 +230,7 @@ def _rest_days_signal(name: str) -> Optional[Dict[str, Any]]:
     Voir note en tête de fichier pour le piège de format de date (même
     normalisation que fatigue_signals, via db.player_last_match_date).
     """
-    last = db.player_last_match_date(name)
+    last = _cached_last_date(name)
     if not last:
         return None
     try:
@@ -189,7 +262,7 @@ def _opponent_quality_signal(mem: Dict[str, Any], name: str) -> Optional[Dict[st
     signal que l'EMA de forme seule ne distingue pas d'une vraie évolution
     de niveau (voir note en tête de fichier pour le format de date).
     """
-    rows = db.player_recent_opponents(name, OPPONENT_QUALITY_WINDOW)
+    rows = _cached_opponents(name, OPPONENT_QUALITY_WINDOW)
     if len(rows) < OPPONENT_QUALITY_MIN_MATCHES:
         return None
     elo = mem.get("elo") or {}
@@ -229,7 +302,7 @@ def _clutch_signal(name: str) -> Optional[Dict[str, Any]]:
     uniquement (voir note Phase 2) — backtest walk-forward dans
     bot/signal_backtest.py::backtest_clutch avant toute entrée dans le modèle.
     """
-    stats = db.player_clutch_stats(name, CLUTCH_WINDOW_MATCHES)
+    stats = _cached_clutch(name, CLUTCH_WINDOW_MATCHES)
     notes: List[str] = []
     out: Dict[str, Any] = {"player": name, "n_matches": int(stats["n_matches"])}
 
@@ -318,7 +391,7 @@ def sentiment_signals(n1: str, n2: str) -> List[Dict[str, Any]]:
 
 
 def _h2h_factor(n1: str, n2: str) -> Optional[Dict[str, Any]]:
-    h2h = db.head_to_head(n1, n2)
+    h2h = _cached_h2h(n1, n2)
     w1 = sum(1 for row in h2h if row["winner"] == n1)
     w2 = sum(1 for row in h2h if row["winner"] == n2)
     if not w1 and not w2:
