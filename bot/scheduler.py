@@ -1,9 +1,13 @@
-"""Background scheduler for periodic tasks (learn, ingest, monitor).
+"""Background scheduler for periodic tasks (learn, ingest, monitor, rankings).
 
 Runs continuously with these jobs:
 - Every 1h: Auto-learning cycle
-- Every 6h: tennis-data.co.uk ingest (remplace Sackmann GitHub — repos supprimés)
+- Every 6h: tennis-data.co.uk ingest + ManTennisData ATP + DB backup
+- Every 12h: MCP WTA backfill
 - Every 5m: System monitor
+- Daily 09:00: Push digest
+- Weekly Mon 03:00: Rankings ingest (ATP/WTA live)
+- Weekly Sun 22:00: Calibration report → reports/calibration_report.md
 """
 
 import schedule
@@ -11,7 +15,7 @@ import time
 from datetime import date, datetime
 
 from . import (auto_learner, backup, db, mantennisdata_feeder, mcp_feeder, monitor,
-              push_notifications, recommendations, tennisdata_feeder)
+              push_notifications, ranking_feeder, recommendations, tennisdata_feeder)
 from .log import log
 
 
@@ -115,6 +119,69 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"Daily digest job failed: {e}", "ERROR")
 
+    def job_rankings(self):
+        """Ingestion hebdomadaire ATP/WTA (live-tennis.eu + archive tennis-data).
+
+        Garde-fou meta last_rankings_ingest_week : un redémarrage du worker
+        dans la même semaine ISO ne relance pas l'ingest (évite scrape HTML
+        répété).
+        """
+        log("=== SCHEDULER: Rankings ingest (weekly) ===", "INFO")
+        iso_week = datetime.now().strftime("%G-W%V")
+        if db.get_meta("last_rankings_ingest_week") == iso_week:
+            return
+        try:
+            result = ranking_feeder.ingest(
+                years=[datetime.now().year, datetime.now().year - 1],
+                tours=["atp", "wta"],
+                live=True,
+                live_limit=500,
+            )
+            cov = (result.get("coverage") or {})
+            log(
+                f"Rankings ingest: live={result.get('live_rankings_upserted', 0)}, "
+                f"official_active={cov.get('official_pct_active', '?')}%, "
+                f"synced={result.get('memory_synced', 0)}",
+                "INFO",
+            )
+            db.set_meta("last_rankings_ingest_week", iso_week)
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"Rankings ingest job failed: {e}", "ERROR")
+
+    def job_calibration_report(self):
+        """Rapport calibration hebdo → reports/calibration_report.md + meta summary.
+
+        Garde-fou last_calibration_report_week : idempotent par semaine ISO.
+        """
+        log("=== SCHEDULER: Calibration report (weekly) ===", "INFO")
+        iso_week = datetime.now().strftime("%G-W%V")
+        if db.get_meta("last_calibration_report_week") == iso_week:
+            return
+        try:
+            from . import calibration_report
+
+            path, report = calibration_report.generate(days=90, write_file=True)
+            n = report.get("n_settled", 0)
+            brier = report.get("brier_score")
+            verdict = report.get("verdict", "—")
+            log(
+                f"Calibration report: n={n}, brier={brier}, verdict={verdict}, "
+                f"path={path}",
+                "INFO",
+            )
+            db.set_meta("last_calibration_report_week", iso_week)
+            db.set_meta("last_calibration_summary", str({
+                "week": iso_week,
+                "n_settled": n,
+                "brier_score": brier,
+                "verdict": verdict,
+                "path": path,
+            }))
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"Calibration report job failed: {e}", "ERROR")
+
     def setup_jobs(self):
         """Configure job schedule."""
         schedule.every(1).hours.do(self.job_learn)
@@ -124,8 +191,11 @@ class TennisBossScheduler:
         schedule.every(5).minutes.do(self.job_monitor)
         schedule.every(6).hours.do(self.job_backup)
         schedule.every().day.at("09:00").do(self.job_daily_digest)
-        log("Scheduler: 7 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
-            "mcp_backfill 12h, monitor 5m, backup 6h, digest 9h/j)", "INFO")
+        schedule.every().monday.at("03:00").do(self.job_rankings)
+        schedule.every().sunday.at("22:00").do(self.job_calibration_report)
+        log("Scheduler: 9 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+            "mcp_backfill 12h, monitor 5m, backup 6h, digest 9h/j, "
+            "rankings Mon 3h, calibration Sun 22h)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()

@@ -72,5 +72,56 @@ class TestJobMtdIngest(unittest.TestCase):
         self.assertEqual(self.scheduler.jobs_run, 0)
 
 
+class TestJobRankings(unittest.TestCase):
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        self._save = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+        self.scheduler = sched_mod.TennisBossScheduler()
+
+    def tearDown(self):
+        config.DB_FILE = self._save
+        os.close(self._fd)
+        os.remove(self._path)
+
+    def test_rankings_runs_once_per_iso_week(self):
+        fake = {"live_rankings_upserted": 10, "memory_synced": 5,
+                "coverage": {"official_pct_active": 70.0}}
+        with patch("bot.scheduler.ranking_feeder.ingest", return_value=fake) as mocked:
+            self.scheduler.job_rankings()
+            self.scheduler.job_rankings()
+        mocked.assert_called_once()
+        self.assertEqual(self.scheduler.jobs_run, 1)
+
+    def test_rankings_failure_does_not_mark_week(self):
+        with patch("bot.scheduler.ranking_feeder.ingest", side_effect=RuntimeError("net")):
+            self.scheduler.job_rankings()
+        self.assertIsNone(db.get_meta("last_rankings_ingest_week"))
+
+
+class TestJobCalibrationReport(unittest.TestCase):
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        self._save = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+        self.scheduler = sched_mod.TennisBossScheduler()
+
+    def tearDown(self):
+        config.DB_FILE = self._save
+        os.close(self._fd)
+        os.remove(self._path)
+
+    def test_calibration_report_once_per_week(self):
+        fake_report = {"n_settled": 94, "brier_score": 0.231, "verdict": "sparse"}
+        with patch("bot.calibration_report.generate",
+                   return_value=("reports/calibration_report.md", fake_report)):
+            self.scheduler.job_calibration_report()
+            self.scheduler.job_calibration_report()
+        self.assertEqual(self.scheduler.jobs_run, 1)
+        self.assertIsNotNone(db.get_meta("last_calibration_report_week"))
+
+
 if __name__ == "__main__":
     unittest.main()
