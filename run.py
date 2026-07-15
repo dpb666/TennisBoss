@@ -484,8 +484,11 @@ def cmd_ingest_rankings(args) -> None:
 
 def cmd_backfill_bet_history(args) -> None:
     db.init()
-    n = db.backfill_bet_history_from_clv(limit=args.limit)
-    print(f"bet_history : {n} lignes backfillées depuis clv_log")
+    result = db.backfill_bet_history_from_clv(limit=args.limit)
+    print(
+        f"bet_history : {result['added']} lignes backfillées, "
+        f"{result['patched']} surfaces corrigées"
+    )
 
 
 def cmd_dedupe_players(args) -> None:

@@ -1450,6 +1450,22 @@ def _name_variants(name: str) -> List[str]:
     return list(dict.fromkeys(variants))  # dédoublonne en gardant l'ordre
 
 
+def _value_pick_surface(p1: str, p2: str) -> str:
+    """Surface du dernier value_pick pour une paire (vide si inconnu)."""
+    for a in _name_variants(p1):
+        for b in _name_variants(p2):
+            with connect() as conn:
+                row = conn.execute(
+                    "SELECT surface FROM value_picks "
+                    "WHERE ((player1=? AND player2=?) OR (player1=? AND player2=?)) "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (a, b, b, a),
+                ).fetchone()
+            if row and (row["surface"] or "").strip():
+                return (row["surface"] or "").strip()
+    return ""
+
+
 def settle_value_pick(p1: str, p2: str, winner: str) -> bool:
     """Marque un value pick comme réglé (résultat connu). Retourne True si trouvé.
 
@@ -1794,7 +1810,7 @@ def sync_bet_history_on_settle(p1: str, p2: str, winner_name: str,
                 "result": clv_row["result"],
                 "profit_loss": clv_row["pnl_flat"],
                 "clv_pct": clv_row["clv_pct"],
-                "surface": (vp_row["surface"] if vp_row else "") or "",
+                "surface": _value_pick_surface(clv_row["player1"], clv_row["player2"]),
                 "model_version": _bet_history_model_version(),
                 "bookmaker": clv_row["closing_src"] or "",
                 "ts": clv_row["settled_ts"],
@@ -1964,9 +1980,10 @@ def bet_history_calibration(days: int = 90) -> Dict[str, Any]:
     }
 
 
-def backfill_bet_history_from_clv(limit: int = 500) -> int:
-    """Remplit bet_history depuis clv_log déjà réglés (migration historique)."""
+def backfill_bet_history_from_clv(limit: int = 500) -> Dict[str, int]:
+    """Remplit bet_history depuis clv_log réglés; corrige surfaces manquantes."""
     added = 0
+    patched = 0
     with connect() as c:
         rows = c.execute(
             "SELECT * FROM clv_log WHERE result IS NOT NULL "
@@ -1992,13 +2009,27 @@ def backfill_bet_history_from_clv(limit: int = 500) -> int:
             "result": r["result"],
             "profit_loss": r["pnl_flat"],
             "clv_pct": r["clv_pct"],
-            "surface": "",
+            "surface": _value_pick_surface(r["player1"], r["player2"]),
             "model_version": _bet_history_model_version(),
             "bookmaker": r["closing_src"] or "",
             "ts": r["settled_ts"],
         }) > 0:
             added += 1
-    return added
+    with connect() as c:
+        missing = c.execute(
+            "SELECT id, player1, player2 FROM bet_history "
+            "WHERE surface IS NULL OR surface=''"
+        ).fetchall()
+    for row in missing:
+        surf = _value_pick_surface(row["player1"], row["player2"])
+        if surf:
+            with connect() as c:
+                c.execute(
+                    "UPDATE bet_history SET surface=? WHERE id=?",
+                    (surf, row["id"]),
+                )
+            patched += 1
+    return {"added": added, "patched": patched}
 
 
 def bet_history_stats(days: int = 30) -> Dict[str, Any]:

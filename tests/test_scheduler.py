@@ -114,7 +114,8 @@ class TestJobBetHistoryBackfill(unittest.TestCase):
         os.remove(self._path)
 
     def test_backfill_once_per_day(self):
-        with patch("bot.scheduler.db.backfill_bet_history_from_clv", return_value=3) as mocked:
+        with patch("bot.scheduler.db.backfill_bet_history_from_clv",
+                   return_value={"added": 3, "patched": 1}) as mocked:
             self.scheduler.job_bet_history_backfill()
             self.scheduler.job_bet_history_backfill()
         mocked.assert_called_once()

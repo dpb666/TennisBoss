@@ -33,11 +33,18 @@ class SystemMonitor:
             settled_count = len(db.list_settled())
             players_count = len(self.mem["players"])
 
+            bh = db.bet_history_stats(days=90)
+            bh_n = bh.get("n") or 0
+            if bh_n < 200:
+                self.alerts.append(
+                    f"bet_history sparse: {bh_n} settled (need 200+ for calibration)"
+                )
             return {
                 "status": "ok",
                 "matches": matches_count,
                 "settled": settled_count,
                 "players": players_count,
+                "bet_history_settled_90d": bh_n,
                 "timestamp": datetime.utcnow().isoformat(),
             }
         except Exception as e:  # noqa: BLE001

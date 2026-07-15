@@ -159,8 +159,12 @@ class TennisBossScheduler:
         if db.get_meta("last_bet_history_backfill_date") == today:
             return
         try:
-            added = db.backfill_bet_history_from_clv(limit=200)
-            log(f"bet_history backfill: {added} lignes ajoutées", "INFO")
+            result = db.backfill_bet_history_from_clv(limit=200)
+            log(
+                f"bet_history backfill: {result['added']} lignes ajoutées, "
+                f"{result['patched']} surfaces corrigées",
+                "INFO",
+            )
             db.set_meta("last_bet_history_backfill_date", today)
             self.jobs_run += 1
         except Exception as e:  # noqa: BLE001
@@ -219,7 +223,8 @@ class TennisBossScheduler:
         schedule.every(6).hours.do(self.job_backup)
         schedule.every().day.at("09:00").do(self.job_daily_digest)
         schedule.every().day.at("04:30").do(self.job_bet_history_backfill)
-        schedule.every().monday.at("03:00").do(self.job_rankings)
+        # Quotidien 03:00 avec garde-fou ISO week : retry auto si échec lundi.
+        schedule.every().day.at("03:00").do(self.job_rankings)
         schedule.every().sunday.at("22:00").do(self.job_calibration_report)
         log("Scheduler: 11 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
             "mcp_backfill 12h, monitor 5m, espn_warm 2m, backup 6h, digest 9h/j, "

@@ -96,8 +96,12 @@ class TestBetHistoryDb(BetHistoryTestCase):
         clv.seed_pick("bf1", "2026-07-10", "A", "B", "A", 2.0, 0.60, 0.70)
         clv.refresh_closing("bf1", "A", "A", 1.90, 2.1)
         clv.settle("A", "B", "A")
-        added = db.backfill_bet_history_from_clv(limit=10)
-        self.assertGreaterEqual(added, 0)
+        db.log_value_pick("2026-07-10", "A", "B", "A", 2.0, 10.0, surface="clay")
+        result = db.backfill_bet_history_from_clv(limit=10)
+        rows = db.list_bet_history()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["surface"], "clay")
+        self.assertGreaterEqual(result["added"] + result["patched"], 1)
 
     def test_sync_from_clv_settle_hook(self):
         clv.seed_pick("hook1", "2026-07-12", "A", "B", "A", 2.0, 0.58, 0.70)
