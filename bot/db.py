@@ -266,6 +266,7 @@ CREATE INDEX IF NOT EXISTS idx_settled_date ON settled_matches(date);
 -- (sinon scan complet des ~80 000 matchs à chaque prédiction/H2H).
 CREATE INDEX IF NOT EXISTS idx_matches_winner ON matches(winner);
 CREATE INDEX IF NOT EXISTS idx_matches_loser ON matches(loser);
+CREATE INDEX IF NOT EXISTS idx_matches_surface ON matches(surface);
 """
 
 
@@ -1466,6 +1467,48 @@ def _value_pick_surface(p1: str, p2: str) -> str:
     return ""
 
 
+def lookup_surface_from_archive(p1: str, p2: str, date: str = "") -> str:
+    """Surface depuis l'archive matches (player pair + date optionnelle).
+
+    Cherche d'abord une confrontation exacte à la date, sinon la plus récente
+    avant cette date pour la paire.
+    """
+    date_compact = (date or "").replace("-", "")[:8]
+    for a in _name_variants(p1):
+        for b in _name_variants(p2):
+            with connect() as conn:
+                if date_compact:
+                    row = conn.execute(
+                        "SELECT surface FROM matches "
+                        "WHERE ((winner=? AND loser=?) OR (winner=? AND loser=?)) "
+                        "AND REPLACE(date,'-','')=? "
+                        "AND surface IS NOT NULL AND surface != '' "
+                        "LIMIT 1",
+                        (a, b, b, a, date_compact),
+                    ).fetchone()
+                    if row and row["surface"]:
+                        return (row["surface"] or "").strip()
+                row = conn.execute(
+                    "SELECT surface FROM matches "
+                    "WHERE ((winner=? AND loser=?) OR (winner=? AND loser=?)) "
+                    "AND surface IS NOT NULL AND surface != '' "
+                    + ("AND REPLACE(date,'-','')<=? " if date_compact else "")
+                    + "ORDER BY REPLACE(date,'-','') DESC, id DESC LIMIT 1",
+                    (a, b, b, a, date_compact) if date_compact else (a, b, b, a),
+                ).fetchone()
+            if row and (row["surface"] or "").strip():
+                return (row["surface"] or "").strip()
+    return ""
+
+
+def resolve_bet_surface(p1: str, p2: str, date: str = "") -> str:
+    """Surface pour bet_history : value_pick d'abord, puis archive matches."""
+    surf = _value_pick_surface(p1, p2)
+    if surf:
+        return surf
+    return lookup_surface_from_archive(p1, p2, date)
+
+
 def settle_value_pick(p1: str, p2: str, winner: str) -> bool:
     """Marque un value pick comme réglé (résultat connu). Retourne True si trouvé.
 
@@ -1810,7 +1853,7 @@ def sync_bet_history_on_settle(p1: str, p2: str, winner_name: str,
                 "result": clv_row["result"],
                 "profit_loss": clv_row["pnl_flat"],
                 "clv_pct": clv_row["clv_pct"],
-                "surface": _value_pick_surface(clv_row["player1"], clv_row["player2"]),
+                "surface": resolve_bet_surface(clv_row["player1"], clv_row["player2"], clv_row["date"]),
                 "model_version": _bet_history_model_version(),
                 "bookmaker": clv_row["closing_src"] or "",
                 "ts": clv_row["settled_ts"],
@@ -2009,7 +2052,7 @@ def backfill_bet_history_from_clv(limit: int = 500) -> Dict[str, int]:
             "result": r["result"],
             "profit_loss": r["pnl_flat"],
             "clv_pct": r["clv_pct"],
-            "surface": _value_pick_surface(r["player1"], r["player2"]),
+            "surface": resolve_bet_surface(r["player1"], r["player2"], r["date"]),
             "model_version": _bet_history_model_version(),
             "bookmaker": r["closing_src"] or "",
             "ts": r["settled_ts"],
@@ -2021,7 +2064,7 @@ def backfill_bet_history_from_clv(limit: int = 500) -> Dict[str, int]:
             "WHERE surface IS NULL OR surface=''"
         ).fetchall()
     for row in missing:
-        surf = _value_pick_surface(row["player1"], row["player2"])
+        surf = resolve_bet_surface(row["player1"], row["player2"])
         if surf:
             with connect() as c:
                 c.execute(
@@ -2030,6 +2073,28 @@ def backfill_bet_history_from_clv(limit: int = 500) -> Dict[str, int]:
                 )
             patched += 1
     return {"added": added, "patched": patched}
+
+
+def backfill_bet_history_surface_from_matches() -> Dict[str, int]:
+    """Remplit les surfaces manquantes via archive matches (player+date)."""
+    patched = 0
+    with connect() as c:
+        missing = c.execute(
+            "SELECT id, player1, player2, date FROM bet_history "
+            "WHERE surface IS NULL OR surface=''"
+        ).fetchall()
+    for row in missing:
+        surf = lookup_surface_from_archive(
+            row["player1"], row["player2"], row["date"] or "",
+        )
+        if surf:
+            with connect() as c:
+                c.execute(
+                    "UPDATE bet_history SET surface=? WHERE id=?",
+                    (surf, row["id"]),
+                )
+            patched += 1
+    return {"patched": patched}
 
 
 def bet_history_stats(days: int = 30) -> Dict[str, Any]:

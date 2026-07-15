@@ -19,6 +19,7 @@ import csv as _csv
 import json
 import os
 import sys
+from pathlib import Path
 
 from bot import (backtest as bt, backup as backup_mod, config, datasource, db, features,
                  learner, live_api, memory, namematch, odds_api, predictor, signal_backtest)
@@ -487,8 +488,28 @@ def cmd_backfill_bet_history(args) -> None:
     result = db.backfill_bet_history_from_clv(limit=args.limit)
     print(
         f"bet_history : {result['added']} lignes backfillées, "
-        f"{result['patched']} surfaces corrigées"
+        f"{result['patched']} surfaces corrigées (value_picks)"
     )
+    if getattr(args, "archive", False):
+        arch = db.backfill_bet_history_surface_from_matches()
+        print(f"bet_history : {arch['patched']} surfaces corrigées (archive matches)")
+
+
+def cmd_surface_benchmark(args) -> None:
+    from bot import surface_experiment
+    db.init()
+    report = surface_experiment.run_benchmark(
+        test_fraction=args.test_fraction,
+        min_test=args.min_test,
+        write_report=True,
+    )
+    print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
+
+
+def cmd_surface_data_audit(_args) -> None:
+    import subprocess
+    script = Path(__file__).resolve().parent / "scripts" / "surface_data_audit.py"
+    subprocess.run([sys.executable, str(script)], check=False)
 
 
 def cmd_dedupe_players(args) -> None:
@@ -614,7 +635,21 @@ def main() -> None:
 
     p_bh = sub.add_parser("backfill-bet-history", help="Remplit bet_history depuis clv_log")
     p_bh.add_argument("--limit", type=int, default=5000, help="Max lignes clv_log")
+    p_bh.add_argument("--archive", action="store_true",
+                      help="Aussi backfill surface depuis archive matches")
     p_bh.set_defaults(func=cmd_backfill_bet_history)
+
+    p_surf = sub.add_parser("surface-benchmark",
+                            help="Walk-forward benchmark surface features (offline)")
+    p_surf.add_argument("--test-fraction", type=float, default=0.25,
+                        help="Fraction holdout test (défaut 0.25)")
+    p_surf.add_argument("--min-test", type=int, default=500,
+                        help="Minimum matchs dans le holdout")
+    p_surf.set_defaults(func=cmd_surface_benchmark)
+
+    sub.add_parser("surface-data-audit",
+                   help="Rapport couverture surface (matches, bet_history)").set_defaults(
+        func=cmd_surface_data_audit)
 
     p_dedupe = sub.add_parser("dedupe-players",
                               help="Fusionne les profils joueurs dupliqués (ex. 'Andreeva M.' / 'Mirra Andreeva')")
