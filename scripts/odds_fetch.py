@@ -45,11 +45,14 @@ def _load_model() -> Optional[Dict]:
 
 
 def _resolve_players(mem: Dict, home: str, away: str,
-                     league: str = "") -> Tuple[Any, Any]:
-    """Use AI resolver — returns (ResolvedPlayer, ResolvedPlayer)."""
+                     league: str = "") -> Tuple[Optional[str], Optional[str]]:
+    """Résout les noms via namematch (même logique que le backend principal)."""
     try:
-        from bot.ai_resolver import resolve_match
-        return resolve_match(home, away, mem, league=league)
+        from bot import namematch
+        players = mem.get("players") or {}
+        counts = {n: int(p.get("n", 0)) for n, p in players.items()}
+        idx = namematch.build_index(list(players.keys()), counts)
+        return namematch.resolve(home, idx), namematch.resolve(away, idx)
     except Exception as exc:
         print(f"[RESOLVER] Erreur : {exc}")
         return None, None
@@ -320,29 +323,17 @@ def main() -> None:
             covered += 1
         elif model_ok:
             league = ev.get("league", {}).get("name", "")
-            p1r, p2r = _resolve_players(mem, ev.get("home", ""), ev.get("away", ""), league)
-            if p1r and p2r:
-                # Use resolved names (or raw with peer profile) for prediction
-                n1 = p1r.resolved if p1r.confidence >= 0.30 else p1r.raw
-                n2 = p2r.resolved if p2r.confidence >= 0.30 else p2r.raw
-                # Inject peer profiles into mem if needed
-                if p1r.profile and n1 not in (mem.get("players") or {}):
-                    mem.setdefault("players", {})[n1] = p1r.profile
-                if p2r.profile and n2 not in (mem.get("players") or {}):
-                    mem.setdefault("players", {})[n2] = p2r.profile
+            n1, n2 = _resolve_players(mem, ev.get("home", ""), ev.get("away", ""), league)
+            if n1 and n2:
                 pred = _model_predict(mem, n1, n2)
                 if pred:
-                    pred["src1"] = p1r.source
-                    pred["src2"] = p2r.source
-                    pred["conf1"] = p1r.confidence
-                    pred["conf2"] = p2r.confidence
                     print_model_fallback(pred)
                     hybrid += 1
                 else:
                     print(f"  [INFO] Prédiction impossible pour {n1} vs {n2}.\n")
                     blind += 1
             else:
-                print(f"  [INFO] Resolver indisponible.\n")
+                print(f"  [INFO] Résolution joueurs impossible.\n")
                 blind += 1
         else:
             print(f"  [INFO] Aucune cote disponible et modèle désactivé.\n")
