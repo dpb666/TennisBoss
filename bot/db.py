@@ -246,6 +246,16 @@ CREATE TABLE IF NOT EXISTS bet_history (
 );
 CREATE INDEX IF NOT EXISTS idx_bet_history_date ON bet_history(date);
 CREATE INDEX IF NOT EXISTS idx_bet_history_event ON bet_history(event_key);
+CREATE TABLE IF NOT EXISTS player_rankings (
+    name        TEXT PRIMARY KEY,
+    tour        TEXT,
+    rank        INTEGER NOT NULL,
+    points      REAL,
+    as_of       TEXT,
+    source      TEXT,
+    updated_ts  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_player_rankings_tour ON player_rankings(tour);
 CREATE INDEX IF NOT EXISTS idx_clv_date ON clv_log(date);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
@@ -316,6 +326,8 @@ def init() -> None:
             ("honeypot_player", "ALTER TABLE clv_log ADD COLUMN honeypot_player TEXT"),
             ("honeypot_edge_pct", "ALTER TABLE clv_log ADD COLUMN honeypot_edge_pct REAL"),
             ("bookmaker", "ALTER TABLE bet_history ADD COLUMN bookmaker TEXT"),
+            ("w_rank", "ALTER TABLE matches ADD COLUMN w_rank INTEGER"),
+            ("l_rank", "ALTER TABLE matches ADD COLUMN l_rank INTEGER"),
         ):
             try:
                 conn.execute(ddl)
@@ -356,6 +368,36 @@ def health_check(repair: bool = False) -> Dict[str, Any]:
 
 
 # --- Archive des matchs ----------------------------------------------------
+# Valeur neutre écrite par tennisdata_feeder quand serve/return sont inconnus.
+# MCP peut remplacer ces placeholders (voir backfill_match_stats_mcp_bulk).
+NEUTRAL_STAT = 0.5
+NEUTRAL_STAT_EPS = 1e-4
+
+
+def _is_neutral_stat(val: Optional[float]) -> bool:
+    if val is None:
+        return True
+    try:
+        return abs(float(val) - NEUTRAL_STAT) < NEUTRAL_STAT_EPS
+    except (TypeError, ValueError):
+        return True
+
+
+def _fill_mcp_stat(current: Optional[float], new: Optional[float]) -> Optional[float]:
+    """Remplace NULL ou 0.5 neutre ; conserve une vraie stat déjà présente."""
+    if new is None:
+        return current
+    if _is_neutral_stat(current):
+        return new
+    return current
+
+
+def _fill_mcp_bp(current: Optional[float], new: Optional[float]) -> Optional[float]:
+    if new is None:
+        return current
+    return current if current is not None else new
+
+
 def archive_matches(matches: List[Dict]) -> int:
     """Insère les matchs dans l'archive (ignore les doublons). Renvoie le nb ajoutés."""
     rows = [
@@ -368,6 +410,7 @@ def archive_matches(matches: List[Dict]) -> int:
             m.get("w_bp_saved"), m.get("w_bp_faced"),
             m.get("l_bp_saved"), m.get("l_bp_faced"),
             m.get("w_tb_won"), m.get("l_tb_won"),
+            m.get("w_rank"), m.get("l_rank"),
         )
         for m in matches
     ]
@@ -377,8 +420,9 @@ def archive_matches(matches: List[Dict]) -> int:
             "INSERT OR IGNORE INTO matches "
             "(id,date,tour,winner,loser,w_serve,w_return1,w_return2,"
             " l_serve,l_return1,l_return2,surface,margin,"
-            " w_bp_saved,w_bp_faced,l_bp_saved,l_bp_faced,w_tb_won,l_tb_won) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " w_bp_saved,w_bp_faced,l_bp_saved,l_bp_faced,w_tb_won,l_tb_won,"
+            " w_rank,l_rank) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         after = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
@@ -486,6 +530,269 @@ def backfill_match_stats_bulk(
             if _apply_backfill(conn, match_id, winner_stats, loser_stats):
                 updated += 1
     return updated
+
+
+def _apply_backfill_mcp(conn: sqlite3.Connection, match_id: str,
+                        winner_stats: Dict[str, float],
+                        loser_stats: Dict[str, float]) -> bool:
+    """Enrichissement MCP : remplace serve/return neutres (0.5), BP en COALESCE."""
+    row = conn.execute(
+        "SELECT w_serve,w_return1,w_return2,l_serve,l_return1,l_return2,"
+        "w_bp_saved,w_bp_faced,l_bp_saved,l_bp_faced FROM matches WHERE id=?",
+        (match_id,),
+    ).fetchone()
+    if not row:
+        return False
+    ws = _fill_mcp_stat(row["w_serve"], winner_stats.get("serve"))
+    wr1 = _fill_mcp_stat(row["w_return1"], winner_stats.get("return1"))
+    wr2 = _fill_mcp_stat(row["w_return2"], winner_stats.get("return2"))
+    ls = _fill_mcp_stat(row["l_serve"], loser_stats.get("serve"))
+    lr1 = _fill_mcp_stat(row["l_return1"], loser_stats.get("return1"))
+    lr2 = _fill_mcp_stat(row["l_return2"], loser_stats.get("return2"))
+    wbs = _fill_mcp_bp(row["w_bp_saved"], winner_stats.get("bp_saved"))
+    wbf = _fill_mcp_bp(row["w_bp_faced"], winner_stats.get("bp_faced"))
+    lbs = _fill_mcp_bp(row["l_bp_saved"], loser_stats.get("bp_saved"))
+    lbf = _fill_mcp_bp(row["l_bp_faced"], loser_stats.get("bp_faced"))
+    conn.execute(
+        "UPDATE matches SET w_serve=?, w_return1=?, w_return2=?, "
+        "l_serve=?, l_return1=?, l_return2=?, "
+        "w_bp_saved=?, w_bp_faced=?, l_bp_saved=?, l_bp_faced=? WHERE id=?",
+        (ws, wr1, wr2, ls, lr1, lr2, wbs, wbf, lbs, lbf, match_id),
+    )
+    return True
+
+
+def backfill_match_stats_mcp_bulk(
+    updates: List[Tuple[str, Dict[str, float], Dict[str, float]]],
+) -> int:
+    """Backfill MCP : peut remplacer les stats neutres 0.5 (tennis-data WTA)."""
+    if not updates:
+        return 0
+    updated = 0
+    with connect() as conn:
+        for match_id, winner_stats, loser_stats in updates:
+            if _apply_backfill_mcp(conn, match_id, winner_stats, loser_stats):
+                updated += 1
+    return updated
+
+
+def backfill_match_ranks_bulk(
+    updates: List[Tuple[str, Optional[int], Optional[int]]],
+) -> int:
+    """Complète w_rank/l_rank sur des matchs existants (COALESCE)."""
+    if not updates:
+        return 0
+    updated = 0
+    with connect() as conn:
+        for match_id, w_rank, l_rank in updates:
+            if w_rank is None and l_rank is None:
+                continue
+            cur = conn.execute(
+                "UPDATE matches SET "
+                "w_rank=COALESCE(w_rank, ?), l_rank=COALESCE(l_rank, ?) "
+                "WHERE id=?",
+                (w_rank, l_rank, match_id),
+            )
+            if cur.rowcount:
+                updated += 1
+    return updated
+
+
+def upsert_player_ranking(
+    name: str,
+    tour: str,
+    rank: int,
+    *,
+    as_of: Optional[str] = None,
+    source: str = "tennisdata",
+    points: Optional[float] = None,
+) -> None:
+    """Upsert un classement joueur (garde le plus récent par date as_of)."""
+    import datetime as _dt
+    ts = _dt.datetime.utcnow().isoformat(timespec="seconds")
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT rank, as_of FROM player_rankings WHERE name=?", (name,)
+        ).fetchone()
+        if row and as_of and row["as_of"] and as_of < row["as_of"]:
+            return
+        conn.execute(
+            "INSERT INTO player_rankings (name, tour, rank, points, as_of, source, updated_ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET "
+            "tour=excluded.tour, rank=excluded.rank, points=excluded.points, "
+            "as_of=excluded.as_of, source=excluded.source, updated_ts=excluded.updated_ts",
+            (name, tour, rank, points, as_of, source, ts),
+        )
+
+
+def upsert_player_rankings_bulk(rows: List[Dict[str, Any]]) -> int:
+    """Upsert en lot — rows: {name, tour, rank, as_of?, source?, points?}."""
+    n = 0
+    for r in rows:
+        if not r.get("name") or r.get("rank") is None:
+            continue
+        upsert_player_ranking(
+            r["name"],
+            r.get("tour") or "",
+            int(r["rank"]),
+            as_of=r.get("as_of"),
+            source=r.get("source") or "tennisdata",
+            points=r.get("points"),
+        )
+        n += 1
+    return n
+
+
+def get_all_player_rankings() -> Dict[str, int]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT name, rank FROM player_rankings ORDER BY rank"
+        ).fetchall()
+    return {r["name"]: int(r["rank"]) for r in rows}
+
+
+def rebuild_player_rankings_from_matches() -> int:
+    """Reconstruit player_rankings depuis le rang le plus récent par joueur/match."""
+    import datetime as _dt
+    ts = _dt.datetime.utcnow().isoformat(timespec="seconds")
+    best: Dict[str, Dict[str, Any]] = {}
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT winner AS name, tour, w_rank AS rank, date AS as_of "
+            "FROM matches WHERE w_rank IS NOT NULL "
+            "UNION ALL "
+            "SELECT loser AS name, tour, l_rank AS rank, date AS as_of "
+            "FROM matches WHERE l_rank IS NOT NULL"
+        ).fetchall()
+        for r in rows:
+            name = r["name"]
+            as_of = (r["as_of"] or "").replace("-", "")
+            prev = best.get(name)
+            if prev is None or as_of >= prev["as_of_key"]:
+                best[name] = {
+                    "tour": r["tour"],
+                    "rank": int(r["rank"]),
+                    "as_of": r["as_of"],
+                    "as_of_key": as_of,
+                }
+        n = 0
+        for name, info in best.items():
+            conn.execute(
+                "INSERT INTO player_rankings (name, tour, rank, points, as_of, source, updated_ts) "
+                "VALUES (?, ?, ?, NULL, ?, 'matches', ?) "
+                "ON CONFLICT(name) DO UPDATE SET "
+                "tour=excluded.tour, rank=excluded.rank, "
+                "as_of=CASE WHEN excluded.as_of >= COALESCE(player_rankings.as_of, '') "
+                "THEN excluded.as_of ELSE player_rankings.as_of END, "
+                "source=CASE WHEN excluded.as_of >= COALESCE(player_rankings.as_of, '') "
+                "THEN excluded.source ELSE player_rankings.source END, "
+                "updated_ts=excluded.updated_ts",
+                (name, info["tour"], info["rank"], info["as_of"], ts),
+            )
+            n += 1
+    return n
+
+
+def wta_stats_coverage() -> Dict[str, Any]:
+    """Couverture serve/return non-neutres pour joueurs WTA (matchs MCP-enrichissables)."""
+    with connect() as conn:
+        total_players = conn.execute(
+            "SELECT COUNT(DISTINCT name) FROM ("
+            "  SELECT winner AS name FROM matches WHERE tour='wta' "
+            "  UNION SELECT loser AS name FROM matches WHERE tour='wta'"
+            ")"
+        ).fetchone()[0]
+        non_neutral_players = conn.execute(
+            "SELECT COUNT(DISTINCT name) FROM ("
+            "  SELECT winner AS name FROM matches WHERE tour='wta' "
+            "    AND ABS(COALESCE(w_serve, 0.5) - 0.5) > 0.01 "
+            "  UNION "
+            "  SELECT loser AS name FROM matches WHERE tour='wta' "
+            "    AND ABS(COALESCE(l_serve, 0.5) - 0.5) > 0.01"
+            ")"
+        ).fetchone()[0]
+        total_matches = conn.execute(
+            "SELECT COUNT(*) FROM matches WHERE tour='wta'"
+        ).fetchone()[0]
+        mcp_matches = conn.execute(
+            "SELECT COUNT(*) FROM matches WHERE tour='wta' AND ("
+            "  ABS(COALESCE(w_serve, 0.5) - 0.5) > 0.01 OR "
+            "  ABS(COALESCE(l_serve, 0.5) - 0.5) > 0.01 OR "
+            "  w_bp_faced IS NOT NULL)"
+        ).fetchone()[0]
+    pct = round(100.0 * non_neutral_players / max(total_players, 1), 2)
+    return {
+        "tour": "wta",
+        "total_players": total_players,
+        "players_non_neutral_serve": non_neutral_players,
+        "player_serve_coverage_pct": pct,
+        "total_matches": total_matches,
+        "matches_with_real_or_bp_stats": mcp_matches,
+    }
+
+
+def ranking_coverage_stats(active_days: int = 365) -> Dict[str, Any]:
+    """Couverture ranking pour joueurs actifs (match récent ou n>=5)."""
+    import datetime as _dt
+    cutoff = (_dt.date.today() - _dt.timedelta(days=active_days)).isoformat()
+    with connect() as conn:
+        active = conn.execute(
+            "SELECT COUNT(DISTINCT name) FROM ("
+            "  SELECT winner AS name FROM matches WHERE date >= ? "
+            "  UNION SELECT loser AS name FROM matches WHERE date >= ?"
+            ")",
+            (cutoff, cutoff),
+        ).fetchone()[0]
+        active_with_rank = conn.execute(
+            "SELECT COUNT(DISTINCT pr.name) FROM player_rankings pr "
+            "WHERE pr.name IN ("
+            "  SELECT winner FROM matches WHERE date >= ? "
+            "  UNION SELECT loser FROM matches WHERE date >= ?"
+            ")",
+            (cutoff, cutoff),
+        ).fetchone()[0]
+        total_ranked = conn.execute(
+            "SELECT COUNT(*) FROM player_rankings"
+        ).fetchone()[0]
+        matches_with_rank = conn.execute(
+            "SELECT COUNT(*) FROM matches WHERE w_rank IS NOT NULL OR l_rank IS NOT NULL"
+        ).fetchone()[0]
+        total_matches = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+        # Joueurs "actifs" pour TIS : n>=5 en table players + match récent
+        confident_active = conn.execute(
+            "SELECT COUNT(DISTINCT p.name) FROM players p "
+            "WHERE p.n >= 5 AND p.name IN ("
+            "  SELECT winner FROM matches WHERE date >= ? "
+            "  UNION SELECT loser FROM matches WHERE date >= ?"
+            ")",
+            (cutoff, cutoff),
+        ).fetchone()[0]
+        confident_with_rank = conn.execute(
+            "SELECT COUNT(DISTINCT pr.name) FROM player_rankings pr "
+            "JOIN players p ON p.name = pr.name "
+            "WHERE p.n >= 5 AND pr.name IN ("
+            "  SELECT winner FROM matches WHERE date >= ? "
+            "  UNION SELECT loser FROM matches WHERE date >= ?"
+            ")",
+            (cutoff, cutoff),
+        ).fetchone()[0]
+    pct = round(100.0 * active_with_rank / max(active, 1), 2)
+    conf_pct = round(100.0 * confident_with_rank / max(confident_active, 1), 2)
+    return {
+        "active_players": active,
+        "active_with_rank": active_with_rank,
+        "active_rank_coverage_pct": pct,
+        "confident_active_players": confident_active,
+        "confident_active_with_rank": confident_with_rank,
+        "confident_active_rank_coverage_pct": conf_pct,
+        "total_ranked_players": total_ranked,
+        "matches_with_rank": matches_with_rank,
+        "match_rank_coverage_pct": round(
+            100.0 * matches_with_rank / max(total_matches, 1), 2
+        ),
+        "active_days": active_days,
+    }
 
 
 def archive_historical_odds(rows: List[Dict]) -> int:
@@ -784,6 +1091,7 @@ def counts() -> Dict[str, int]:
             "predictions": conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0],
             "backtests": conn.execute("SELECT COUNT(*) FROM backtests").fetchone()[0],
             "settled": conn.execute("SELECT COUNT(*) FROM settled_matches").fetchone()[0],
+            "bet_history": conn.execute("SELECT COUNT(*) FROM bet_history").fetchone()[0],
         }
 
 

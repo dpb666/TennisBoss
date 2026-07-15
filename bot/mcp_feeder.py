@@ -27,17 +27,14 @@ pas de séparation retour 1re/2e balle adverse comme Sackmann/ManTennisData.
 return1 et return2 reçoivent donc la même valeur — moins précis, mais
 toujours mieux que le neutre 0.5 utilisé jusqu'ici pour ces matchs.
 
-Effet observé en pratique (vérifié sur la DB réelle, 2026-07-12) : seules les
-colonnes BP (w_bp_saved/w_bp_faced/l_bp_saved/l_bp_faced) sont réellement
-enrichies. serve/return1/return2 restent à 0.5 : tennisdata_feeder les
-écrit EXPLICITEMENT à 0.5 (pas NULL) comme valeur neutre à l'ingestion, donc
-COALESCE(w_serve, ?) ne les touche jamais. Sans effet néfaste — c'est très
-exactement le signal recherché (clutch WTA, voir intelligence_layer.py) —
-mais serve/return de MCP ne servent aujourd'hui à rien côté prédiction/EMA.
+Effet observé (corrigé 2026-07-15) : db.backfill_match_stats_mcp_bulk() remplace
+les serve/return neutres 0.5 écrits par tennisdata_feeder, tout en conservant
+les vraies stats déjà présentes (ex. 0.777 Sackmann). Les colonnes BP restent
+en COALESCE (NULL seulement).
 
-db.backfill_match_stats() n'écrase JAMAIS une valeur déjà présente
-(COALESCE) : rejouer ce feeder est idempotent et sans risque de dégrader une
-donnée plus fiable (Sackmann historique, ManTennisData).
+db.backfill_match_stats() (COALESCE strict) reste pour les autres feeders ;
+MCP utilise backfill_match_stats_mcp_bulk — idempotent, sans risque d'écraser
+une donnée plus fiable que le placeholder 0.5.
 """
 from __future__ import annotations
 
@@ -111,8 +108,8 @@ def _player_stats(row: Dict[str, str]) -> Dict[str, float]:
 def backfill(tour: str = "wta") -> Dict[str, Any]:
     """Complète les matchs WTA déjà archivés avec les stats MCP disponibles.
 
-    Ne modifie que des colonnes actuellement NULL (voir
-    db.backfill_match_stats_bulk) — jamais destructif, toujours ré-exécutable.
+    Ne modifie que des colonnes NULL ou neutres 0.5 pour serve/return (voir
+    db.backfill_match_stats_mcp_bulk) — BP en COALESCE strict ; ré-exécutable.
 
     Charge TOUT l'index (date -> lignes matches) en UNE requête plutôt que
     d'ouvrir une connexion sqlite par match candidat : sur /mnt/c (WSL sur
@@ -170,7 +167,7 @@ def backfill(tour: str = "wta") -> Dict[str, Any]:
         w_stats, l_stats = (s1, s2) if row["winner"] == r1 else (s2, s1)
         updates.append((row["id"], w_stats, l_stats))
 
-    updated = db.backfill_match_stats_bulk(updates)
+    updated = db.backfill_match_stats_mcp_bulk(updates)
     log(f"MCP backfill {tour.upper()} : {checked} matchs avec stats exploitables, "
         f"{updated} lignes enrichies, {skipped_unresolved} non résolus.", "INFO")
     return {

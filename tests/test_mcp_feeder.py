@@ -102,6 +102,8 @@ class TestBackfillIntegration(unittest.TestCase):
         self.assertAlmostEqual(row["w_bp_faced"], 7.0)
         self.assertAlmostEqual(row["w_bp_saved"], 6.0)
         self.assertAlmostEqual(row["l_bp_faced"], 6.0)
+        self.assertAlmostEqual(row["w_serve"], 37 / 56)
+        self.assertAlmostEqual(row["l_serve"], 22 / 49)
 
     def test_backfill_never_overwrites_existing_stats(self):
         date = "20260524"
