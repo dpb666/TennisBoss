@@ -205,7 +205,8 @@ def clear_cache() -> None:
     _CURRENT_KEY_IDX = 0
 
 
-def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
+def _get(path: str, params: Dict[str, Any], ttl: float,
+         *, http_timeout: float = 20) -> Optional[Any]:
     """GET caché + pool de clés rotatif. Thread-safe : une seule requête par cache key."""
     cache_key_str = _cache_key(path, params)
     now = time.time()
@@ -229,8 +230,8 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
             evt = None  # ce thread fait la requête
 
     if evt is not None:
-        # Un autre thread est en train de fetcher — on attend son résultat (max 25s)
-        evt.wait(timeout=25)
+        # Un autre thread est en train de fetcher — on attend son résultat
+        evt.wait(timeout=min(25, http_timeout + 5))
         hit = _CACHE.get(cache_key_str)
         return hit[1] if (hit and hit[0] > now) else None
 
@@ -252,7 +253,7 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
             if _wait:
                 time.sleep(_wait)
             try:
-                r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
+                r = requests.get(f"{BASE}{path}", params=call_params, timeout=http_timeout)
                 _last_exc = None
                 break
             except requests.RequestException as exc:
@@ -274,7 +275,7 @@ def _get(path: str, params: Dict[str, Any], ttl: float) -> Optional[Any]:
                 log(f"odds-api 429 sur clé ...{api_key[-6:]} — bascule sur ...{next_key[-6:]}.", "WARN")
                 call_params["apiKey"] = next_key
                 try:
-                    r = requests.get(f"{BASE}{path}", params=call_params, timeout=20)
+                    r = requests.get(f"{BASE}{path}", params=call_params, timeout=http_timeout)
                     _update_rl(r, next_key)
                     api_key = next_key
                 except requests.RequestException:
@@ -420,7 +421,9 @@ def build_time_index(events: List[Dict[str, Any]]) -> Dict[frozenset, str]:
 
 def fetch_match_winner(event_id: Any,
                        bookmakers: Optional[str] = None,
-                       ttl: float = TTL_ODDS) -> Optional[Dict[str, Any]]:
+                       ttl: float = TTL_ODDS,
+                       *,
+                       http_timeout: float = 20) -> Optional[Dict[str, Any]]:
     """Cotes "ML" (vainqueur de match) -> probabilités implicites SANS vig.
 
     ttl=TTL_ODDS (10min) par défaut, pensé pour le pré-match où les cotes
@@ -439,7 +442,7 @@ def fetch_match_winner(event_id: Any,
         bookmakers = _bookmakers()
     sharp = _sharp_book()
     data = _get("/odds", {"eventId": event_id, "bookmakers": bookmakers},
-                ttl=ttl)
+                ttl=ttl, http_timeout=http_timeout)
     if not isinstance(data, dict):
         return None
 

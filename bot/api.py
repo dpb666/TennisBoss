@@ -902,19 +902,7 @@ def api_insight():
 
     # Phase 12a — Tennis Intelligence Score (TIS), extension non-breaking.
     try:
-        odds_data = None
-        if event_id and odds_api.is_enabled():
-            try:
-                mw = odds_api.fetch_match_winner(str(event_id), ttl=120)
-                if mw:
-                    odds_data = {
-                        "home_odds": mw["home_odds"],
-                        "away_odds": mw["away_odds"],
-                        "home_prob": mw.get("home_prob"),
-                        "away_prob": mw.get("away_prob"),
-                    }
-            except Exception as exc:  # noqa: BLE001
-                log(f"TIS: fetch_match_winner échoué pour {event_id} ({exc}) — ignoré.", "WARN")
+        odds_data = _tis_odds_snapshot(event_id)
         insight["match_intelligence"] = match_intelligence.compute_tis(
             n1, n2, surface=surface, odds_data=odds_data,
             mem=_MEM, event_key=event_id, explain=explain, prediction=r,
@@ -922,6 +910,48 @@ def api_insight():
     except Exception as exc:  # noqa: BLE001
         log(f"TIS compute échoué pour {n1} vs {n2} ({exc}) — insight sans TIS.", "WARN")
     return jsonify(insight)
+
+
+# TTL caches — endpoints Phase 12 (TIS) coûteux en requêtes SQLite par match.
+_tis_response_cache: Dict[str, tuple] = {}  # key -> (expiry_ts, payload)
+_MATCH_INTEL_TTL = 60
+_engineer_today_cache: Dict[str, tuple] = {}
+_ENGINEER_TODAY_TTL = 90
+_ENGINEER_MAX_FIXTURES = 40  # cap TIS — évite N×~10 requêtes DB sur tout le tableau ESPN
+
+
+def _tis_cache_get(cache: Dict[str, tuple], key: str) -> Optional[Any]:
+    import time as _t
+    hit = cache.get(key)
+    if hit and hit[0] > _t.time():
+        return hit[1]
+    return None
+
+
+def _tis_cache_set(cache: Dict[str, tuple], key: str, payload: Any, ttl: float) -> None:
+    import time as _t
+    cache[key] = (_t.time() + ttl, payload)
+
+
+def _tis_odds_snapshot(event_key: Optional[str], *, http_timeout: float = 8.0) -> Optional[Dict[str, Any]]:
+    """Cotes ML pour TIS — timeout court pour ne pas bloquer l'origine (524 CF)."""
+    if not event_key or not odds_api.is_enabled():
+        return None
+    try:
+        mw = odds_api.fetch_match_winner(
+            str(event_key), ttl=120, http_timeout=http_timeout,
+        )
+        if not mw:
+            return None
+        return {
+            "home_odds": mw["home_odds"],
+            "away_odds": mw["away_odds"],
+            "home_prob": mw.get("home_prob"),
+            "away_prob": mw.get("away_prob"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        log(f"TIS odds fetch échoué pour {event_key} ({exc}) — ignoré.", "WARN")
+        return None
 
 
 @app.get("/api/match/intelligence")
@@ -939,24 +969,17 @@ def api_match_intelligence():
     surface = request.args.get("surface") or None
     event_key = request.args.get("event_key") or request.args.get("event_id") or None
 
+    cache_key = f"{n1}|{n2}|{surface or ''}|{event_key or ''}"
+    cached = _tis_cache_get(_tis_response_cache, cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     f1 = features.feature_vector(features.get_profile(_MEM, n1))
     f2 = features.feature_vector(features.get_profile(_MEM, n2))
     r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
     explain = _explain(n1, f1, n2, f2)
 
-    odds_data = None
-    if event_key and odds_api.is_enabled():
-        try:
-            mw = odds_api.fetch_match_winner(str(event_key), ttl=120)
-            if mw:
-                odds_data = {
-                    "home_odds": mw["home_odds"],
-                    "away_odds": mw["away_odds"],
-                    "home_prob": mw.get("home_prob"),
-                    "away_prob": mw.get("away_prob"),
-                }
-        except Exception as exc:  # noqa: BLE001
-            log(f"/api/match/intelligence: fetch odds échoué ({exc}) — ignoré.", "WARN")
+    odds_data = _tis_odds_snapshot(event_key)
 
     payload = match_intelligence.compute_tis(
         n1, n2, surface=surface, odds_data=odds_data,
@@ -964,6 +987,7 @@ def api_match_intelligence():
     )
     payload["player1"] = n1
     payload["player2"] = n2
+    _tis_cache_set(_tis_response_cache, cache_key, payload, _MATCH_INTEL_TTL)
     return jsonify(payload)
 
 
@@ -981,6 +1005,11 @@ def api_engineer_today():
     limit = min(int(request.args.get("limit", 15)), 30)
     min_tis = float(request.args.get("min_tis", 0))
 
+    cache_key = f"{limit}_{min_tis}"
+    cached = _tis_cache_get(_engineer_today_cache, cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
     fixtures = espn_api.fetch_upcoming(days_ahead=1)
     _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     fixtures = [
@@ -989,7 +1018,10 @@ def api_engineer_today():
     ]
 
     rows: List[Dict[str, Any]] = []
+    processed = 0
     for f in fixtures:
+        if processed >= _ENGINEER_MAX_FIXTURES:
+            break
         n1 = _resolve(f.get("player1", "")) or f.get("player1", "")
         n2 = _resolve(f.get("player2", "")) or f.get("player2", "")
         if not n1 or not n2:
@@ -1004,6 +1036,7 @@ def api_engineer_today():
         except Exception as exc:  # noqa: BLE001
             log(f"engineer/today: TIS échoué {n1} vs {n2} ({exc}) — ignoré.", "WARN")
             continue
+        processed += 1
         if tis["tis"] < min_tis:
             continue
         rows.append({
@@ -1028,7 +1061,9 @@ def api_engineer_today():
 
     rows.sort(key=lambda r: (r["tis"], r.get("ev_pct", 0)), reverse=True)
     top = rows[:limit]
-    return jsonify({"count": len(top), "matches": top})
+    result = {"count": len(top), "matches": top}
+    _tis_cache_set(_engineer_today_cache, cache_key, result, _ENGINEER_TODAY_TTL)
+    return jsonify(result)
 
 
 _upcoming_cache: Dict[str, Any] = {}
