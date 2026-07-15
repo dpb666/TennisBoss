@@ -1510,6 +1510,43 @@ def bet_history_calibration(days: int = 90) -> Dict[str, Any]:
     }
 
 
+def backfill_bet_history_from_clv(limit: int = 500) -> int:
+    """Remplit bet_history depuis clv_log déjà réglés (migration historique)."""
+    added = 0
+    with connect() as c:
+        rows = c.execute(
+            "SELECT * FROM clv_log WHERE result IS NOT NULL "
+            "ORDER BY settled_ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    for r in rows:
+        ek = r["event_key"] or ""
+        with connect() as c:
+            if ek and c.execute(
+                "SELECT 1 FROM bet_history WHERE event_key=?", (ek,)
+            ).fetchone():
+                continue
+        if log_bet_history({
+            "event_key": ek,
+            "player1": r["player1"],
+            "player2": r["player2"],
+            "date": r["date"],
+            "prediction": r["pick_prob"],
+            "pick_side": r["pick_side"],
+            "odds": r["pick_odds"],
+            "confidence": r["confidence"],
+            "result": r["result"],
+            "profit_loss": r["pnl_flat"],
+            "clv_pct": r["clv_pct"],
+            "surface": "",
+            "model_version": _bet_history_model_version(),
+            "bookmaker": r["closing_src"] or "",
+            "ts": r["settled_ts"],
+        }) > 0:
+            added += 1
+    return added
+
+
 def bet_history_stats(days: int = 30) -> Dict[str, Any]:
     """ROI, win rate, bins de calibration et performance par surface."""
     rows = list_bet_history(limit=100000, days=days)
@@ -1538,9 +1575,11 @@ def bet_history_stats(days: int = 30) -> Dict[str, Any]:
         "wins": wins,
         "win_rate": round(wins / n, 3),
         "roi": round(sum(pnls) / len(pnls), 4) if pnls else None,
+        "yield_pct": round(sum(pnls) / len(pnls) * 100, 1) if pnls else None,
         "total_pnl": round(sum(pnls), 2) if pnls else 0.0,
         "calibration_bins": _bet_history_calibration_bins(settled),
         "by_surface": _bet_history_surface_stats(settled),
+        "by_bookmaker": _bet_history_bookmaker_stats(settled),
         "avg_clv_pct": round(sum(clvs) / len(clvs), 2) if clvs else None,
     }
 
