@@ -64,9 +64,9 @@
 
 | Hash | Message |
 |------|---------|
-| *(pending)* | `perf(db): batch prefetch player intel for TIS signal queries` |
-| *(pending)* | `fix(tis): apply Platt/temperature calibration to model_prob and EV` |
-| *(pending)* | `feat(ops): engineer/today batch path, endpoint timing, bet_history backfill job` |
+| `1cf9c1f` | `perf(db): batch prefetch player intel for TIS signal queries` |
+| `680e5bd` | `fix(tis): apply Platt/temperature calibration to model_prob and EV` |
+| `9dad1e9` | `feat(ops): engineer/today batch path, endpoint timing, bet_history backfill` |
 
 ---
 
