@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import os
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, request
 from flask_limiter import Limiter
@@ -901,23 +901,26 @@ def api_insight():
     )
 
     # Phase 12a — Tennis Intelligence Score (TIS), extension non-breaking.
-    odds_data = None
-    if event_id and odds_api.is_enabled():
-        try:
-            mw = odds_api.fetch_match_winner(str(event_id), ttl=120)
-            if mw:
-                odds_data = {
-                    "home_odds": mw["home_odds"],
-                    "away_odds": mw["away_odds"],
-                    "home_prob": mw.get("home_prob"),
-                    "away_prob": mw.get("away_prob"),
-                }
-        except Exception as exc:  # noqa: BLE001
-            log(f"TIS: fetch_match_winner échoué pour {event_id} ({exc}) — ignoré.", "WARN")
-    insight["match_intelligence"] = match_intelligence.compute_tis(
-        n1, n2, surface=surface, odds_data=odds_data,
-        mem=_MEM, event_key=event_id, explain=explain, prediction=r,
-    )
+    try:
+        odds_data = None
+        if event_id and odds_api.is_enabled():
+            try:
+                mw = odds_api.fetch_match_winner(str(event_id), ttl=120)
+                if mw:
+                    odds_data = {
+                        "home_odds": mw["home_odds"],
+                        "away_odds": mw["away_odds"],
+                        "home_prob": mw.get("home_prob"),
+                        "away_prob": mw.get("away_prob"),
+                    }
+            except Exception as exc:  # noqa: BLE001
+                log(f"TIS: fetch_match_winner échoué pour {event_id} ({exc}) — ignoré.", "WARN")
+        insight["match_intelligence"] = match_intelligence.compute_tis(
+            n1, n2, surface=surface, odds_data=odds_data,
+            mem=_MEM, event_key=event_id, explain=explain, prediction=r,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"TIS compute échoué pour {n1} vs {n2} ({exc}) — insight sans TIS.", "WARN")
     return jsonify(insight)
 
 
@@ -962,6 +965,70 @@ def api_match_intelligence():
     payload["player1"] = n1
     payload["player2"] = n2
     return jsonify(payload)
+
+
+@app.get("/api/engineer/today")
+@limiter.limit("10 per minute")
+def api_engineer_today():
+    """Tableau Engineer : matchs du jour classés par TIS (Phase 12d).
+
+    Colonnes : match, surface, prédiction, confiance, cotes marché, cote juste,
+    edge %, risque. Sans fetch odds massif (quota) — EV/edge à 0 sauf si cotes
+    déjà présentes dans les fixtures.
+    """
+    import datetime as _dt
+
+    limit = min(int(request.args.get("limit", 15)), 30)
+    min_tis = float(request.args.get("min_tis", 0))
+
+    fixtures = espn_api.fetch_upcoming(days_ahead=1)
+    _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    fixtures = [
+        f for f in fixtures
+        if not f.get("is_doubles") and (f.get("live") or f.get("date", "") >= _today)
+    ]
+
+    rows: List[Dict[str, Any]] = []
+    for f in fixtures:
+        n1 = _resolve(f.get("player1", "")) or f.get("player1", "")
+        n2 = _resolve(f.get("player2", "")) or f.get("player2", "")
+        if not n1 or not n2:
+            continue
+        t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
+        t2 = (_MEM.get("players") or {}).get(n2, {}).get("tour", "")
+        if t1 and t2 and {t1, t2} == {"atp", "wta"}:
+            continue
+        surface = f.get("surface") or config.surface_from_league(f.get("tournament", ""))
+        try:
+            tis = match_intelligence.compute_tis(n1, n2, surface=surface, mem=_MEM)
+        except Exception as exc:  # noqa: BLE001
+            log(f"engineer/today: TIS échoué {n1} vs {n2} ({exc}) — ignoré.", "WARN")
+            continue
+        if tis["tis"] < min_tis:
+            continue
+        rows.append({
+            "match": f"{n1} vs {n2}",
+            "player1": n1,
+            "player2": n2,
+            "surface": surface or tis.get("surface"),
+            "prediction": tis["favorite"],
+            "confidence": tis["confidence"],
+            "confidence_label": tis.get("confidence_label", ""),
+            "market_odds": tis.get("market_odds"),
+            "fair_odds": tis.get("fair_odds"),
+            "edge_pct": tis.get("edge_pct", 0.0),
+            "ev_pct": tis.get("ev_pct", 0.0),
+            "risk_score": tis.get("risk_score", 0.0),
+            "tis": tis["tis"],
+            "recommendation": tis["recommendation"],
+            "tournament": f.get("tournament", ""),
+            "date": f.get("date", ""),
+            "time": f.get("time", ""),
+        })
+
+    rows.sort(key=lambda r: (r["tis"], r.get("ev_pct", 0)), reverse=True)
+    top = rows[:limit]
+    return jsonify({"count": len(top), "matches": top})
 
 
 _upcoming_cache: Dict[str, Any] = {}
