@@ -1,7 +1,7 @@
 # TennisBoss — Stabilization Report
 
 **Date :** 15 juillet 2026  
-**Base prod :** `da0be76` → `dd5ea5f` (stabilization pass)  
+**Base prod :** `da0be76` → `f7ec92b` (stabilization pass)  
 **Mode :** STABILIZATION — preuve de fiabilité statistique du moteur de prédiction
 
 ---
@@ -220,7 +220,7 @@ pytest tests/test_bet_history.py tests/test_scheduler.py tests/test_monitor.py
 
 | Hash | Message |
 |------|---------|
-| `dd5ea5f` | `fix(stab): bet_history surface backfill, rankings retry, sparse alert` |
+| `f7ec92b` | `fix(stab): bet_history surface backfill, rankings retry, sparse alert` |
 
 ---
 
