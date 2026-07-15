@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv as _csv
+import json
 import os
 import sys
 
@@ -430,6 +431,25 @@ def cmd_signals(_args) -> None:
     print()
 
 
+def _safe_print(text: str) -> None:
+    """Print Unicode safely on Windows consoles (cp1252)."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+        print(text.encode(enc, errors="replace").decode(enc))
+
+
+def cmd_clv_weekly(args) -> None:
+    """Rapport CLV sur les N derniers jours (paper trading / validation edge)."""
+    from bot import clv as clv_mod, digest
+    days = max(1, int(getattr(args, "days", 7)))
+    _safe_print(digest.build_weekly_clv_report(days=days))
+    stats = clv_mod.weekly_stats(days=days)
+    print("\n--- JSON ---")
+    print(json.dumps(stats, indent=2, ensure_ascii=True, default=str))
+
+
 def cmd_dedupe_players(args) -> None:
     """Fusionne les profils joueurs dupliqués par variation de format de nom
     (ex. "Andreeva M." / "Mirra Andreeva" — voir bot/dedupe_players.py pour
@@ -527,6 +547,10 @@ def main() -> None:
 
     sub.add_parser("backup", help="Sauvegarde immédiate de la base SQLite").set_defaults(func=cmd_backup)
     sub.add_parser("signals", help="Backtest calib_k/form_signal/steam_move").set_defaults(func=cmd_signals)
+
+    p_clv = sub.add_parser("clv-weekly", help="Rapport CLV des N derniers jours")
+    p_clv.add_argument("--days", type=int, default=7, help="Fenêtre glissante (défaut 7)")
+    p_clv.set_defaults(func=cmd_clv_weekly)
 
     p_dedupe = sub.add_parser("dedupe-players",
                               help="Fusionne les profils joueurs dupliqués (ex. 'Andreeva M.' / 'Mirra Andreeva')")

@@ -102,9 +102,34 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Difficulty**: Low
 - **Estimated time**: 30 min
 - **Dependencies**: Requires user confirmation before deleting (see project convention: never delete without confirming intent)
-- **Status**: Not started
-- **Files involved**: `bot/ai_resolver.py` (401 lines, zero references anywhere including tests), `bot/alerts.py` (145 lines, zero references — dangerously similar name to the actually-used `bot/realtime_alerts.py`), `bot/telegram_handler.py`, `bot/telegram_poll.py` (two competing, both unused, Telegram integrations)
-- **Why it matters**: Dead code with a near-duplicate live module name (`alerts.py` vs `realtime_alerts.py`) is a real trap for a future contributor (human or AI) who greps for "alerts" and edits the wrong file.
+- **Status**: **Done — 2026-07-15**, user sign-off via "vas y".
+- **Removed**: `bot/ai_resolver.py`, `bot/alerts.py`, `bot/telegram_handler.py`, `bot/telegram_poll.py`.
+- **Also updated**: `scripts/odds_fetch.py` — `_resolve_players()` now uses `namematch` (same as backend), no longer imports `ai_resolver`.
+- **Verified**: `grep` across repo shows zero Python imports of deleted modules; `python -m pytest` 371/373 pass (2 unrelated Windows file-lock flakes in `test_backup` / `test_mantennisdata_feeder`, not caused by this deletion).
+
+### 5b. Match watchlist API + odds refresh prioritaire
+- **Priority**: High (parieur — budget odds-api concentré sur les matchs suivis)
+- **Status**: **Done — 2026-07-15.**
+- **API**: `POST /api/match/follow`, `POST /api/match/unfollow`, `GET /api/matches/followed` (DB table `followed_matches` existed, endpoints were missing).
+- **Background loop**: `_followed_matches_refresh_loop()` in `bot/api.py` — refresh 60s, TTL 30s live / 60s pré-match, alertes steam via `realtime_alerts.on_odds_move` si mouvement ≥ 3%.
+- **Android UI**: not wired yet — joueurs suivis déjà dans `PlayersScreen.kt`; bouton match à ajouter sur `MatchDetailScreen` si souhaité.
+- **Usage**:
+  ```bash
+  curl -X POST http://localhost:8000/api/match/follow \
+    -H "Content-Type: application/json" \
+    -d '{"event_key":"123","player1":"Sinner","player2":"Alcaraz","match_date":"2026-07-15","tournament":"Wimbledon"}'
+  curl http://localhost:8000/api/matches/followed
+  ```
+
+### 5c. Rapport CLV hebdomadaire (paper trading)
+- **Priority**: High (validation d'edge)
+- **Status**: **Done — 2026-07-15.**
+- **Backend**: `clv.weekly_stats(days=7)` in `bot/clv.py`.
+- **Endpoints / CLI / Telegram**:
+  - `GET /api/clv/weekly?days=7`
+  - `python run.py clv-weekly --days 7`
+  - Telegram `/clv-weekly` + envoi auto dimanche 21h avec le digest quotidien
+- **Tests**: `tests/test_clv.py::test_weekly_stats_aggregates_period`, `tests/test_api_endpoints_db.py::TestFollowedMatches`.
 
 ## Medium
 
@@ -124,7 +149,14 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Dependencies**: None
 - **Status**: **Done** — added `log(f"...", "WARN")` with a specific message to 26 of the 31 confirmed sites (data loading, predictions, DB writes, weather/honeypot analysis, market snapshots, Telegram send/poll). 3 sites deliberately left silent with a documented reason: `api.py:252` (`_clean_tournament`'s `ast.literal_eval` fallback — expected/frequent parse-miss on malformed input, not an error) and `api.py:522` (`_toronto_tz`'s `zoneinfo` fallback — already has a working degraded path, not silent data loss) and the Telegram `/clear` endpoint (`api.py` `_tg_poll_loop`, hits the dormant `app/` service on port 8001 — fails systematically while that service is disabled per item #1, so a WARN log there would just be noise about a known, not unexpected, condition; documented inline instead).
 - **Files involved**: `bot/api.py` (26 sites edited: `_load_state`, `api_predict`, `api_upcoming`, `api_live`, `api_inplay_best`, `_bet_builder`, settlement/calibration endpoints, `/api/value`, the value-scanner background loop, the inplay-settle loop, `_digest_loop`, `_tg_poll_loop`)
-- **Verified**: `python3 -m pytest` 403/403 passed, `python3 -c "import bot.api"` succeeds (no syntax errors from the 26 edits). **Not yet deployed** — `tennisboss-bot.service` needs a restart to pick this up; deferred since it's a live production service restart (same category of action that required explicit sign-off earlier this session).
+- **Verified**: `python3 -m pytest` 403/403 passed, `python3 -c "import bot.api"` succeeds (no syntax errors from the 26 edits). **Not yet deployed** — restart requis pour activer les WARN logs en prod.
+- **Deploy (WSL/production, après validation explicite)** :
+  ```bash
+  sudo systemctl restart tennisboss-bot.service
+  sleep 2 && systemctl is-active tennisboss-bot.service
+  curl -s http://127.0.0.1:8000/health
+  ```
+  Le restart ci-dessus déploie aussi les nouveautés 2026-07-15 (watchlist loop, CLV hebdo, endpoints match follow) — pas seulement les logs #7.
 
 ### 8. Bump Compose BOM and evaluate `security-crypto` alpha dependency
 - **Priority**: Medium
@@ -175,6 +207,44 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Status**: Not started (deliberately deferred per prior session decisions)
 - **Files involved**: N/A — architectural decision only
 - **Why it matters**: Just a periodic sanity check that this is still the right call, not a bug.
+
+---
+
+## Phase 12 — Validation & consolidation (predict → record → measure → improve)
+
+Focus: prove the decision engine, enrich bet tracking, calibration — **no new Android screens**.
+
+### A. TIS validation script + report
+- **Status**: **Done**
+- **Commands**: `python run.py validate-tis --limit 200`
+- **Output**: `reports/tis_validation.md`
+- **Tests**: `tests/test_validate_tis.py`
+- **Checks**: TIS 0–100, category sum, fair_odds = 1/prob, EV/edge formulas, tier consistency
+
+### B. bet_history enrichment
+- **Status**: **Done**
+- **API**: `GET /api/bet-history/calibration?days=90` — bins 50–55%, … 75%+ (predicted vs observed)
+- **Stats extended**: `yield_pct`, `avg_clv_pct`, `by_bookmaker` (from `closing_src` / CLV settle hook)
+- **Backfill**: `db.backfill_bet_history_from_clv()` for historical CLV rows
+- **Tests**: `tests/test_bet_history.py` (calibration endpoint, bookmaker, yield)
+
+### C. Calibration report
+- **Status**: **Done**
+- **Command**: `python run.py calibration-report --days 90`
+- **Output**: `reports/calibration_report.md` — reliability bins, Brier score, verdict
+- **Source priority**: `bet_history` → fallback `clv_log`
+
+### D. ML comparison (offline only)
+- **Status**: **Done**
+- **Command**: `python run.py compare-engines`
+- **Output**: `reports/engine_comparison.md`
+- **Rule**: heuristic stays in production; ML is hold-out evaluation only
+
+### Data gaps (before promoting ML)
+- WTA stats incomplete in archive
+- No live rankings feed (ranking coverage in ML prep dataset)
+- Indoor surface not split from hard
+- Need ≥30 settled bets in bet_history for meaningful calibration bins
 
 ---
 
