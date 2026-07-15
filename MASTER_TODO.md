@@ -241,10 +241,10 @@ Focus: prove the decision engine, enrich bet tracking, calibration — **no new 
 - **Rule**: heuristic stays in production; ML is hold-out evaluation only
 
 ### Data gaps (before promoting ML)
-- WTA stats incomplete in archive
-- No live rankings feed (ranking coverage in ML prep dataset)
+- ~~WTA stats incomplete in archive~~ **Partially fixed 2026-07-15** — MCP backfill now overwrites neutral 0.5 serve/return; WTA serve coverage **94.34%** (was 94.19% pre-MCP-run; **922** MCP matches enriched)
+- ~~No live rankings feed~~ **Fixed 2026-07-15** — `player_rankings` + `ranking_feeder` (tennis-data + live-tennis.eu); **70.3%** confident active (n≥5) with official rank; **100%** `ranking_diff` with Elo fallback
 - Indoor surface not split from hard
-- Need ≥30 settled bets in bet_history for meaningful calibration bins
+- ~~Need ≥30 settled bets in bet_history~~ **Done** — **94** rows backfilled from `clv_log`
 
 ---
 

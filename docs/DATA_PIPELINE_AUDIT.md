@@ -264,6 +264,30 @@ Le module `bot/ml_prep/` définit 10 features (`ranking_diff`, Elo, surface Elo,
 
 ---
 
+## 8. Résultats correctifs (15 juillet 2026)
+
+| Métrique | Avant | Après |
+|----------|-------|-------|
+| WTA joueurs serve non-neutre | 94.19% (3259/3460) | **94.34%** (3264/3460) |
+| MCP matchs serve/return enrichis | BP seulement (COALESCE bloqué par 0.5) | **922** matchs avec serve/return réels |
+| Matchs avec w_rank/l_rank | 0 | **12 094** (tennis-data 2020–2026) |
+| Joueurs classés (`player_rankings`) | 0 | **4 197** (live-tennis + tennis-data + memory) |
+| Couverture ranking actifs confiants (n≥5) | ~0% | **70.3%** officiel ; **100%** avec Elo fallback |
+| `bet_history` rows | 0 | **94** (backfill clv_log) |
+
+**Commandes :**
+```bash
+python run.py data-quality
+python run.py ingest-rankings --years 2020 2021 2022 2023 2024 2025 2026
+python -m bot.mcp_feeder  # ou scheduler job_mcp_backfill
+python run.py backfill-bet-history --limit 5000
+python -m pytest tests/ -q -k "mcp or ranking or bet_history"
+```
+
+**Commits :** WTA MCP fix → rankings ingestion → bet_history backfill (séparés).
+
+---
+
 ## 7. Inventaire technique par module
 
 ### `bot/datasource.py`
