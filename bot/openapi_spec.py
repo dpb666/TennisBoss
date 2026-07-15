@@ -176,6 +176,28 @@ def build_spec() -> Dict[str, Any]:
                 responses=_ok(), tags=["intelligence"])},
             "/api/clv": {"get": _op(
                 "Closing Line Value — preuve d'edge honnête", responses=_ok(), tags=["intelligence"])},
+            "/api/clv/weekly": {"get": _op(
+                "Rapport CLV glissant (7 jours par défaut)",
+                params=[_q("days", type_="integer")], responses=_ok(), tags=["intelligence"])},
+            "/api/match/intelligence": {"get": _op(
+                "Tennis Intelligence Score (TIS) 0-100 + EV + recommandation",
+                params=[_q("p1", required=True), _q("p2", required=True),
+                        _q("surface"), _q("event_key"), _q("event_id")],
+                responses={**_ok(), "400": {"description": "p1/p2 manquants"}},
+                tags=["intelligence"])},
+            "/api/engineer/today": {"get": _op(
+                "Top matchs du jour classés par TIS (tableau Engineer)",
+                params=[_q("limit", type_="integer"), _q("min_tis", type_="number")],
+                responses=_ok(), tags=["intelligence"])},
+            "/api/bet-history/stats": {"get": _op(
+                "Performance agrégée paris réglés (ROI, yield, CLV, surface)",
+                params=[_q("days", type_="integer")], responses=_ok(), tags=["intelligence"])},
+            "/api/bet-history/recent": {"get": _op(
+                "Derniers paris réglés (bet_history)",
+                params=[_q("limit", type_="integer")], responses=_ok(), tags=["intelligence"])},
+            "/api/bet-history/calibration": {"get": _op(
+                "Bins calibration prédit vs observé (50-55% … 75%+)",
+                params=[_q("days", type_="integer")], responses=_ok(), tags=["intelligence"])},
             "/api/line-movement": {"get": _op(
                 "Mouvement de cote capté par le scanner pour un match",
                 params=[_q("event_id")], responses=_ok(), tags=["intelligence"])},
