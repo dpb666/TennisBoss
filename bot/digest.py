@@ -320,6 +320,58 @@ def build_value_open() -> str:
     return "\n".join(lines)
 
 
+def build_weekly_clv_report(days: int = 7) -> str:
+    """Rapport CLV hebdomadaire (paper trading / validation d'edge)."""
+    try:
+        stats = clv.weekly_stats(days=days)
+    except Exception:
+        return "❌ Erreur lors du calcul CLV hebdo."
+
+    gl = stats.get("scanner") or stats.get("global") or {}
+    lines = [
+        f"📅 *CLV — {stats.get('period_start')} → {stats.get('period_end')}*",
+        "",
+        stats.get("verdict_label", "—"),
+        "",
+    ]
+    n_clv = gl.get("n_clv", 0)
+    if n_clv:
+        lines.append(f"CLV moyen : *{gl.get('avg_clv_pct', 0):+.1f}%*")
+        lines.append(
+            f"Beat closing : *{gl.get('beat_closing_pct', 0):.0f}%* "
+            f"(±{gl.get('beat_closing_ci95', 0):.1f}%, n={n_clv})"
+        )
+    if gl.get("n_settled", 0):
+        lines.append(
+            f"ROI flat : *{gl.get('roi_flat_pct', 0):+.1f}%* "
+            f"(n={gl.get('n_settled', 0)})"
+        )
+        lines.append(f"Win rate : *{gl.get('win_rate_pct', 0):.0f}%*")
+
+    by_day = stats.get("by_day") or {}
+    active_days = [d for d, agg in by_day.items() if agg.get("n_settled", 0)]
+    if active_days:
+        lines.append("")
+        lines.append("_Activité par jour :_")
+        for d in active_days[:7]:
+            agg = by_day[d]
+            lines.append(
+                f"  {d} : {agg.get('n_settled', 0)} réglés, "
+                f"ROI {agg.get('roi_flat_pct', 0):+.0f}%"
+            )
+
+    lines.append(
+        f"\n_{stats.get('n_new_picks', 0)} pick(s) encore ouverts sur la période_"
+    )
+    lines.append("_/clv-weekly — TennisBoss_")
+    return "\n".join(lines)
+
+
+def send_weekly_clv_digest(days: int = 7) -> bool:
+    """Envoie le rapport CLV hebdo par Telegram (owner)."""
+    return _send(build_weekly_clv_report(days=days))
+
+
 def build_clv_report() -> str:
     """Rapport CLV concis pour /clv."""
     try:

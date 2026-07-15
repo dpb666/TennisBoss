@@ -59,6 +59,15 @@ class TestCLV(unittest.TestCase):
     def test_settle_no_pick_returns_false(self):
         self.assertFalse(clv.settle("X", "Y", "X"))
 
+    def test_weekly_stats_aggregates_period(self):
+        clv.seed_pick("w1", "2026-07-10", "A", "B", "A", 2.0, 0.55, 0.7)
+        clv.refresh_closing("w1", "A", "A", 1.85, 2.1)
+        clv.settle("A", "B", "A")
+        stats = clv.weekly_stats(days=30)
+        self.assertEqual(stats["period_days"], 30)
+        self.assertGreaterEqual(stats["global"].get("n_settled", 0), 1)
+        self.assertIn("by_day", stats)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from bot import api, config, db
+from bot import api, clv, config, db
 
 
 class ApiDbTestCase(unittest.TestCase):
@@ -199,6 +199,46 @@ class TestFollowedPlayers(ApiDbTestCase):
         self.client.post("/api/player/follow", json={"name": "Sinner"})
         self.client.post("/api/player/follow", json={"name": "Sinner"})
         self.assertEqual(self.client.get("/api/players/followed").get_json()["count"], 1)
+
+
+class TestFollowedMatches(ApiDbTestCase):
+    def test_match_follow_requires_players(self):
+        resp = self.client.post("/api/match/follow", json={})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_match_follow_list_unfollow(self):
+        body = {
+            "event_key": "evt-123",
+            "player1": "Jannik Sinner",
+            "player2": "Carlos Alcaraz",
+            "match_date": "2026-07-15",
+            "tournament": "Wimbledon",
+        }
+        resp = self.client.post("/api/match/follow", json=body)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["followed"])
+        self.assertEqual(resp.get_json()["event_key"], "evt-123")
+
+        resp = self.client.get("/api/matches/followed")
+        data = resp.get_json()
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["matches"][0]["player1"], "Jannik Sinner")
+        self.assertTrue(data["matches"][0]["followed"])
+
+        resp = self.client.post("/api/match/unfollow", json={"event_key": "evt-123"})
+        self.assertFalse(resp.get_json()["followed"])
+        self.assertEqual(self.client.get("/api/matches/followed").get_json()["count"], 0)
+
+    def test_clv_weekly_endpoint(self):
+        clv.seed_pick("wk1", "2026-07-10", "A", "B", "A", 2.0, 0.55, 0.7)
+        clv.refresh_closing("wk1", "A", "A", 1.85, 2.1)
+        clv.settle("A", "B", "A")
+        resp = self.client.get("/api/clv/weekly?days=30")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn("global", data)
+        self.assertIn("period_days", data)
+        self.assertGreaterEqual(data["global"].get("n_settled", 0), 1)
 
 
 if __name__ == "__main__":
