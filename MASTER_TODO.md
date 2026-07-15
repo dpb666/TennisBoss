@@ -248,6 +248,30 @@ Focus: prove the decision engine, enrich bet tracking, calibration — **no new 
 
 ---
 
+## Phase 12 validation & Lead Engineer (2026-07-15)
+
+See **`docs/LEAD_ENGINEER_AUDIT.md`** for full audit.
+
+| Item | Status |
+|------|--------|
+| TIS validation (`validate-tis`) | Done — 0 math anomalies |
+| bet_history + calibration API | Done — 94 picks, bins sparse |
+| Scheduler weekly rankings (Mon 3h) | **Done** — `job_rankings` |
+| Scheduler weekly calibration (Sun 22h) | **Done** — `job_calibration_report` |
+| OpenAPI Phase 12 endpoints | **Done** |
+| Prod deploy (logs #7 + Phase 12 API) | Pending user OK — restart service |
+| Engineer Android UI | Deferred — moteur d'abord |
+| ML production | Deferred — need 1000+ settled picks |
+
+**Weekly routine:**
+```bash
+python run.py calibration-report --days 90
+python run.py validate-tis --limit 200
+python run.py data-quality
+```
+
+---
+
 ## Execution order (this session, if proceeding autonomously)
 
 Given #1 (the `app/` package) and #5 (deleting orphaned modules) both involve deleting code and therefore need explicit user sign-off before acting (per this project's standing conventions on destructive/hard-to-reverse actions), the safe autonomous execution order is:
