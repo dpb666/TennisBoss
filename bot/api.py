@@ -30,8 +30,8 @@ from flask_limiter import Limiter
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
-               db, elo, espn_api, features, intelligence, intelligence_layer, live_api, memory,
-               mistake_learner, namematch, odds_api, oddspapi_feeder, openapi_spec, predictor,
+               db, elo, espn_api, features, intelligence, intelligence_layer, live_api, match_intelligence,
+               memory, mistake_learner, namematch, odds_api, oddspapi_feeder, openapi_spec, predictor,
                recommendations, sackmann_feeder, settlement, weather)
 from . import __version__
 from .bootstrap import bootstrap
@@ -829,7 +829,65 @@ def api_insight():
         confidence=r["confidence"], confidence_label=r["confidence_label"],
         surface=surface, event_id=event_id, include_sentiment=include_sentiment,
     )
+
+    # Phase 12a — TIS (extension non-breaking de /api/insight).
+    try:
+        odds_data = _tis_odds_data(event_id)
+        insight["match_intelligence"] = match_intelligence.compute_tis(
+            n1, n2, surface=surface, odds_data=odds_data,
+            mem=_MEM, event_key=event_id, explain=explain, prediction=r,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"TIS compute échoué pour {n1} vs {n2} ({exc}) — insight sans TIS.", "WARN")
     return jsonify(insight)
+
+
+def _tis_odds_data(event_key: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Récupère les cotes pour le TIS si event_key fourni et odds-api activée."""
+    if not event_key or not odds_api.is_enabled():
+        return None
+    try:
+        mw = odds_api.fetch_match_winner(str(event_key), ttl=120)
+    except Exception as exc:  # noqa: BLE001
+        log(f"TIS: fetch_match_winner échoué pour {event_key} ({exc}) — ignoré.", "WARN")
+        return None
+    if not mw:
+        return None
+    return {
+        "home_odds": mw["home_odds"],
+        "away_odds": mw["away_odds"],
+        "home_prob": mw.get("home_prob"),
+        "away_prob": mw.get("away_prob"),
+    }
+
+
+@app.get("/api/match/intelligence")
+def api_match_intelligence():
+    """Tennis Intelligence Score (TIS) — score 0-100 + recommandation de pari.
+
+    Paramètres : p1, p2 (requis), surface (optionnel), event_key (optionnel,
+    id odds-api pour cotes + steam move).
+    """
+    p1, p2 = request.args.get("p1"), request.args.get("p2")
+    if not p1 or not p2:
+        return jsonify({"error": "paramètres requis: p1, p2"}), 400
+    n1 = _resolve(p1) or p1.strip()
+    n2 = _resolve(p2) or p2.strip()
+    surface = request.args.get("surface") or None
+    event_key = request.args.get("event_key") or request.args.get("event_id") or None
+
+    f1 = features.feature_vector(features.get_profile(_MEM, n1))
+    f2 = features.feature_vector(features.get_profile(_MEM, n2))
+    r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
+    explain = _explain(n1, f1, n2, f2)
+
+    payload = match_intelligence.compute_tis(
+        n1, n2, surface=surface, odds_data=_tis_odds_data(event_key),
+        mem=_MEM, event_key=event_key, explain=explain, prediction=r,
+    )
+    payload["player1"] = n1
+    payload["player2"] = n2
+    return jsonify(payload)
 
 
 _upcoming_cache: Dict[str, Any] = {}
