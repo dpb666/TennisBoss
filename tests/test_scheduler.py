@@ -100,6 +100,27 @@ class TestJobRankings(unittest.TestCase):
         self.assertIsNone(db.get_meta("last_rankings_ingest_week"))
 
 
+class TestJobBetHistoryBackfill(unittest.TestCase):
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        self._save = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+        self.scheduler = sched_mod.TennisBossScheduler()
+
+    def tearDown(self):
+        config.DB_FILE = self._save
+        os.close(self._fd)
+        os.remove(self._path)
+
+    def test_backfill_once_per_day(self):
+        with patch("bot.scheduler.db.backfill_bet_history_from_clv", return_value=3) as mocked:
+            self.scheduler.job_bet_history_backfill()
+            self.scheduler.job_bet_history_backfill()
+        mocked.assert_called_once()
+        self.assertEqual(self.scheduler.jobs_run, 1)
+
+
 class TestJobCalibrationReport(unittest.TestCase):
     def setUp(self):
         self._fd, self._path = tempfile.mkstemp(suffix=".db")

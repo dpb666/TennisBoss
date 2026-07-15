@@ -155,6 +155,12 @@ class SystemMonitor:
             "odds_api": self.check_odds_api(),
             "model_drift": self.check_model_drift(),
         }
+        try:
+            endpoint_timings = json.loads(db.get_meta("endpoint_timings") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            endpoint_timings = {}
+        if endpoint_timings:
+            checks["endpoint_timings"] = endpoint_timings
 
         summary = {
             "timestamp": datetime.utcnow().isoformat(),

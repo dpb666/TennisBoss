@@ -906,6 +906,7 @@ def api_insight():
         insight["match_intelligence"] = match_intelligence.compute_tis(
             n1, n2, surface=surface, odds_data=odds_data,
             mem=_MEM, event_key=event_id, explain=explain, prediction=r,
+            calibrate_match_prob=_calib,
         )
     except Exception as exc:  # noqa: BLE001
         log(f"TIS compute échoué pour {n1} vs {n2} ({exc}) — insight sans TIS.", "WARN")
@@ -918,6 +919,31 @@ _MATCH_INTEL_TTL = 60
 _engineer_today_cache: Dict[str, tuple] = {}
 _ENGINEER_TODAY_TTL = 90
 _ENGINEER_MAX_FIXTURES = 40  # cap TIS — évite N×~10 requêtes DB sur tout le tableau ESPN
+_SLOW_ENDPOINT_WARN_MS = 5000.0
+
+
+def _record_endpoint_timing(name: str, elapsed_ms: float) -> None:
+    """Persiste les timings lents pour /api/monitor/status."""
+    import datetime as _dt
+    import json as _j
+    try:
+        stats = _j.loads(db.get_meta("endpoint_timings") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        stats = {}
+    prev = stats.get(name, {})
+    count = int(prev.get("count", 0)) + 1
+    max_ms = max(float(prev.get("max_ms", 0)), elapsed_ms)
+    avg_ms = (float(prev.get("avg_ms", 0)) * (count - 1) + elapsed_ms) / count
+    stats[name] = {
+        "count": count,
+        "last_ms": round(elapsed_ms, 1),
+        "max_ms": round(max_ms, 1),
+        "avg_ms": round(avg_ms, 1),
+        "last_ts": _dt.datetime.utcnow().isoformat(timespec="seconds"),
+    }
+    db.set_meta("endpoint_timings", _j.dumps(stats))
+    if elapsed_ms >= _SLOW_ENDPOINT_WARN_MS:
+        log(f"Endpoint lent {name}: {elapsed_ms:.0f}ms", "WARN")
 
 
 def _tis_cache_get(cache: Dict[str, tuple], key: str) -> Optional[Any]:
@@ -984,6 +1010,7 @@ def api_match_intelligence():
     payload = match_intelligence.compute_tis(
         n1, n2, surface=surface, odds_data=odds_data,
         mem=_MEM, event_key=event_key, explain=explain, prediction=r,
+        calibrate_match_prob=_calib,
     )
     payload["player1"] = n1
     payload["player2"] = n2
@@ -1001,68 +1028,84 @@ def api_engineer_today():
     déjà présentes dans les fixtures.
     """
     import datetime as _dt
+    import time as _t
 
+    t0 = _t.time()
     limit = min(int(request.args.get("limit", 15)), 30)
     min_tis = float(request.args.get("min_tis", 0))
 
     cache_key = f"{limit}_{min_tis}"
     cached = _tis_cache_get(_engineer_today_cache, cache_key)
     if cached is not None:
+        _record_endpoint_timing("engineer/today", (_t.time() - t0) * 1000)
         return jsonify(cached)
 
     fixtures = espn_api.fetch_upcoming(days_ahead=1)
     _today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
-    fixtures = [
-        f for f in fixtures
-        if not f.get("is_doubles") and (f.get("live") or f.get("date", "") >= _today)
-    ]
+    known_players = _MEM.get("players") or {}
+    candidates: List[Dict[str, Any]] = []
+    batch_names: List[str] = []
+    batch_pairs: List[tuple] = []
 
-    rows: List[Dict[str, Any]] = []
-    processed = 0
     for f in fixtures:
-        if processed >= _ENGINEER_MAX_FIXTURES:
-            break
+        if f.get("is_doubles"):
+            continue
+        if not (f.get("live") or f.get("date", "") >= _today):
+            continue
         n1 = _resolve(f.get("player1", "")) or f.get("player1", "")
         n2 = _resolve(f.get("player2", "")) or f.get("player2", "")
         if not n1 or not n2:
             continue
-        t1 = (_MEM.get("players") or {}).get(n1, {}).get("tour", "")
-        t2 = (_MEM.get("players") or {}).get(n2, {}).get("tour", "")
+        if n1 not in known_players or n2 not in known_players:
+            continue
+        t1 = known_players.get(n1, {}).get("tour", "")
+        t2 = known_players.get(n2, {}).get("tour", "")
         if t1 and t2 and {t1, t2} == {"atp", "wta"}:
             continue
-        surface = f.get("surface") or config.surface_from_league(f.get("tournament", ""))
-        try:
-            tis = match_intelligence.compute_tis(n1, n2, surface=surface, mem=_MEM)
-        except Exception as exc:  # noqa: BLE001
-            log(f"engineer/today: TIS échoué {n1} vs {n2} ({exc}) — ignoré.", "WARN")
-            continue
-        processed += 1
-        if tis["tis"] < min_tis:
-            continue
-        rows.append({
-            "match": f"{n1} vs {n2}",
-            "player1": n1,
-            "player2": n2,
-            "surface": surface or tis.get("surface"),
-            "prediction": tis["favorite"],
-            "confidence": tis["confidence"],
-            "confidence_label": tis.get("confidence_label", ""),
-            "market_odds": tis.get("market_odds"),
-            "fair_odds": tis.get("fair_odds"),
-            "edge_pct": tis.get("edge_pct", 0.0),
-            "ev_pct": tis.get("ev_pct", 0.0),
-            "risk_score": tis.get("risk_score", 0.0),
-            "tis": tis["tis"],
-            "recommendation": tis["recommendation"],
-            "tournament": f.get("tournament", ""),
-            "date": f.get("date", ""),
-            "time": f.get("time", ""),
-        })
+        candidates.append((f, n1, n2))
+        batch_names.extend([n1, n2])
+        batch_pairs.append((n1, n2))
+        if len(candidates) >= _ENGINEER_MAX_FIXTURES:
+            break
+
+    rows: List[Dict[str, Any]] = []
+    with intelligence_layer.intel_batch(batch_names, batch_pairs):
+        for f, n1, n2 in candidates:
+            surface = f.get("surface") or config.surface_from_league(f.get("tournament", ""))
+            try:
+                tis = match_intelligence.compute_tis(
+                    n1, n2, surface=surface, mem=_MEM, calibrate_match_prob=_calib,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log(f"engineer/today: TIS échoué {n1} vs {n2} ({exc}) — ignoré.", "WARN")
+                continue
+            if tis["tis"] < min_tis:
+                continue
+            rows.append({
+                "match": f"{n1} vs {n2}",
+                "player1": n1,
+                "player2": n2,
+                "surface": surface or tis.get("surface"),
+                "prediction": tis["favorite"],
+                "confidence": tis["confidence"],
+                "confidence_label": tis.get("confidence_label", ""),
+                "market_odds": tis.get("market_odds"),
+                "fair_odds": tis.get("fair_odds"),
+                "edge_pct": tis.get("edge_pct", 0.0),
+                "ev_pct": tis.get("ev_pct", 0.0),
+                "risk_score": tis.get("risk_score", 0.0),
+                "tis": tis["tis"],
+                "recommendation": tis["recommendation"],
+                "tournament": f.get("tournament", ""),
+                "date": f.get("date", ""),
+                "time": f.get("time", ""),
+            })
 
     rows.sort(key=lambda r: (r["tis"], r.get("ev_pct", 0)), reverse=True)
     top = rows[:limit]
     result = {"count": len(top), "matches": top}
     _tis_cache_set(_engineer_today_cache, cache_key, result, _ENGINEER_TODAY_TTL)
+    _record_endpoint_timing("engineer/today", (_t.time() - t0) * 1000)
     return jsonify(result)
 
 
@@ -2662,7 +2705,11 @@ def api_monitor_status():
         result = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return jsonify({"available": False, "note": "Dernier check illisible."})
-    return jsonify({"available": True, **result})
+    try:
+        endpoint_timings = json.loads(db.get_meta("endpoint_timings") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        endpoint_timings = {}
+    return jsonify({"available": True, "endpoint_timings": endpoint_timings, **result})
 
 
 _LEARN_LOCK = __import__("threading").Lock()

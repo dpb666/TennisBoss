@@ -149,6 +149,23 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"Rankings ingest job failed: {e}", "ERROR")
 
+    def job_bet_history_backfill(self):
+        """Backfill bet_history depuis clv_log réglés (migration incrémentale).
+
+        Garde-fou last_bet_history_backfill_date : une fois par jour max.
+        """
+        log("=== SCHEDULER: bet_history backfill ===", "INFO")
+        today = date.today().isoformat()
+        if db.get_meta("last_bet_history_backfill_date") == today:
+            return
+        try:
+            added = db.backfill_bet_history_from_clv(limit=200)
+            log(f"bet_history backfill: {added} lignes ajoutées", "INFO")
+            db.set_meta("last_bet_history_backfill_date", today)
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"bet_history backfill job failed: {e}", "ERROR")
+
     def job_calibration_report(self):
         """Rapport calibration hebdo → reports/calibration_report.md + meta summary.
 
@@ -191,11 +208,12 @@ class TennisBossScheduler:
         schedule.every(5).minutes.do(self.job_monitor)
         schedule.every(6).hours.do(self.job_backup)
         schedule.every().day.at("09:00").do(self.job_daily_digest)
+        schedule.every().day.at("04:30").do(self.job_bet_history_backfill)
         schedule.every().monday.at("03:00").do(self.job_rankings)
         schedule.every().sunday.at("22:00").do(self.job_calibration_report)
-        log("Scheduler: 9 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+        log("Scheduler: 10 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
             "mcp_backfill 12h, monitor 5m, backup 6h, digest 9h/j, "
-            "rankings Mon 3h, calibration Sun 22h)", "INFO")
+            "bet_history 4h30/j, rankings Mon 3h, calibration Sun 22h)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()
