@@ -80,6 +80,15 @@ interface TennisBossApi {
         @Query("event_id") eventId: String? = null,
     ): InsightResponse
 
+    @GET("api/match/intelligence")
+    suspend fun matchIntelligence(
+        @Query("p1") p1: String,
+        @Query("p2") p2: String,
+        @Query("surface") surface: String? = null,
+        @Query("event_key") eventKey: String? = null,
+        @Query("event_id") eventId: String? = null,
+    ): MatchIntelligence
+
     @GET("api/live")
     suspend fun live(): LiveResponse
 

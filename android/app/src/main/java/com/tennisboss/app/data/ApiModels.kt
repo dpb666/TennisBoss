@@ -236,6 +236,35 @@ data class SentimentSignal(
     val label: String = "",
 )
 
+/** Décomposition TIS par catégorie (joueur / surface / marché). */
+data class MatchIntelligenceCategories(
+    val player: Double = 0.0,
+    val surface: Double = 0.0,
+    val market: Double = 0.0,
+)
+
+/**
+ * Tennis Intelligence Score — /api/match/intelligence ou champ imbriqué
+ * `match_intelligence` de /api/insight (Phase 12).
+ */
+data class MatchIntelligence(
+    val tis: Double = 0.0,
+    val recommendation: String = "NO_BET",
+    val favorite: String = "",
+    val model_prob: Double = 0.0,
+    val ev_pct: Double = 0.0,
+    val fair_odds: Double? = null,
+    val market_odds: Double? = null,
+    val categories: MatchIntelligenceCategories = MatchIntelligenceCategories(),
+    val why: List<String> = emptyList(),
+    val risks: List<String> = emptyList(),
+    val confidence: Double = 0.0,
+    val confidence_label: String = "",
+    val surface: String? = null,
+    val player1: String = "",
+    val player2: String = "",
+)
+
 /** Réponse de /api/insight — Sport Intelligence Layer Phase 1+2 : "pourquoi ce pick ?". */
 data class InsightResponse(
     val player1: String = "",
@@ -252,6 +281,7 @@ data class InsightResponse(
     val sentiment_signals: List<SentimentSignal> = emptyList(),
     val market: MarketMovement? = null,
     val model_health: ModelHealth = ModelHealth(),
+    val match_intelligence: MatchIntelligence? = null,
 )
 
 /** Une confrontation directe passée. */

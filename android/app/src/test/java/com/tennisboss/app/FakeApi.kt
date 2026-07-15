@@ -22,6 +22,7 @@ import com.tennisboss.app.data.InsightResponse
 import com.tennisboss.app.data.IntelligenceStats
 import com.tennisboss.app.data.LearnerStats
 import com.tennisboss.app.data.LiveResponse
+import com.tennisboss.app.data.MatchIntelligence
 import com.tennisboss.app.data.PlayerDetail
 import com.tennisboss.app.data.PlayersResponse
 import com.tennisboss.app.data.PredictResponse
@@ -47,6 +48,7 @@ class FakeApi(
     private val calibrationResponse: CalibrationResponse? = null,
     private val playerResponses: Map<String, PlayerDetail>? = null,
     private val insightResponse: InsightResponse? = null,
+    private val matchIntelligenceResponse: MatchIntelligence? = null,
     private val h2hResponse: H2H? = null,
     private val clvResponse: ClvResponse? = null,
     private val followedPlayersResponse: FollowedPlayersResponse? = null,
@@ -119,6 +121,17 @@ class FakeApi(
         throwError?.let { throw it }
         return insightResponse ?: throw NotImplementedError("insightResponse non fourni")
     }
+
+    // RuntimeException (pas NotImplementedError) : MatchDetailViewModel rattrape
+    // l'échec de matchIntelligence avec catch (e: Exception) { null }, best-effort.
+    override suspend fun matchIntelligence(
+        p1: String,
+        p2: String,
+        surface: String?,
+        eventKey: String?,
+        eventId: String?,
+    ): MatchIntelligence =
+        matchIntelligenceResponse ?: throw RuntimeException("non utilisé")
 
     override suspend fun live(): LiveResponse {
         throwError?.let { throw it }

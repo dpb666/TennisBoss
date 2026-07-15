@@ -2,7 +2,10 @@ package com.tennisboss.app
 
 import com.tennisboss.app.data.ApiClient
 import com.tennisboss.app.data.H2H
+import com.tennisboss.app.data.InsightFactor
 import com.tennisboss.app.data.InsightResponse
+import com.tennisboss.app.data.MatchIntelligence
+import com.tennisboss.app.data.MatchIntelligenceCategories
 import com.tennisboss.app.data.PlayerDetail
 import com.tennisboss.app.ui.MatchDetailUiState
 import com.tennisboss.app.ui.MatchDetailViewModel
@@ -57,6 +60,93 @@ class MatchDetailViewModelTest {
         assertEquals("Sinner", s.player1.name)
         assertEquals("Alcaraz", s.player2.name)
         assertEquals(5, s.h2h?.total)
+    }
+
+    @Test
+    fun `loadMatchDetail utilise matchIntelligence quand disponible`() = runTest(dispatcher) {
+        val intel = MatchIntelligence(
+            tis = 88.0,
+            recommendation = "STRONG_BET",
+            favorite = "Sinner",
+            ev_pct = 9.0,
+            player1 = "Sinner",
+            player2 = "Alcaraz",
+        )
+        ApiClient.apiOverride = FakeApi(
+            playerResponses = mapOf(
+                "Sinner" to PlayerDetail(name = "Sinner", rating = 2100.0),
+                "Alcaraz" to PlayerDetail(name = "Alcaraz", rating = 2080.0),
+            ),
+            insightResponse = InsightResponse(player1 = "Sinner", player2 = "Alcaraz"),
+            matchIntelligenceResponse = intel,
+        )
+
+        val vm = MatchDetailViewModel()
+        vm.loadMatchDetail("Sinner", "Alcaraz")
+        advanceUntilIdle()
+
+        val s = vm.uiState as MatchDetailUiState.Success
+        assertEquals("STRONG_BET", s.intelligence.recommendation)
+        assertEquals(88.0, s.intelligence.tis, 0.001)
+    }
+
+    @Test
+    fun `loadMatchDetail retombe sur match_intelligence imbrique dans insight`() = runTest(dispatcher) {
+        val nested = MatchIntelligence(
+            tis = 72.0,
+            recommendation = "WATCH",
+            favorite = "Alcaraz",
+            player1 = "Sinner",
+            player2 = "Alcaraz",
+        )
+        ApiClient.apiOverride = FakeApi(
+            playerResponses = mapOf(
+                "Sinner" to PlayerDetail(name = "Sinner", rating = 2100.0),
+                "Alcaraz" to PlayerDetail(name = "Alcaraz", rating = 2080.0),
+            ),
+            insightResponse = InsightResponse(
+                player1 = "Sinner",
+                player2 = "Alcaraz",
+                match_intelligence = nested,
+            ),
+            // matchIntelligenceResponse absent : FakeApi lève, capturé en best-effort.
+        )
+
+        val vm = MatchDetailViewModel()
+        vm.loadMatchDetail("Sinner", "Alcaraz")
+        advanceUntilIdle()
+
+        val s = vm.uiState as MatchDetailUiState.Success
+        assertEquals("WATCH", s.intelligence.recommendation)
+        assertEquals(72.0, s.intelligence.tis, 0.001)
+    }
+
+    @Test
+    fun `loadMatchDetail retombe sur fallback insight sans intelligence`() = runTest(dispatcher) {
+        ApiClient.apiOverride = FakeApi(
+            playerResponses = mapOf(
+                "Sinner" to PlayerDetail(name = "Sinner", rating = 2100.0),
+                "Alcaraz" to PlayerDetail(name = "Alcaraz", rating = 2080.0),
+            ),
+            insightResponse = InsightResponse(
+                player1 = "Sinner",
+                player2 = "Alcaraz",
+                confidence = 0.85,
+                confidence_label = "élevée",
+                factors = listOf(
+                    InsightFactor(key = "elo", label = "ELO", contribution = 0.5, favors = "Sinner"),
+                ),
+            ),
+        )
+
+        val vm = MatchDetailViewModel()
+        vm.loadMatchDetail("Sinner", "Alcaraz")
+        advanceUntilIdle()
+
+        val s = vm.uiState as MatchDetailUiState.Success
+        assertEquals("WATCH", s.intelligence.recommendation)
+        assertEquals("Sinner", s.intelligence.favorite)
+        assertTrue(s.intelligence.why.isNotEmpty())
     }
 
     @Test
