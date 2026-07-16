@@ -144,7 +144,27 @@ CREATE TABLE IF NOT EXISTS clv_log (
     honeypot_flag        INTEGER,      -- 1 si conditions+surface+foule alignées (weather_profile)
     honeypot_beneficiary TEXT,         -- 'p1' ou 'p2'
     honeypot_player      TEXT,
-    honeypot_edge_pct    REAL
+    honeypot_edge_pct    REAL,
+    -- Champs de reproductibilité (Data Observability, 2026-07-15) : tout ce
+    -- qu'il faut pour rejouer une analyse sur un pick sans reconstruction —
+    -- voir docs/EVIDENCE_DRIVEN_OPTIMIZATION.md §3 et docs/LOGGING_SCHEMA.md.
+    tournament            TEXT,
+    tournament_level      TEXT,        -- 'grand_slam'|'tour'|'challenger_itf'|'other'
+    surface               TEXT,
+    player_rank           REAL,        -- classement du joueur misé (pick_side)
+    opponent_rank         REAL,
+    ranking_diff          REAL,        -- opponent_rank - player_rank (positif = pick mieux classé)
+    model_prob_raw        REAL,        -- proba modèle AVANT calibration (set_to_match_prob brut)
+    model_prob_calibrated REAL,        -- proba modèle APRÈS calibration, AVANT blend marché
+    market_prob           REAL,        -- proba marché implicite utilisée dans le blend
+    market_disagreement   REAL,        -- abs(model_prob_calibrated - market_prob)
+    ev_pct                REAL,        -- EV% de la proba blendée (pick_prob) à la décision
+    calib_k               REAL,        -- calib_k (ou a Platt) en vigueur au moment du pick
+    market_blend_w        REAL,        -- market_blend_w en vigueur au moment du pick
+    calibration_version   TEXT,        -- bot.versions.CALIBRATION_VERSION au moment du pick
+    predictor_version     TEXT,        -- bot.versions.PREDICTOR_VERSION au moment du pick
+    feature_set_version   TEXT,        -- bot.versions.FEATURE_SET_VERSION au moment du pick
+    opening_odds          REAL         -- 1er snapshot de cote vu pour cet event (si disponible)
 );
 CREATE TABLE IF NOT EXISTS market_snapshots (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -331,6 +351,26 @@ def init() -> None:
             ("bookmaker", "ALTER TABLE bet_history ADD COLUMN bookmaker TEXT"),
             ("w_rank", "ALTER TABLE matches ADD COLUMN w_rank INTEGER"),
             ("l_rank", "ALTER TABLE matches ADD COLUMN l_rank INTEGER"),
+            # Reproductibilité des picks (Data Observability, 2026-07-15) — voir
+            # docs/LOGGING_SCHEMA.md. Additif uniquement : bases existantes
+            # conservées, nouvelles colonnes NULL sur l'historique déjà loggé.
+            ("tournament", "ALTER TABLE clv_log ADD COLUMN tournament TEXT"),
+            ("tournament_level", "ALTER TABLE clv_log ADD COLUMN tournament_level TEXT"),
+            ("surface", "ALTER TABLE clv_log ADD COLUMN surface TEXT"),
+            ("player_rank", "ALTER TABLE clv_log ADD COLUMN player_rank REAL"),
+            ("opponent_rank", "ALTER TABLE clv_log ADD COLUMN opponent_rank REAL"),
+            ("ranking_diff", "ALTER TABLE clv_log ADD COLUMN ranking_diff REAL"),
+            ("model_prob_raw", "ALTER TABLE clv_log ADD COLUMN model_prob_raw REAL"),
+            ("model_prob_calibrated", "ALTER TABLE clv_log ADD COLUMN model_prob_calibrated REAL"),
+            ("market_prob", "ALTER TABLE clv_log ADD COLUMN market_prob REAL"),
+            ("market_disagreement", "ALTER TABLE clv_log ADD COLUMN market_disagreement REAL"),
+            ("ev_pct", "ALTER TABLE clv_log ADD COLUMN ev_pct REAL"),
+            ("calib_k", "ALTER TABLE clv_log ADD COLUMN calib_k REAL"),
+            ("market_blend_w", "ALTER TABLE clv_log ADD COLUMN market_blend_w REAL"),
+            ("calibration_version", "ALTER TABLE clv_log ADD COLUMN calibration_version TEXT"),
+            ("predictor_version", "ALTER TABLE clv_log ADD COLUMN predictor_version TEXT"),
+            ("feature_set_version", "ALTER TABLE clv_log ADD COLUMN feature_set_version TEXT"),
+            ("opening_odds", "ALTER TABLE clv_log ADD COLUMN opening_odds REAL"),
         ):
             try:
                 conn.execute(ddl)
@@ -1639,7 +1679,8 @@ def value_picks_stats() -> dict:
 # --- CLV : closing line value (preuve d'edge) ------------------------------
 def log_clv_pick(event_key: str, date: str, p1: str, p2: str, side: str,
                  pick_odds: float, pick_prob: float, confidence: float,
-                 honeypot: Optional[Dict[str, Any]] = None) -> None:
+                 honeypot: Optional[Dict[str, Any]] = None,
+                 repro: Optional[Dict[str, Any]] = None) -> None:
     """Sème un pick dans le journal CLV (closing_odds rempli plus tard).
 
     INSERT OR IGNORE : on garde la PREMIÈRE cote vue (la décision d'entrée),
@@ -1647,20 +1688,154 @@ def log_clv_pick(event_key: str, date: str, p1: str, p2: str, side: str,
     `honeypot` : signal weather_profile.analyze() au moment du pick (fige la
     condition constatée ce jour-là — ne pas le recalculer après coup, l'état
     des profils joueurs change avec le temps).
+    `repro` : champs de reproductibilité (voir docs/LOGGING_SCHEMA.md) —
+    tournament, tournament_level, surface, player_rank, opponent_rank,
+    ranking_diff, model_prob_raw, model_prob_calibrated, market_prob,
+    market_disagreement, ev_pct, calib_k, market_blend_w,
+    calibration_version, predictor_version, feature_set_version,
+    opening_odds. Optionnel (None -> colonnes NULL) pour ne pas casser les
+    appelants existants ; toutes les nouvelles capture-paths de bot/api.py le
+    renseignent systématiquement (voir clv.seed_pick).
     """
     import datetime as _dt
     hp = honeypot or {}
+    rp = repro or {}
     with connect() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO clv_log "
             "(event_key,date,player1,player2,pick_side,pick_odds,pick_prob,"
             " confidence,pick_ts,honeypot_flag,honeypot_beneficiary,"
-            " honeypot_player,honeypot_edge_pct) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " honeypot_player,honeypot_edge_pct,"
+            " tournament,tournament_level,surface,player_rank,opponent_rank,"
+            " ranking_diff,model_prob_raw,model_prob_calibrated,market_prob,"
+            " market_disagreement,ev_pct,calib_k,market_blend_w,"
+            " calibration_version,predictor_version,feature_set_version,"
+            " opening_odds) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (event_key, date, p1, p2, side, pick_odds, pick_prob, confidence,
              _dt.datetime.now().isoformat(timespec="seconds"),
              1 if hp.get("flag") else 0, hp.get("beneficiary"),
-             hp.get("player"), hp.get("edge_pct")),
+             hp.get("player"), hp.get("edge_pct"),
+             rp.get("tournament"), rp.get("tournament_level"), rp.get("surface"),
+             rp.get("player_rank"), rp.get("opponent_rank"), rp.get("ranking_diff"),
+             rp.get("model_prob_raw"), rp.get("model_prob_calibrated"), rp.get("market_prob"),
+             rp.get("market_disagreement"), rp.get("ev_pct"), rp.get("calib_k"),
+             rp.get("market_blend_w"), rp.get("calibration_version"),
+             rp.get("predictor_version"), rp.get("feature_set_version"),
+             rp.get("opening_odds")),
         )
+
+
+# Champs de reproductibilité requis sur chaque pick (voir log_clv_pick.repro
+# et docs/LOGGING_SCHEMA.md) — utilisés par la validation de complétude.
+CLV_REPRO_FIELDS = (
+    "tournament", "tournament_level", "surface", "player_rank", "opponent_rank",
+    "ranking_diff", "model_prob_raw", "model_prob_calibrated", "market_prob",
+    "market_disagreement", "ev_pct", "calib_k", "market_blend_w",
+    "calibration_version", "predictor_version", "feature_set_version",
+)
+
+
+def validate_clv_pick_row(row: Any) -> List[str]:
+    """Renvoie la liste des champs de reproductibilité manquants (NULL) pour
+    une ligne clv_log. Liste vide = pick complet. `opening_odds` et
+    `closing_odds` sont exclus (légitimement absents tant que le marché n'a
+    pas encore bougé/le match n'est pas terminé — pas un défaut de capture)."""
+    missing = []
+    for field in CLV_REPRO_FIELDS:
+        try:
+            val = row[field]
+        except (IndexError, KeyError):
+            val = None
+        if val is None:
+            missing.append(field)
+    return missing
+
+
+def find_incomplete_clv_picks(limit: int = 200, since: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Picks dont au moins un champ de reproductibilité requis est NULL —
+    détection automatique des enregistrements incomplets (voir
+    docs/LOGGING_SCHEMA.md, section validation)."""
+    where = "WHERE date >= ?" if since else ""
+    params: Tuple[Any, ...] = (since,) if since else ()
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM clv_log {where} ORDER BY pick_ts DESC LIMIT ?",
+            params + (limit,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        missing = validate_clv_pick_row(r)
+        if missing:
+            out.append({"event_key": r["event_key"], "date": r["date"],
+                       "player1": r["player1"], "player2": r["player2"],
+                       "pick_ts": r["pick_ts"], "missing_fields": missing})
+    return out
+
+
+def clv_logging_completeness_report(bucket: str = "week", limit_buckets: int = 26) -> Dict[str, Any]:
+    """Taux de complétude des champs de reproductibilité, agrégé par période
+    (`bucket` = 'week' ou 'day') — pour un rapport de santé du logging dans le
+    temps (voir docs/LOGGING_SCHEMA.md). Une ligne est "complète" si TOUS les
+    champs CLV_REPRO_FIELDS sont renseignés (hors opening/closing odds, cf.
+    validate_clv_pick_row)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clv_log ORDER BY date ASC"
+        ).fetchall()
+
+    def _period_key(date_str: str) -> str:
+        d = (date_str or "")[:10]
+        if not d:
+            return "inconnue"
+        if bucket == "day":
+            return d
+        try:
+            import datetime as _dt
+            dt = _dt.date.fromisoformat(d)
+            monday = dt - _dt.timedelta(days=dt.weekday())
+            return monday.isoformat()
+        except ValueError:
+            return d
+
+    by_period: Dict[str, Dict[str, int]] = {}
+    field_missing_counts: Dict[str, int] = {f: 0 for f in CLV_REPRO_FIELDS}
+    n_total = 0
+    n_complete = 0
+
+    for r in rows:
+        n_total += 1
+        period = _period_key(r["date"])
+        stats = by_period.setdefault(period, {"n": 0, "n_complete": 0})
+        stats["n"] += 1
+        missing = validate_clv_pick_row(r)
+        if not missing:
+            stats["n_complete"] += 1
+            n_complete += 1
+        for f in missing:
+            field_missing_counts[f] += 1
+
+    periods_sorted = sorted(by_period.keys(), reverse=True)[:limit_buckets]
+    by_period_out = {
+        p: {
+            "n": by_period[p]["n"],
+            "n_complete": by_period[p]["n_complete"],
+            "completeness_pct": round(by_period[p]["n_complete"] / by_period[p]["n"] * 100, 1)
+                                if by_period[p]["n"] else None,
+        }
+        for p in periods_sorted
+    }
+
+    return {
+        "bucket": bucket,
+        "n_total": n_total,
+        "n_complete": n_complete,
+        "completeness_pct_overall": round(n_complete / n_total * 100, 1) if n_total else None,
+        "by_period": by_period_out,
+        "missing_field_counts": field_missing_counts,
+        "most_incomplete_field": (max(field_missing_counts, key=field_missing_counts.get)
+                                  if n_total and any(field_missing_counts.values()) else None),
+    }
 
 
 def list_clv_open() -> List[sqlite3.Row]:
@@ -2292,6 +2467,19 @@ def line_movement(event_key: str) -> Optional[Dict[str, Any]]:
         "move_home_pct": _pct(opening["odds_home"], closing["odds_home"]),
         "move_away_pct": _pct(opening["odds_away"], closing["odds_away"]),
     }
+
+
+def earliest_market_snapshot(event_key: str) -> Optional[sqlite3.Row]:
+    """1er snapshot de cote vu pour un event (potentiellement le seul) — sert
+    de "cote d'ouverture" pour le logging de reproductibilité (clv_log.
+    opening_odds), sans exiger 2 snapshots comme line_movement()."""
+    if not event_key:
+        return None
+    with connect() as conn:
+        return conn.execute(
+            "SELECT ts, odds_home, odds_away FROM market_snapshots "
+            "WHERE event_key=? ORDER BY ts ASC LIMIT 1", (event_key,)
+        ).fetchone()
 
 
 def record_live_prob(event_key: str, prob1: float, sets_home: int, sets_away: int,

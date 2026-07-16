@@ -42,12 +42,20 @@ CLOSING_WINDOW_MIN = 120
 
 def seed_pick(event_key: str, date: str, p1: str, p2: str, side: str,
               pick_odds: float, pick_prob: float, confidence: float,
-              honeypot: Optional[Dict[str, Any]] = None) -> None:
-    """Logue un pick à l'instant de la décision (idempotent sur event_key)."""
+              honeypot: Optional[Dict[str, Any]] = None,
+              repro: Optional[Dict[str, Any]] = None) -> None:
+    """Logue un pick à l'instant de la décision (idempotent sur event_key).
+
+    `repro` : champs de reproductibilité (tournament, surface, rankings,
+    probas modèle/marché, EV, versions de calibration/predictor/features —
+    voir docs/LOGGING_SCHEMA.md et db.log_clv_pick). Optionnel pour ne pas
+    casser un appelant existant, mais chaque point de capture réel dans
+    bot/api.py le renseigne."""
     if not event_key or not pick_odds or pick_odds <= 1.0:
         return
     db.log_clv_pick(event_key, date, p1, p2, side, float(pick_odds),
-                    float(pick_prob), float(confidence), honeypot=honeypot)
+                    float(pick_prob), float(confidence), honeypot=honeypot,
+                    repro=repro)
 
 
 def refresh_closing(event_key: str, side: str,

@@ -174,10 +174,12 @@ distinctement, désaccord marché jamais mesuré).
    `log_bet_history`/`sync_bet_history_on_settle`, pas seulement récupéré
    par un backfill partiel après coup.
 
-**Ce plan n'a PAS été exécuté** — il modifierait `db.py`/`api.py`/`clv.py`
-(code de production), hors du périmètre de cette mission d'audit
-("do not modify production code"). Il nécessite un go explicite séparé,
-comme tout changement de production précédent cette session.
+**Mise à jour 2026-07-15 : ce plan a été implémenté** (mission "Data
+Observability Engineer" distincte, avec accord explicite séparé) — voir
+**`docs/LOGGING_SCHEMA.md`** pour le détail complet (schéma, points de
+capture, validation, rapport de santé `/api/logging/health`). Aucun
+changement à `predictor.predict()` ni à la logique de décision
+`/api/value` : uniquement les points de capture/logging.
 
 ---
 

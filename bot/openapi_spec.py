@@ -168,6 +168,10 @@ def build_spec() -> Dict[str, Any]:
                 params=[_q("limit", type_="integer"), _q("odds_max", type_="number"),
                         _q("ev_min", type_="number")],
                 responses=_ok(), tags=["value"])},
+            "/api/logging/health": {"get": _op(
+                "Santé du pipeline de logging (complétude des champs de reproductibilité, clv_log)",
+                params=[_q("bucket", type_="string"), _q("incomplete_limit", type_="integer")],
+                responses=_ok(), tags=["observability"])},
             "/api/recommendations": {"get": _op(
                 "Recommandations personnalisées (usage du compte actuel)",
                 params=[_q("limit", type_="integer")], responses=_ok(), tags=["personalization"])},

@@ -32,7 +32,7 @@ from flask_swagger_ui import get_swaggerui_blueprint
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, intelligence, intelligence_layer, live_api, match_intelligence,
                memory, mistake_learner, namematch, odds_api, oddspapi_feeder, openapi_spec, predictor,
-               recommendations, sackmann_feeder, settlement, weather)
+               recommendations, sackmann_feeder, settlement, versions, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -747,6 +747,51 @@ def api_matches_followed():
 def _set_to_match_prob(p_set: float) -> float:
     """Proba set -> proba match (centralisée dans predictor)."""
     return predictor.set_to_match_prob(p_set)
+
+
+def _build_pick_repro(
+    picked_player: str, opponent_player: str,
+    model_prob_raw_side: float, model_prob_calibrated_side: float, market_prob_side: float,
+    ev_pct: float, surface: Optional[str], league_name: str,
+    rankings: Dict[str, int], calib_k: float, market_blend_w: float,
+    event_key: Optional[str] = None, home_player: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Construit les champs de reproductibilité d'un pick (voir
+    docs/LOGGING_SCHEMA.md) — utilisé par tous les points de capture
+    (api_value, _value_scanner_loop). Ne touche à aucune décision de pari,
+    uniquement à ce qui est ensuite passé à clv.seed_pick pour archivage."""
+    player_rank = rankings.get(picked_player)
+    opponent_rank = rankings.get(opponent_player)
+    ranking_diff = (opponent_rank - player_rank) if (player_rank is not None and opponent_rank is not None) else None
+
+    opening_odds = None
+    if event_key:
+        try:
+            snap = db.earliest_market_snapshot(event_key)
+            if snap and home_player is not None:
+                opening_odds = snap["odds_home"] if picked_player == home_player else snap["odds_away"]
+        except Exception as exc:  # noqa: BLE001
+            log(f"earliest_market_snapshot échoué pour {event_key} ({exc}) — opening_odds omis.", "WARN")
+
+    return {
+        "tournament": league_name or None,
+        "tournament_level": config.tournament_level_from_name(league_name),
+        "surface": surface or None,
+        "player_rank": player_rank,
+        "opponent_rank": opponent_rank,
+        "ranking_diff": ranking_diff,
+        "model_prob_raw": round(float(model_prob_raw_side), 6),
+        "model_prob_calibrated": round(float(model_prob_calibrated_side), 6),
+        "market_prob": round(float(market_prob_side), 6),
+        "market_disagreement": round(abs(float(model_prob_calibrated_side) - float(market_prob_side)), 6),
+        "ev_pct": ev_pct,
+        "calib_k": calib_k,
+        "market_blend_w": market_blend_w,
+        "calibration_version": versions.CALIBRATION_VERSION,
+        "predictor_version": versions.PREDICTOR_VERSION,
+        "feature_set_version": versions.FEATURE_SET_VERSION,
+        "opening_odds": opening_odds,
+    }
 
 
 _SLAMS = {"australian open", "roland garros", "french open", "wimbledon", "us open"}
@@ -2047,6 +2092,11 @@ def api_value():
             "message": f"Limite API atteinte — réessayer dans {best_reset}s",
         })
 
+    # Rankings chargés une fois par requête (pas par match) — reproductibilité
+    # du logging (clv_log.player_rank/opponent_rank/ranking_diff), voir
+    # docs/LOGGING_SCHEMA.md. N'affecte ni la prédiction ni is_value.
+    _rankings_cache = db.get_all_player_rankings()
+
     events = odds_api.fetch_tennis_events(upcoming_only=True)
     # Priorité aux grands tournois : ATP/WTA principaux avant ITF/UTR.
     def _tourn_rank(e: Dict) -> int:
@@ -2107,7 +2157,8 @@ def api_value():
         if r["confidence"] < min_conf:
             continue
 
-        pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))  # proba match calibrée (J1)
+        _pm1_raw = _set_to_match_prob(r["prob1"] / 100.0)       # proba match AVANT calibration
+        pm1 = _calib(_pm1_raw)  # proba match calibrée (J1)
         pm2 = 1.0 - pm1                                         # (J2)
         ho, ao = mw["home_odds"], mw["away_odds"]
         # Blend modèle/marché : le marché (sans vig) sert de prior, le modèle
@@ -2226,9 +2277,18 @@ def api_value():
             try:
                 ekey = str(e.get("id") or "")
                 pick_prob = pb1 if best_side == n1 else pb2
+                _opponent = n2 if best_side == n1 else n1
+                _repro = _build_pick_repro(
+                    best_side, _opponent,
+                    _pm1_raw if best_side == n1 else (1.0 - _pm1_raw),
+                    pm1 if best_side == n1 else pm2,
+                    mw["home_prob"] if best_side == n1 else mw["away_prob"],
+                    best_ev_pct, _surf_log, _leag_name, _rankings_cache,
+                    _CALIB_K, _MKT_W, event_key=ekey, home_player=n1,
+                )
                 clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
                               pick_odds, pick_prob, r["confidence"],
-                              honeypot=_honeypot)
+                              honeypot=_honeypot, repro=_repro)
             except Exception as exc:  # noqa: BLE001
                 log(f"clv.seed_pick échoué pour {n1} vs {n2} ({exc}) — CLV non semé.", "WARN")
 
@@ -2403,6 +2463,32 @@ def api_value_history():
         "picks": picks,
         "stats": stats,
         "filters": {"odds_max": odds_max, "ev_min": ev_min},
+    })
+
+
+@app.get("/api/logging/health")
+def api_logging_health():
+    """Santé du pipeline de logging de reproductibilité (clv_log) — lecture
+    seule, ne touche à aucune décision de pari. Voir docs/LOGGING_SCHEMA.md.
+
+    ?bucket=week|day (défaut week) — granularité du rapport de complétude.
+    ?incomplete_limit=N (défaut 50) — nombre de picks incomplets à lister.
+    """
+    db.init()
+    bucket = request.args.get("bucket", "week")
+    if bucket not in ("week", "day"):
+        bucket = "week"
+    incomplete_limit = min(int(request.args.get("incomplete_limit", 50)), 500)
+    report = db.clv_logging_completeness_report(bucket=bucket)
+    incomplete = db.find_incomplete_clv_picks(limit=incomplete_limit)
+    return jsonify({
+        "completeness": report,
+        "incomplete_picks": incomplete,
+        "n_incomplete_listed": len(incomplete),
+        "required_fields": list(db.CLV_REPRO_FIELDS),
+        "note": ("Un pick est 'complet' si tous les champs de reproductibilité "
+                 "(hors opening_odds/closing_odds, légitimement absents avant "
+                 "mouvement de marché/fin de match) sont renseignés."),
     })
 
 
@@ -3110,6 +3196,10 @@ def _value_scanner_loop(interval: int = 90) -> None:
             events = odds_api.fetch_tennis_events(upcoming_only=True)
             now_utc = _dt.datetime.now(_dt.timezone.utc)
             _near_misses = []
+            # Rankings chargés une fois par cycle (pas par event) — reproductibilité
+            # du logging (clv_log.player_rank/opponent_rank/ranking_diff), voir
+            # docs/LOGGING_SCHEMA.md. N'affecte ni la prédiction ni la sélection.
+            _rankings_cache = db.get_all_player_rankings()
 
             # Tri priorité : grands tournois en premier
             def _tourn_rank_s(e: Dict) -> int:
@@ -3217,7 +3307,8 @@ def _value_scanner_loop(interval: int = 90) -> None:
                     _rej_conf += 1
                     continue
 
-                pm1 = _calib(_set_to_match_prob(r["prob1"] / 100.0))
+                _pm1_raw_sc = _set_to_match_prob(r["prob1"] / 100.0)
+                pm1 = _calib(_pm1_raw_sc)
                 pm2 = 1.0 - pm1
                 ho, ao = mw["home_odds"], mw["away_odds"]
                 pb1 = calibrate.blend_probs(pm1, mw["home_prob"], _MKT_W)
@@ -3293,9 +3384,18 @@ def _value_scanner_loop(interval: int = 90) -> None:
                                       pick_odds, best_ev_pct, league=_lg_name,
                                       surface=_surf, kelly_u=_kelly)
                     ekey = str(eid)
+                    _opponent_sc = n2 if best_side == n1 else n1
+                    _repro_sc = _build_pick_repro(
+                        best_side, _opponent_sc,
+                        _pm1_raw_sc if best_side == n1 else (1.0 - _pm1_raw_sc),
+                        pm1 if best_side == n1 else pm2,
+                        mw["home_prob"] if best_side == n1 else mw["away_prob"],
+                        best_ev_pct, _surf, _lg_name, _rankings_cache,
+                        _CALIB_K, _MKT_W, event_key=ekey, home_player=n1,
+                    )
                     clv.seed_pick(ekey, e.get("date", ""), n1, n2, best_side,
                                   pick_odds, pb_pick, r["confidence"],
-                                  honeypot=_sc_honeypot)
+                                  honeypot=_sc_honeypot, repro=_repro_sc)
                 except Exception as exc:
                     log(f"log_value_pick/seed_pick échoué pour {n1} vs {n2} (scanner) ({exc}) — pick non archivé.", "WARN")
 

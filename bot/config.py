@@ -248,6 +248,25 @@ def surface_from_league(league_name: str) -> str:
     return ""
 
 
+def tournament_level_from_name(league_name: str) -> str:
+    """Dérive un niveau de tournoi ('grand_slam'|'tour'|'challenger_itf'|'other')
+    depuis le nom/slug du tournoi — pour le LOGGING uniquement (reproductibilité
+    des picks, voir clv_log.tournament_level). N'affecte aucune décision de pari :
+    la priorité de scan du _value_scanner_loop a sa propre logique locale
+    (_tourn_rank_s dans bot/api.py), volontairement non touchée ici."""
+    ln = (league_name or "").lower()
+    if not ln:
+        return "other"
+    if any(k in ln for k in ("wimbledon", "roland-garros", "roland garros",
+                              "us-open", "us open", "australian")):
+        return "grand_slam"
+    if any(k in ln for k in ("challenger", "125k", "itf", "m15", "m25")):
+        return "challenger_itf"
+    if ln.startswith("atp") or ln.startswith("wta") or " atp" in ln or " wta" in ln:
+        return "tour"
+    return "other"
+
+
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"

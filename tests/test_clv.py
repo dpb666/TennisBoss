@@ -68,6 +68,29 @@ class TestCLV(unittest.TestCase):
         self.assertGreaterEqual(stats["global"].get("n_settled", 0), 1)
         self.assertIn("by_day", stats)
 
+    def test_seed_pick_without_repro_still_works(self):
+        # Backward compat : les appelants existants (sans `repro`) doivent
+        # continuer de fonctionner, colonnes de reproductibilité NULL.
+        clv.seed_pick("bc1", "2026-07-15", "K", "L", "K", 1.9, 0.58, 0.65)
+        row = db.list_clv()[0]
+        self.assertIsNone(row["tournament"])
+        self.assertIsNone(row["model_prob_raw"])
+        self.assertIsNone(row["market_disagreement"])
+
+    def test_seed_pick_with_repro_persists_all_fields(self):
+        repro = {
+            "tournament": "ATP Wimbledon", "tournament_level": "grand_slam",
+            "surface": "grass", "player_rank": 12.0, "opponent_rank": 45.0,
+            "ranking_diff": 33.0, "model_prob_raw": 0.62, "model_prob_calibrated": 0.55,
+            "market_prob": 0.50, "market_disagreement": 0.05, "ev_pct": 9.2,
+            "calib_k": 0.21, "market_blend_w": 0.0, "calibration_version": "1.0",
+            "predictor_version": "1.0", "feature_set_version": "1.0", "opening_odds": 2.1,
+        }
+        clv.seed_pick("rp1", "2026-07-15", "M", "N", "M", 2.0, 0.55, 0.7, repro=repro)
+        row = db.list_clv()[0]
+        for key, val in repro.items():
+            self.assertEqual(row[key], val, key)
+
 
 if __name__ == "__main__":
     unittest.main()

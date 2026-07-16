@@ -272,6 +272,28 @@ python run.py data-quality
 
 ---
 
+## Data Observability — logging de reproductibilité (2026-07-15)
+
+See **`docs/LOGGING_SCHEMA.md`** for full schema/validation/health-report doc,
+and **`docs/EVIDENCE_DRIVEN_OPTIMIZATION.md`** §3 for the audit that led to
+this work (5/10 required fields were previously unlogged).
+
+| Item | Status |
+|------|--------|
+| `clv_log` schema migration (17 nouvelles colonnes) | **Done** — additif, `db.init()` |
+| `bot/versions.py` (predictor/feature/calib version constants) | **Done** |
+| `config.tournament_level_from_name()` | **Done** (logging only, no decision change) |
+| `db.earliest_market_snapshot()` (opening odds) | **Done** |
+| `clv.seed_pick()` / `db.log_clv_pick()` extended (`repro` param) | **Done** — backward compatible |
+| Both pick creation paths (`api_value`, `_value_scanner_loop`) updated | **Done** |
+| Validation (`db.validate_clv_pick_row`, `find_incomplete_clv_picks`) | **Done** |
+| Completeness report (`db.clv_logging_completeness_report`) | **Done** |
+| `/api/logging/health` endpoint + OpenAPI doc | **Done** |
+| Tests (21 new) | **Done** — 498/498 total passing |
+| `predictor.predict()` / `/api/value` decision logic | **Unchanged** (audit-only mission) |
+
+---
+
 ## Execution order (this session, if proceeding autonomously)
 
 Given #1 (the `app/` package) and #5 (deleting orphaned modules) both involve deleting code and therefore need explicit user sign-off before acting (per this project's standing conventions on destructive/hard-to-reverse actions), the safe autonomous execution order is:

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from bot import api, clv, config, db
+from bot import api, clv, config, db, versions
 
 
 class ApiDbTestCase(unittest.TestCase):
@@ -239,6 +239,58 @@ class TestFollowedMatches(ApiDbTestCase):
         self.assertIn("global", data)
         self.assertIn("period_days", data)
         self.assertGreaterEqual(data["global"].get("n_settled", 0), 1)
+
+
+class TestLoggingHealthEndpoint(ApiDbTestCase):
+    def test_empty_db_returns_zero(self):
+        resp = self.client.get("/api/logging/health")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["completeness"]["n_total"], 0)
+        self.assertEqual(data["incomplete_picks"], [])
+
+    def test_reports_incomplete_pick(self):
+        clv.seed_pick("lh1", "2026-07-15", "A", "B", "A", 2.0, 0.55, 0.7)
+        resp = self.client.get("/api/logging/health")
+        data = resp.get_json()
+        self.assertEqual(data["completeness"]["n_total"], 1)
+        self.assertEqual(data["completeness"]["n_complete"], 0)
+        self.assertEqual(len(data["incomplete_picks"]), 1)
+        self.assertIn("tournament", data["incomplete_picks"][0]["missing_fields"])
+
+    def test_bucket_param_rejects_invalid_value(self):
+        # Valeur invalide -> fallback silencieux sur 'week' (pas d'erreur 400).
+        resp = self.client.get("/api/logging/health?bucket=nonsense")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["completeness"]["bucket"], "week")
+
+
+class TestBuildPickRepro(unittest.TestCase):
+    def test_computes_ranking_diff_and_disagreement(self):
+        repro = api._build_pick_repro(
+            "Sinner", "Alcaraz",
+            model_prob_raw_side=0.62, model_prob_calibrated_side=0.55,
+            market_prob_side=0.50, ev_pct=9.0, surface="hard",
+            league_name="ATP Miami", rankings={"Sinner": 1, "Alcaraz": 3},
+            calib_k=0.21, market_blend_w=0.0,
+        )
+        self.assertEqual(repro["player_rank"], 1)
+        self.assertEqual(repro["opponent_rank"], 3)
+        self.assertEqual(repro["ranking_diff"], 2)
+        self.assertAlmostEqual(repro["market_disagreement"], 0.05)
+        self.assertEqual(repro["tournament_level"], "tour")
+        self.assertEqual(repro["calibration_version"], versions.CALIBRATION_VERSION)
+
+    def test_missing_rankings_yield_none_diff(self):
+        repro = api._build_pick_repro(
+            "Unknown1", "Unknown2",
+            model_prob_raw_side=0.5, model_prob_calibrated_side=0.5,
+            market_prob_side=0.5, ev_pct=0.0, surface=None,
+            league_name="", rankings={}, calib_k=1.0, market_blend_w=0.0,
+        )
+        self.assertIsNone(repro["player_rank"])
+        self.assertIsNone(repro["ranking_diff"])
+        self.assertEqual(repro["tournament_level"], "other")
 
 
 if __name__ == "__main__":
