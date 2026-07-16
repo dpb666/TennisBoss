@@ -246,9 +246,13 @@ def build_spec() -> Dict[str, Any]:
             "/api/chat": {"post": _op(
                 "Assistant IA conversationnel (contexte prédiction ancré ; réponse "
                 "inclut tools_called/sources quand les outils analytiques en lecture "
-                "seule se déclenchent, voir docs/AI_ASSISTANT_ARCHITECTURE.md)",
+                "seule se déclenchent, voir docs/AI_ASSISTANT_ARCHITECTURE.md). "
+                "mode='analyst' (défaut 'chat') : réponses plus longues/factuelles "
+                "(max_tokens optionnel, défaut 512) pour les questions techniques.",
                 request_body={"type": "object", "properties": {
-                    "message": {"type": "string"}, "history": {"type": "array"}},
+                    "message": {"type": "string"}, "history": {"type": "array"},
+                    "mode": {"type": "string", "enum": ["chat", "analyst"]},
+                    "max_tokens": {"type": "integer"}},
                     "required": ["message"]},
                 responses={**_ok(), "503": {"description": "LLM inaccessible"}}, tags=["chat"])},
             "/api/upload": {"post": _op(

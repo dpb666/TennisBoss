@@ -900,3 +900,29 @@ Delivered:
 **Not done in this slice** (deferred per §10 "Out of scope"): no
 `project_knowledge.db` (Phase 2), no folder moves (Phase 4), no predictor/
 calibration changes, no Android UI changes, no embedding search.
+
+### 2026-07-16 — Roadmap rank #2: `mode=analyst`
+
+Per §3.5/§9 rank #2. Delivered:
+
+- `bot/chat.py`: `chat()` gains optional `max_tokens`/`temperature` params
+  (default `None` → `MAX_TOKENS`/`TEMPERATURE`, behavior unchanged for any
+  caller not passing them). New `ANALYST_MAX_TOKENS=512`/
+  `ANALYST_TEMPERATURE=0.3` constants. The three provider functions
+  (`_chat_via_openai`, `_chat_via_gemini`, `_chat_via_generate`) now accept
+  and forward these instead of reading the module globals directly. System
+  prompt's reply instruction switches from "3 sentences max" to "detailed,
+  cite sources" when `max_tokens > MAX_TOKENS`.
+- `bot/api.py::api_chat()`: reads optional `mode` (`"chat"` default,
+  `"analyst"`) and `max_tokens` from the request body; `mode=analyst` uses
+  `ANALYST_MAX_TOKENS`/`ANALYST_TEMPERATURE` (or a caller-supplied
+  `max_tokens`). Response echoes back `"mode"`.
+- `bot/openapi_spec.py`: `/api/chat` request body documents `mode`/`max_tokens`.
+- `QUICK_START_CHAT.md`: usage example.
+- Tests: 4 new in `tests/test_chat.py` (default constants unchanged,
+  analyst override applied, prompt wording switches), 3 new in
+  `tests/test_api_endpoints2.py` (default mode, analyst mode, explicit
+  `max_tokens` override) — 8 total. All passing, zero regressions.
+
+No predictor/calibration/betting-logic changes — purely a chat
+verbosity/temperature knob for the assistant, off (mode=chat) by default.

@@ -86,6 +86,39 @@ def test_chat_calls_lm_studio():
     assert "Qui est le meilleur" in body["messages"][-1]["content"]
 
 
+def test_chat_default_uses_module_constants():
+    """Sans override, chat() envoie MAX_TOKENS/TEMPERATURE d'origine (mode=chat)."""
+    from bot import chat as chat_mod
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+    with patch("bot.chat.requests.post", return_value=fake_response) as mock_post:
+        chat_mod.chat("Question", [], _fake_mem(), "http://fake:1234/v1/chat/completions")
+    body = mock_post.call_args[1]["json"]
+    assert body["max_tokens"] == chat_mod.MAX_TOKENS
+    assert body["temperature"] == chat_mod.TEMPERATURE
+
+
+def test_chat_analyst_mode_overrides_max_tokens_and_temperature():
+    """max_tokens/temperature explicites (mode=analyst côté api.py) doivent
+    remplacer les constantes par défaut, sans toucher au comportement mode=chat."""
+    from bot import chat as chat_mod
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.json.return_value = {"choices": [{"message": {"content": "réponse détaillée"}}]}
+    with patch("bot.chat.requests.post", return_value=fake_response) as mock_post:
+        chat_mod.chat(
+            "Quel est notre ROI ?", [], _fake_mem(), "http://fake:1234/v1/chat/completions",
+            max_tokens=chat_mod.ANALYST_MAX_TOKENS, temperature=chat_mod.ANALYST_TEMPERATURE,
+        )
+    body = mock_post.call_args[1]["json"]
+    assert body["max_tokens"] == chat_mod.ANALYST_MAX_TOKENS
+    assert body["temperature"] == chat_mod.ANALYST_TEMPERATURE
+    # Le prompt système doit refléter le mode détaillé, pas "3 phrases max".
+    system_msg = body["messages"][0]["content"]
+    assert "3 phrases max" not in system_msg
+
+
 def test_surface_elo_line_two_players():
     """L'ELO par surface (déjà calculé dans mem['elo_surface']) doit être
     formaté pour les 2 joueurs, sur les surfaces où ils ont une valeur."""

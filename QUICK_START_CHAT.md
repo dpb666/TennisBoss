@@ -125,5 +125,20 @@ Response now includes (when tools fired):
 `ai/chat/tools/registry.py` for the exact read-only tool list and
 `tests/test_ai_tools.py` for the frozen-boundary guard tests.
 
+### mode=analyst (2026-07-16)
+
+Pass `"mode": "analyst"` in the `/api/chat` request body for longer, more
+detailed factual answers (higher token budget, lower temperature) instead
+of the default mobile-friendly 3-sentence replies:
+
+```json
+{"message": "Quel est notre ROI ?", "mode": "analyst"}
+```
+
+Optional `"max_tokens"` overrides the analyst default (512). Response
+includes `"mode"` echoing back what was used. `mode=chat` (default, or
+omitted) is byte-identical to prior behavior — nothing changes unless a
+client opts in.
+
 **Full docs:** See `TELEGRAM_SETUP.md`, `AI_CHAT_AUDIT.md` (stale — predates
 the `app/` removal), and `docs/AI_ASSISTANT_ARCHITECTURE.md` (current).

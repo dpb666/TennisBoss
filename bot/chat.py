@@ -21,6 +21,13 @@ HISTORY_WINDOW = 8
 MAX_TOKENS = 120
 TEMPERATURE = 0.7
 
+# mode=analyst (docs/AI_ASSISTANT_ARCHITECTURE.md §3.5) : réponses factuelles
+# plus longues et moins créatives pour les questions techniques/analytiques
+# (ROI, calibration, architecture...) — mode=chat (défaut) garde la brièveté
+# mobile-friendly actuelle, comportement strictement inchangé.
+ANALYST_MAX_TOKENS = 512
+ANALYST_TEMPERATURE = 0.3
+
 _OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
 _OLLAMA_FALLBACK_MODEL = "gemma3:4b"
 _GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -312,6 +319,8 @@ def chat(
     model: str = DEFAULT_MODEL,
     extra_context: str = "",
     agent_prompt: str = "",
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
 ) -> str:
     """Envoie un message au LLM local avec contexte TennisBoss enrichi dynamiquement.
 
@@ -320,7 +329,12 @@ def chat(
     la détection automatique de joueurs.
     agent_prompt : instruction spécialisée d'un agent (voir agent_router.py),
     ex. « You are the TennisBoss Odds Agent... » — préfixée au system prompt.
+    max_tokens/temperature : None -> valeurs par défaut (MAX_TOKENS/TEMPERATURE,
+    comportement inchangé) ; voir ANALYST_MAX_TOKENS/ANALYST_TEMPERATURE pour
+    mode=analyst (branché dans bot/api.py::api_chat()).
     """
+    max_tokens = max_tokens if max_tokens is not None else MAX_TOKENS
+    temperature = temperature if temperature is not None else TEMPERATURE
     context = build_context(mem)
 
     # Détection automatique des joueurs seulement si pas de contexte externe fourni
@@ -352,7 +366,15 @@ def chat(
             log("Web search timeout (>10s) — ignoré", "WARN")
 
     lang = _detect_lang(message)
-    reply_instr = "Reply in English, max 3 sentences." if lang == "en" else "Réponds en français, 3 phrases max."
+    is_analyst = max_tokens > MAX_TOKENS
+    if is_analyst:
+        reply_instr = (
+            "Reply in English, in detail, citing the data/sources given above."
+            if lang == "en" else
+            "Réponds en français, de façon détaillée, en citant les données/sources fournies ci-dessus."
+        )
+    else:
+        reply_instr = "Reply in English, max 3 sentences." if lang == "en" else "Réponds en français, 3 phrases max."
     web_instr = " Use the web results above to answer — do not say you lack real-time data." if web_context else ""
     extra_instr = " Base your answer strictly on the TennisBoss data provided." if extra_context else ""
     extra_block = f"\n\nTennisBoss data:\n{extra_context}" if extra_context else ""
@@ -392,16 +414,16 @@ def chat(
     is_gemini = "generativelanguage.googleapis.com" in lm_url_l or model.startswith(("gemini-", "gemma-"))
     is_ollama = ("11434" in lm_url_l or "ollama" in lm_url_l) and not is_groq
     if is_ollama:
-        return _chat_via_generate(model, messages)
+        return _chat_via_generate(model, messages, max_tokens, temperature)
     if is_gemini:
-        return _chat_via_gemini(os.environ.get("GEMINI_MODEL", model), messages)
+        return _chat_via_gemini(os.environ.get("GEMINI_MODEL", model), messages, max_tokens, temperature)
     try:
-        return _chat_via_openai(lm_url, model, messages)
+        return _chat_via_openai(lm_url, model, messages, max_tokens, temperature)
     except Exception as exc:
         log(f"LLM primaire KO ({exc}) — fallback Gemini/Gemma", "WARN")
         try:
             gemini_model = os.environ.get("GEMINI_MODEL", _GEMINI_FALLBACK_MODEL)
-            return _chat_via_gemini(gemini_model, messages)
+            return _chat_via_gemini(gemini_model, messages, max_tokens, temperature)
         except Exception as gemini_exc:
             ollama_model = os.environ.get("OLLAMA_FALLBACK_MODEL", _OLLAMA_FALLBACK_MODEL)
             log(
@@ -409,10 +431,11 @@ def chat(
                 f"({ollama_model})",
                 "WARN",
             )
-            return _chat_via_generate(ollama_model, messages)
+            return _chat_via_generate(ollama_model, messages, max_tokens, temperature)
 
 
-def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
+def _chat_via_openai(lm_url: str, model: str, messages: list,
+                     max_tokens: int = MAX_TOKENS, temperature: float = TEMPERATURE) -> str:
     """Endpoint OpenAI-compatible (/v1/chat/completions) — LLM / Groq / OpenAI."""
     api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -422,8 +445,8 @@ def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
             json={
                 "model": model,
                 "messages": messages,
-                "temperature": TEMPERATURE,
-                "max_tokens": MAX_TOKENS,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
                 "stream": False,
             },
             headers=headers,
@@ -439,7 +462,8 @@ def _chat_via_openai(lm_url: str, model: str, messages: list) -> str:
         raise RuntimeError(f"Réponse invalide du LLM : {exc}") from exc
 
 
-def _chat_via_gemini(model: str, messages: list) -> str:
+def _chat_via_gemini(model: str, messages: list,
+                     max_tokens: int = MAX_TOKENS, temperature: float = TEMPERATURE) -> str:
     """Endpoint Gemini API REST — modèles Gemini et Gemma hébergés par Google."""
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -468,8 +492,8 @@ def _chat_via_gemini(model: str, messages: list) -> str:
             contents.insert(0, {"role": "user", "parts": [{"text": system_text}]})
 
     generation_config: Dict[str, Any] = {
-        "temperature": TEMPERATURE,
-        "maxOutputTokens": MAX_TOKENS,
+        "temperature": temperature,
+        "maxOutputTokens": max_tokens,
     }
     thinking_level = os.environ.get("GEMINI_THINKING_LEVEL", "").strip()
     if thinking_level:
@@ -505,7 +529,8 @@ def _ollama_chat_url() -> str:
 _THINKING_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
-def _chat_via_generate(model: str, messages: list) -> str:
+def _chat_via_generate(model: str, messages: list,
+                       max_tokens: int = MAX_TOKENS, temperature: float = TEMPERATURE) -> str:
     """Endpoint natif Ollama (/api/chat) — applique le chat template du modèle.
 
     think:false désactive le raisonnement pour qwen3 (Ollama ≥ 0.7).
@@ -521,8 +546,8 @@ def _chat_via_generate(model: str, messages: list) -> str:
                 "think":      False,
                 "keep_alive": "60m",
                 "options": {
-                    "temperature": TEMPERATURE,
-                    "num_predict": MAX_TOKENS,
+                    "temperature": temperature,
+                    "num_predict": max_tokens,
                 },
             },
             timeout=300,

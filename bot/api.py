@@ -3102,6 +3102,18 @@ def api_chat():
         return jsonify({"error": "message requis"}), 400
     primary_url = os.environ.get("GROQ_API_URL", config.GROQ_API_URL)
     primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
+    # mode=analyst (docs/AI_ASSISTANT_ARCHITECTURE.md §3.5) : réponses plus
+    # longues/factuelles pour les questions techniques (ROI, calibration,
+    # architecture...) ; mode=chat (défaut) garde le comportement mobile
+    # actuel inchangé (MAX_TOKENS/TEMPERATURE d'origine).
+    mode = (data.get("mode") or "chat").strip().lower()
+    if mode == "analyst":
+        req_max_tokens = data.get("max_tokens")
+        chat_max_tokens = int(req_max_tokens) if req_max_tokens else chat_mod.ANALYST_MAX_TOKENS
+        chat_temperature = chat_mod.ANALYST_TEMPERATURE
+    else:
+        chat_max_tokens = None
+        chat_temperature = None
     try:
         agent, clean_message = chat_mod.strip_agent_prefix(message)
         agent_prompt = chat_mod.AGENT_PROMPTS.get(agent, "") if agent else ""
@@ -3121,8 +3133,9 @@ def api_chat():
             except Exception as exc:  # noqa: BLE001
                 log(f"AI tools orchestrator échoué ({exc}) — chat inchangé.", "WARN")
         reply = chat_mod.chat(clean_message, history, _MEM, primary_url, model=primary_model,
-                              extra_context=extra, agent_prompt=agent_prompt)
-        resp = {"reply": reply, "context_used": bool(extra), "agent": agent}
+                              extra_context=extra, agent_prompt=agent_prompt,
+                              max_tokens=chat_max_tokens, temperature=chat_temperature)
+        resp = {"reply": reply, "context_used": bool(extra), "agent": agent, "mode": mode}
         if tools_called:
             resp["tools_called"] = tools_called
             resp["sources"] = sources

@@ -507,6 +507,36 @@ def test_chat_returns_503_when_llm_unreachable():
     assert resp.status_code == 503
 
 
+def test_chat_default_mode_is_chat_with_no_token_override():
+    with patch.object(api.chat_mod, "build_match_context", return_value=""), \
+         patch.object(api.chat_mod, "chat", return_value="reponse") as mock_chat:
+        resp = _client().post("/api/chat", json={"message": "Bonjour"})
+    assert resp.status_code == 200
+    assert resp.get_json()["mode"] == "chat"
+    assert mock_chat.call_args.kwargs.get("max_tokens") is None
+    assert mock_chat.call_args.kwargs.get("temperature") is None
+
+
+def test_chat_analyst_mode_passes_higher_token_budget():
+    with patch.object(api.chat_mod, "build_match_context", return_value=""), \
+         patch.object(api.chat_mod, "chat", return_value="reponse detaillee") as mock_chat:
+        resp = _client().post("/api/chat", json={"message": "Quel est notre ROI ?", "mode": "analyst"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["mode"] == "analyst"
+    assert mock_chat.call_args.kwargs.get("max_tokens") == api.chat_mod.ANALYST_MAX_TOKENS
+    assert mock_chat.call_args.kwargs.get("temperature") == api.chat_mod.ANALYST_TEMPERATURE
+
+
+def test_chat_analyst_mode_respects_explicit_max_tokens():
+    with patch.object(api.chat_mod, "build_match_context", return_value=""), \
+         patch.object(api.chat_mod, "chat", return_value="reponse") as mock_chat:
+        resp = _client().post(
+            "/api/chat", json={"message": "Explique la calibration", "mode": "analyst", "max_tokens": 800})
+    assert resp.status_code == 200
+    assert mock_chat.call_args.kwargs.get("max_tokens") == 800
+
+
 def test_upload_requires_file():
     resp = _client().post("/api/upload", data={})
     assert resp.status_code == 400
