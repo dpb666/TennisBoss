@@ -32,7 +32,7 @@ from flask_swagger_ui import get_swaggerui_blueprint
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, intelligence, intelligence_layer, live_api, match_intelligence,
                memory, mistake_learner, namematch, odds_api, oddspapi_feeder, openapi_spec, predictor,
-               recommendations, sackmann_feeder, settlement, versions, weather)
+               recommendations, sackmann_feeder, settlement, track_record, versions, weather)
 from . import __version__
 from .bootstrap import bootstrap
 from .log import log
@@ -478,6 +478,19 @@ def api_status():
         "rate_limit": odds_api.rate_limit_status(),
         "odds_rate_limit": odds_api.rate_limit_status(),
     })
+
+
+@app.get("/api/app/version")
+def api_app_version():
+    """Dernière version Android connue (bandeau "mise à jour disponible" côté
+    app, avant publication Play Store qui gérera ça nativement). Lecture
+    seule ; mis à jour via `python run.py set-app-version` après chaque build
+    notable — voir bot/db.py::set_app_version, docs/AI_ASSISTANT_ARCHITECTURE.md
+    n'est pas concerné (fonctionnalité produit, pas assistant IA)."""
+    info = db.get_app_version_info()
+    if not info:
+        return jsonify({"available": False})
+    return jsonify({"available": True, **info})
 
 
 @app.get("/api/players")
@@ -2916,6 +2929,55 @@ def api_bet_history_calibration():
     """
     days = min(365, max(1, int(request.args.get("days", 90))))
     return jsonify(db.bet_history_calibration(days=days))
+
+
+@app.get("/api/track-record")
+def api_track_record():
+    """Historique paginé des picks réglés (Track Record).
+
+    Query : ?days=365&surface=hard&result=win&page=1&limit=50
+    """
+    days = min(3650, max(1, int(request.args.get("days", 365))))
+    page = max(1, int(request.args.get("page", 1)))
+    limit = min(500, max(1, int(request.args.get("limit", 50))))
+    surface = (request.args.get("surface") or "").strip().lower() or None
+    result = (request.args.get("result") or "").strip().lower() or None
+    if result and result not in ("win", "loss", "void"):
+        return jsonify({"error": "result must be win, loss, or void"}), 400
+    return jsonify(track_record.list_picks(
+        days=days, surface=surface, result=result, page=page, limit=limit,
+    ))
+
+
+@app.get("/api/track-record/summary")
+def api_track_record_summary():
+    """Statistiques agrégées Track Record (ROI, streaks, CLV, confidence).
+
+    Query : ?days=365&surface=hard
+    """
+    days = min(3650, max(1, int(request.args.get("days", 365))))
+    surface = (request.args.get("surface") or "").strip().lower() or None
+    return jsonify(track_record.summary(days=days, surface=surface))
+
+
+@app.get("/api/track-record/monthly")
+def api_track_record_monthly():
+    """Performance mensuelle Track Record.
+
+    Query : ?days=365
+    """
+    days = min(3650, max(1, int(request.args.get("days", 365))))
+    return jsonify(track_record.monthly_breakdown(days=days))
+
+
+@app.get("/api/track-record/surfaces")
+def api_track_record_surfaces():
+    """Performance par surface (Track Record).
+
+    Query : ?days=365
+    """
+    days = min(3650, max(1, int(request.args.get("days", 365))))
+    return jsonify(track_record.surface_breakdown(days=days))
 
 
 @app.get("/api/line-movement")

@@ -592,6 +592,7 @@ private fun MatchCard(m: UpcomingMatch, onClick: () -> Unit) {
                             modifier = Modifier.padding(vertical = 4.dp))
                         BetBuilderView(
                             name1 = pred.player1, name2 = pred.player2,
+                            bb = pred.bet_builder,
                             mlProb1 = pred.ml_prob1, mlProb2 = pred.ml_prob2,
                             set2Prob1 = pred.set2_prob1, set2Prob2 = pred.set2_prob2,
                             thirdSetProb = pred.total_sets_over,

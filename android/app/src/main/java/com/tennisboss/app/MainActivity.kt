@@ -66,6 +66,9 @@ import com.tennisboss.app.ui.PlayerCompareViewModel
 import com.tennisboss.app.ui.PredictGroupScreen
 import com.tennisboss.app.ui.PredictViewModel
 import com.tennisboss.app.ui.ValueGroupScreen
+import com.tennisboss.app.ui.UpdateBannerViewModel
+import com.tennisboss.app.ui.components.UpdateBanner
+import androidx.compose.foundation.layout.Column
 import com.tennisboss.app.notifications.PickNotificationHelper
 import com.tennisboss.app.notifications.LiveProbPollWorker
 import com.tennisboss.app.notifications.ScannerPollWorker
@@ -141,6 +144,11 @@ fun AppRoot() {
     val detailVM: MatchDetailViewModel = viewModel()
     val chatVM: ChatViewModel = viewModel()
     val liveVM: LiveViewModel = viewModel()
+    val updateBannerVM: UpdateBannerViewModel = viewModel()
+
+    LaunchedEffect(Unit) {
+        updateBannerVM.checkForUpdate()
+    }
 
     // Le token est chargé dans MainActivity.onCreate() (avant setContent{}), pour être
     // déjà en place lorsque les ViewModel se construisent — voir le commentaire là-bas.
@@ -205,37 +213,46 @@ fun AppRoot() {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            val match = selectedMatch
-            if (match != null) {
-                MatchDetailScreen(
-                    p1 = match.first,
-                    p2 = match.second,
-                    eventId = match.third,
-                    onBack = { selectedMatch = null },
-                    vm = detailVM
-                )
-            } else {
-                AnimatedContent(
-                    targetState = tab,
-                    transitionSpec = {
-                        (fadeIn(tween(260)) +
-                            slideInVertically(tween(260)) { it / 16 }) togetherWith
-                            fadeOut(tween(180))
-                    },
-                    label = "tabs",
-                ) { current ->
-                    val onMatchClick: (String, String, String?) -> Unit = { p1, p2, eid ->
-                        selectedMatch = Triple(p1, p2, eid)
-                    }
-                    when (current) {
-                        0 -> DashboardScreen(onMatchClick, dashboardVM)
-                        1 -> PredictGroupScreen(predictVM, compareVM)
-                        2 -> MatchesGroupScreen(liveVM, onMatchClick)
-                        3 -> ValueGroupScreen(onMatchClick)
-                        else -> ChatScreen(chatVM)
+          Column(Modifier.fillMaxSize()) {
+            if (updateBannerVM.isUpdateAvailable) {
+                updateBannerVM.updateInfo?.let { info ->
+                    UpdateBanner(info = info, onDismiss = { updateBannerVM.dismiss() })
+                }
+            }
+            Surface(modifier = Modifier.weight(1f)) {
+                val match = selectedMatch
+                if (match != null) {
+                    MatchDetailScreen(
+                        p1 = match.first,
+                        p2 = match.second,
+                        eventId = match.third,
+                        onBack = { selectedMatch = null },
+                        vm = detailVM
+                    )
+                } else {
+                    AnimatedContent(
+                        targetState = tab,
+                        transitionSpec = {
+                            (fadeIn(tween(260)) +
+                                slideInVertically(tween(260)) { it / 16 }) togetherWith
+                                fadeOut(tween(180))
+                        },
+                        label = "tabs",
+                    ) { current ->
+                        val onMatchClick: (String, String, String?) -> Unit = { p1, p2, eid ->
+                            selectedMatch = Triple(p1, p2, eid)
+                        }
+                        when (current) {
+                            0 -> DashboardScreen(onMatchClick, dashboardVM)
+                            1 -> PredictGroupScreen(predictVM, compareVM)
+                            2 -> MatchesGroupScreen(liveVM, onMatchClick)
+                            3 -> ValueGroupScreen(onMatchClick)
+                            else -> ChatScreen(chatVM)
+                        }
                     }
                 }
             }
+          }
         }
     }
 }

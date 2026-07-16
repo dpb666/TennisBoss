@@ -83,6 +83,9 @@ def build_spec() -> Dict[str, Any]:
             "/api/status": {"get": _op(
                 "Métriques modèle + base + quota odds-api.io",
                 responses=_ok(), tags=["core"])},
+            "/api/app/version": {"get": _op(
+                "Dernière version Android connue (bandeau mise à jour, avant Play Store)",
+                responses=_ok(), tags=["core"])},
             "/api/players": {"get": _op(
                 "Recherche joueurs (autocomplete) + probabilité vs moyenne",
                 params=[_q("q", desc="Sous-chaîne du nom"),
@@ -217,6 +220,26 @@ def build_spec() -> Dict[str, Any]:
                 params=[_q("limit", type_="integer")], responses=_ok(), tags=["intelligence"])},
             "/api/bet-history/calibration": {"get": _op(
                 "Bins calibration prédit vs observé (50-55% … 75%+)",
+                params=[_q("days", type_="integer")], responses=_ok(), tags=["intelligence"])},
+            "/api/track-record": {"get": _op(
+                "Track Record — picks réglés paginés (filtres days/surface/result)",
+                params=[
+                    _q("days", type_="integer"),
+                    _q("surface", type_="string"),
+                        _q("result", type_="string", desc="win|loss|void"),
+                    _q("page", type_="integer"),
+                    _q("limit", type_="integer"),
+                ],
+                responses=_ok(), tags=["intelligence"])},
+            "/api/track-record/summary": {"get": _op(
+                "Track Record — stats agrégées (ROI, streaks, CLV, confidence)",
+                params=[_q("days", type_="integer"), _q("surface", type_="string")],
+                responses=_ok(), tags=["intelligence"])},
+            "/api/track-record/monthly": {"get": _op(
+                "Track Record — breakdown mensuel",
+                params=[_q("days", type_="integer")], responses=_ok(), tags=["intelligence"])},
+            "/api/track-record/surfaces": {"get": _op(
+                "Track Record — breakdown par surface",
                 params=[_q("days", type_="integer")], responses=_ok(), tags=["intelligence"])},
             "/api/line-movement": {"get": _op(
                 "Mouvement de cote capté par le scanner pour un match",

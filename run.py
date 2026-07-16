@@ -11,6 +11,7 @@ Commandes :
   python3 run.py status                      -> état (poids, précision, top joueurs)
   python3 run.py reset                       -> efface l'état appris
   python3 run.py dedupe-players [--apply]    -> fusionne les profils joueurs dupliqués
+  python3 run.py set-app-version 2 "1.1"     -> publie la dernière version Android (bandeau app)
 """
 from __future__ import annotations
 
@@ -512,6 +513,17 @@ def cmd_surface_data_audit(_args) -> None:
     subprocess.run([sys.executable, str(script)], check=False)
 
 
+def cmd_set_app_version(args) -> None:
+    """Publie la dernière version Android connue (bandeau "mise à jour
+    disponible" côté app, avant publication Play Store — voir
+    bot/db.py::set_app_version, GET /api/app/version)."""
+    db.set_app_version(args.version_code, args.version_name,
+                       notes=args.notes or "", download_url=args.download_url)
+    print(f"Version publiée : code={args.version_code} name={args.version_name!r}"
+          + (f" notes={args.notes!r}" if args.notes else "")
+          + (f" url={args.download_url!r}" if args.download_url else ""))
+
+
 def cmd_dedupe_players(args) -> None:
     """Fusionne les profils joueurs dupliqués par variation de format de nom
     (ex. "Andreeva M." / "Mirra Andreeva" — voir bot/dedupe_players.py pour
@@ -657,6 +669,14 @@ def main() -> None:
                           help="Applique la fusion (par défaut : dry-run, diagnostic seulement)")
     p_dedupe.add_argument("--top", type=int, default=15, help="Nb de groupes affichés dans le diagnostic")
     p_dedupe.set_defaults(func=cmd_dedupe_players)
+
+    p_ver = sub.add_parser("set-app-version",
+                           help="Publie la dernière version Android (bandeau mise à jour app)")
+    p_ver.add_argument("version_code", type=int, help="versionCode (android/app/build.gradle.kts)")
+    p_ver.add_argument("version_name", help="versionName (ex. '1.1')")
+    p_ver.add_argument("--notes", help="Notes de version affichées dans le bandeau")
+    p_ver.add_argument("--download-url", dest="download_url", help="Lien de téléchargement de l'APK (optionnel)")
+    p_ver.set_defaults(func=cmd_set_app_version)
 
     args = parser.parse_args()
     args.func(args)

@@ -934,6 +934,37 @@ def get_player(name: str) -> Optional[sqlite3.Row]:
         return conn.execute("SELECT * FROM players WHERE name=?", (name,)).fetchone()
 
 
+# --- Version de l'app Android (bandeau "mise à jour disponible") -----------
+# Avant publication Play Store (qui gère ça nativement), l'app sideloadée
+# vérifie au démarrage si une build plus récente existe (voir GET
+# /api/app/version, run.py set-app-version). Stocké en meta (JSON), pas une
+# nouvelle table — un seul enregistrement, mis à jour à chaque build notable.
+APP_VERSION_META_KEY = "app_latest_version"
+
+
+def get_app_version_info() -> Optional[Dict[str, Any]]:
+    raw = get_meta(APP_VERSION_META_KEY)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def set_app_version(version_code: int, version_name: str,
+                    notes: str = "", download_url: Optional[str] = None) -> None:
+    import datetime as _dt
+    payload = {
+        "version_code": int(version_code),
+        "version_name": version_name,
+        "notes": notes,
+        "download_url": download_url,
+        "published_ts": _dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    set_meta(APP_VERSION_META_KEY, json.dumps(payload, ensure_ascii=False))
+
+
 def get_meta(key: str) -> Optional[str]:
     with connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()

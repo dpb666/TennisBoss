@@ -400,7 +400,23 @@ data class Prediction(
     val total_points_over: Double? = null,
     val total_sets_over: Double? = null,
     val correct_score_probs: Map<String, Double>? = null,
-    val total_aces_avg: Double? = null
+    val total_aces_avg: Double? = null,
+    // Bet Builder complet (marchés total_sets/handicap, cotes/EV, badge
+    // "meilleur pari") — voir bot/api.py::_bet_builder. Les champs ml_prob1/
+    // set2_prob1/etc. ci-dessus restent en fallback pour rétrocompatibilité.
+    val bet_builder: BetBuilder? = null,
+)
+
+/** Dernière version Android connue côté backend — bandeau "mise à jour
+ * disponible" avant publication Play Store (qui gérera ça nativement).
+ * Voir bot/db.py::get_app_version_info, GET /api/app/version. */
+data class AppVersionInfo(
+    val available: Boolean = false,
+    val version_code: Int? = null,
+    val version_name: String? = null,
+    val notes: String? = null,
+    val download_url: String? = null,
+    val published_ts: String? = null,
 )
 
 data class Odds(
