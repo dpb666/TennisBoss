@@ -38,8 +38,9 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import calibrate, config, db, features, intelligence_layer
+from . import calibrate, config, db, elo as elo_mod, features, intelligence_layer
 from .log import log
+from .ml_prep import features as ml_features
 
 _EPS = 1e-9
 
@@ -356,6 +357,143 @@ def backtest_clutch(min_bp_faced: float = None,
             + (" Signal informatif — mérite un contrôle contre l'ELO avant d'aller plus loin."
                if rate > 0.52 else " Pas d'écart net — signal probablement redondant/bruit.")
         ),
+    }
+
+
+def _proportion_ztest(observed_rate: float, n: int, null_p: float = 0.5) -> Tuple[Optional[float], Optional[float]]:
+    """Test de proportion bilatéral (approximation normale, H0: rate=null_p).
+
+    z = (p_hat - p0) / sqrt(p0*(1-p0)/n). p-value via la fonction d'erreur
+    (math.erfc, stdlib — pas de scipy dans ce projet). Fiable pour n grand
+    (>~30 avec p0=0.5, largement le cas ici).
+    """
+    if n <= 0:
+        return None, None
+    se = math.sqrt(null_p * (1 - null_p) / n)
+    if se == 0:
+        return None, None
+    z = round((observed_rate - null_p) / se, 3)
+    p = round(math.erfc(abs(z) / math.sqrt(2)), 4)
+    return z, p
+
+
+def backtest_clutch_vs_elo(min_bp_faced: float = None, diff_threshold: float = 0.08,
+                          elo_close_threshold: float = 75.0) -> Dict[str, Any]:
+    """Le signal clutch (BP sauvées, voir backtest_clutch) survit-il un
+    contrôle contre l'ELO ?
+
+    backtest_clutch() mesure 61.6% de réussite globale (n=4294) — mais le
+    taux de BP sauvées est corrélé à la qualité de service, déjà capturée
+    par l'ELO. Si l'écart clutch n'existe QUE sur des matchs où l'ELO est
+    déjà tranché (gros écart), le signal est redondant. La vraie preuve
+    d'info nouvelle : est-ce que le côté "plus clutch" gagne encore plus de
+    50% des matchs PARMI CEUX où l'ELO ne permet PAS de trancher (écart
+    < elo_close_threshold points) ?
+
+    Replay chronologique conjoint : accumulateurs BP (identique à
+    backtest_clutch) + état ELO walk-forward rejoué avec
+    bot.ml_prep.features.init_elo_state/update_elo_state (même code que la
+    prod pour build_feature_row, pas une réimplémentation) — ELO et clutch
+    tous deux mesurés AVANT chaque match, jamais de fuite.
+    """
+    min_bp_faced = (min_bp_faced if min_bp_faced is not None
+                    else float(intelligence_layer.CLUTCH_MIN_BP_FACED))
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT winner, loser, w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced, margin "
+            "FROM matches WHERE w_bp_faced IS NOT NULL "
+            "ORDER BY REPLACE(date,'-','') ASC, id ASC"
+        ).fetchall()
+
+    acc: Dict[str, List[float]] = {}
+    elo_ratings, elo_surface, elo_n, elo_surf_n = ml_features.init_elo_state()
+
+    n_eval_all = n_clutch_won_all = 0
+    n_eval_close = n_clutch_won_close = 0
+    elo_gaps: List[float] = []
+
+    for r in rows:
+        w, l = r["winner"], r["loser"]
+        aw, al = acc.get(w), acc.get(l)
+        if aw and al and aw[1] >= min_bp_faced and al[1] >= min_bp_faced:
+            rate_w, rate_l = aw[0] / aw[1], al[0] / al[1]
+            if abs(rate_w - rate_l) >= diff_threshold:
+                elo_gap = abs(elo_ratings.get(w, elo_mod.BASE) - elo_ratings.get(l, elo_mod.BASE))
+                clutch_won = rate_w > rate_l
+
+                n_eval_all += 1
+                elo_gaps.append(elo_gap)
+                if clutch_won:
+                    n_clutch_won_all += 1
+
+                if elo_gap < elo_close_threshold:
+                    n_eval_close += 1
+                    if clutch_won:
+                        n_clutch_won_close += 1
+
+        acc.setdefault(w, [0.0, 0.0])
+        acc.setdefault(l, [0.0, 0.0])
+        acc[w][0] += r["w_bp_saved"] or 0.0
+        acc[w][1] += r["w_bp_faced"] or 0.0
+        acc[l][0] += r["l_bp_saved"] or 0.0
+        acc[l][1] += r["l_bp_faced"] or 0.0
+
+        # Mise à jour ELO APRÈS évaluation (jamais avant) : évite la fuite.
+        ml_features.update_elo_state(
+            {"winner_name": w, "loser_name": l, "surface": None, "margin": r["margin"]},
+            elo_ratings, elo_surface, elo_n, elo_surf_n,
+        )
+
+    if n_eval_all == 0:
+        return {"n_evaluated_all": 0,
+                "note": "Aucun match évaluable (voir backtest_clutch pour le diagnostic)."}
+
+    rate_all = round(n_clutch_won_all / n_eval_all, 4)
+    rate_close = round(n_clutch_won_close / n_eval_close, 4) if n_eval_close else None
+    avg_elo_gap = round(sum(elo_gaps) / len(elo_gaps), 1) if elo_gaps else None
+
+    z_score, p_value_approx = (_proportion_ztest(rate_close, n_eval_close)
+                                if n_eval_close else (None, None))
+
+    significant = z_score is not None and abs(z_score) >= 1.96  # ~95% bilatéral
+
+    if rate_close is None:
+        verdict = "Aucun match avec écart ELO < seuil parmi les matchs évaluables — seuil trop strict, augmenter elo_close_threshold."
+    elif rate_close > 0.52 and significant:
+        verdict = (f"Le signal clutch SURVIT au contrôle ELO et reste statistiquement significatif : "
+                   f"{rate_close:.1%} de réussite parmi les {n_eval_close} matchs où l'ELO est proche "
+                   f"(< {elo_close_threshold:.0f} pts), vs {rate_all:.1%} sur l'ensemble (n={n_eval_all}) — "
+                   f"z={z_score}, p≈{p_value_approx}. C'est une info nouvelle, modeste mais réelle (pas un "
+                   "simple proxy service/ELO) — la majorité de l'écart brut (61.6%) était en fait "
+                   "expliquée par l'ELO, mais un résidu réel subsiste. Candidat pour un blend faible "
+                   "(pas un remplacement), à valider par un vrai walk-forward log-loss avant intégration.")
+    elif rate_close > 0.5:
+        verdict = (f"Le signal clutch survit nominalement au contrôle ELO ({rate_close:.1%} sur "
+                   f"{n_eval_close} matchs ELO-proches, vs {rate_all:.1%} sur l'ensemble) mais "
+                   f"l'écart n'est PAS statistiquement significatif (z={z_score}, p≈{p_value_approx}) — "
+                   "trop proche du hasard pour conclure à une info nouvelle avec ce N. Accumuler plus "
+                   "de données avant de trancher, ne pas intégrer au modèle sur cette base.")
+    else:
+        verdict = (f"Le signal clutch NE survit PAS au contrôle ELO : {rate_close:.1%} de réussite "
+                   f"parmi les {n_eval_close} matchs ELO-proches (au ou sous le hasard), contre {rate_all:.1%} "
+                   f"sur l'ensemble (n={n_eval_all}). L'écart global vient du fait que le côté plus clutch "
+                   "a aussi souvent un ELO plus élevé — signal redondant, ne pas intégrer tel quel.")
+
+    return {
+        "elo_close_threshold": elo_close_threshold,
+        "min_bp_faced": min_bp_faced,
+        "diff_threshold": diff_threshold,
+        "n_evaluated_all": n_eval_all,
+        "clutch_win_rate_all": rate_all,
+        "n_evaluated_elo_close": n_eval_close,
+        "clutch_win_rate_elo_close": rate_close,
+        "avg_elo_gap_evaluated": avg_elo_gap,
+        "z_score": z_score,
+        "p_value_approx": p_value_approx,
+        "significant_95pct": significant,
+        "baseline": 0.5,
+        "verdict": verdict,
     }
 
 

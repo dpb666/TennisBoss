@@ -116,5 +116,83 @@ class TestBacktestSteamMove(SignalBacktestTestCase):
         self.assertEqual(result["actual_win_rate_moved_side"], 1.0)  # B a gagné
 
 
+class TestProportionZtest(unittest.TestCase):
+    """Test de proportion (bot.signal_backtest._proportion_ztest) — isolé de
+    la replay DB pour vérifier la formule elle-même avec des valeurs
+    connues/vérifiables à la main."""
+
+    def test_exactly_at_null_gives_zero_z_and_p_one(self):
+        z, p = sb._proportion_ztest(0.5, 1000)
+        self.assertEqual(z, 0.0)
+        self.assertEqual(p, 1.0)
+
+    def test_matches_observed_production_values(self):
+        # Valeurs réellement observées sur les données de prod (2026-07-15) :
+        # rate=0.5298, n=1357 -> z≈2.196, p≈0.028 (significatif à 95%).
+        z, p = sb._proportion_ztest(0.5298, 1357)
+        self.assertAlmostEqual(z, 2.196, delta=0.005)
+        self.assertLess(p, 0.05)
+
+    def test_zero_n_returns_none(self):
+        z, p = sb._proportion_ztest(0.6, 0)
+        self.assertIsNone(z)
+        self.assertIsNone(p)
+
+    def test_far_from_null_is_highly_significant(self):
+        z, p = sb._proportion_ztest(0.9, 500)
+        self.assertGreater(abs(z), 10)
+        self.assertLess(p, 0.001)
+
+
+class TestBacktestClutchVsElo(SignalBacktestTestCase):
+    def _insert_match(self, date, winner, loser, w_bp_saved, w_bp_faced,
+                      l_bp_saved, l_bp_faced, margin=0):
+        with db.connect() as conn:
+            conn.execute(
+                "INSERT INTO matches (date,tour,winner,loser,w_serve,w_return1,w_return2,"
+                "l_serve,l_return1,l_return2,surface,margin,"
+                "w_bp_saved,w_bp_faced,l_bp_saved,l_bp_faced)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (date, "atp", winner, loser, 0.6, 0.5, 0.5, 0.6, 0.5, 0.5, "hard", margin,
+                 w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced),
+            )
+
+    def test_empty_db_returns_zero_matches(self):
+        result = sb.backtest_clutch_vs_elo()
+        self.assertEqual(result["n_evaluated_all"], 0)
+
+    def test_elo_close_subset_never_exceeds_full_subset(self):
+        # Constitue un historique BP pour 20 joueurs (10 "haut" taux de BP
+        # sauvées, 10 "bas") via des matchs neutres, puis évalue des duels
+        # haut-vs-bas : le sous-ensemble ELO-proche doit toujours être un
+        # sous-ensemble (jamais plus grand) de l'ensemble évalué, et la
+        # structure de sortie doit être complète, quel que soit le résultat
+        # numérique exact (qui dépend de la dynamique ELO réelle rejouée).
+        for i in range(10):
+            hi, lo = f"Hi{i}", f"Lo{i}"
+            filler_hi, filler_lo = f"FHi{i}", f"FLo{i}"
+            # Hi{i} accumule un bon taux de BP sauvées (16/20 = 80%).
+            self._insert_match(f"2026-01-{i+1:02d}", hi, filler_hi, 16, 20, 10, 20)
+            # Lo{i} accumule un mauvais taux de BP sauvées (4/20 = 20%).
+            self._insert_match(f"2026-01-{i+1:02d}", filler_lo, lo, 10, 20, 4, 20)
+        for i in range(10):
+            # Match évalué : Hi{i} vs Lo{i}, écart BP net >= diff_threshold.
+            self._insert_match(f"2026-02-{i+1:02d}", f"Hi{i}", f"Lo{i}", 5, 10, 5, 10)
+
+        result = sb.backtest_clutch_vs_elo(min_bp_faced=15, diff_threshold=0.08)
+
+        for key in ("elo_close_threshold", "min_bp_faced", "diff_threshold",
+                    "n_evaluated_all", "clutch_win_rate_all", "n_evaluated_elo_close",
+                    "clutch_win_rate_elo_close", "avg_elo_gap_evaluated",
+                    "z_score", "p_value_approx", "significant_95pct", "baseline", "verdict"):
+            self.assertIn(key, result)
+
+        self.assertGreaterEqual(result["n_evaluated_all"], 1)
+        self.assertLessEqual(result["n_evaluated_elo_close"], result["n_evaluated_all"])
+        if result["n_evaluated_elo_close"]:
+            self.assertGreaterEqual(result["clutch_win_rate_elo_close"], 0.0)
+            self.assertLessEqual(result["clutch_win_rate_elo_close"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
