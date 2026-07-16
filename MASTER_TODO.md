@@ -330,17 +330,31 @@ Given #1 (the `app/` package) and #5 (deleting orphaned modules) both involve de
 
 ---
 
-## AI Assistant Ecosystem (new mission — predictor frozen)
+## AI Assistant Ecosystem — phase status (superseded by section above)
 
-_Plan: `docs/AI_ASSISTANT_ARCHITECTURE.md` (2026-07-16). Analytical only — no changes to predictor, calibration, market_blend, `/api/value`, thresholds, or pick selection._
+_Plan: `docs/AI_ASSISTANT_ARCHITECTURE.md` (2026-07-16). Analytical only — no changes to predictor, calibration, market_blend, `/api/value`, thresholds, or pick selection. Phase 1 status: see "AI Assistant Ecosystem — Phase 1 Slice 1" above — **Done**, not "Next"._
 
 | Phase | Goal | Status |
 |-------|------|--------|
 | **0** | Architecture audit + plan | **Done** — see `docs/AI_ASSISTANT_ARCHITECTURE.md` |
-| **1** | Read-only tool-calling chat (`ai/chat/tools/`, feature flag) | **Next** — Slice 1: `read_doc`, `query_bet_history`, `get_calibration_summary`, `explain_pick`, `list_api_endpoints` |
+| **1** | Read-only tool-calling chat (`ai/chat/tools/`, feature flag) | **Done** — see Phase 1 Slice 1 section above |
 | **2** | Project memory / searchable knowledge base | Planned |
 | **3** | Post-settlement learning loop (suggestions only) | Planned |
 | **4** | Gradual folder reorg (`ai/`, `prediction/`, `data/`, …) | Planned |
 | **5** | Design system documentation | Planned |
 
-**Prerequisites before Phase 1 coding:** explicit user go-ahead (plan-only session completed).
+---
+
+## Bet Builder — nouveaux marchés, cotes/EV, combos (2026-07-16)
+
+Commit `44beaa5`. `predictor.py`/`calibrate.py`/`/api/value` inchangés — pure combinatoire sur les probas déjà calculées.
+
+| Item | Status |
+|------|--------|
+| Marchés `total_sets` (+/-2.5) et `handicap` (-1.5 sets) | **Done** |
+| `fair_odds1/2` sur chaque marché + `odds1/2`/`ev1/2` réels sur "match" | **Done** |
+| `best_market`/`best_market_confidence` (badge "meilleur pari") | **Done** |
+| `POST /api/bet-builder/combo` (2-4 legs, produit des probas) | **Done** |
+| Android : `BetBuilderView.kt` étendu + nouvel onglet Combo (Value > Combo) | **Done** |
+| Tests (21 nouveaux : 13 backend + 8 Android) | **Done** — 533/533 backend, 61/61 Android |
+| Vérifié en direct sur émulateur (service redémarré, accord utilisateur) | **Done** |
