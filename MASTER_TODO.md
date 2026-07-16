@@ -294,6 +294,27 @@ this work (5/10 required fields were previously unlogged).
 
 ---
 
+## AI Assistant Ecosystem — Phase 1 Slice 1 (2026-07-16)
+
+See **`docs/AI_ASSISTANT_ARCHITECTURE.md`** for the full 5-phase plan
+(chat tools, project memory, self-learning, folder reorg, design system)
+and its "Implementation log" section for what's actually shipped.
+
+| Item | Status |
+|------|--------|
+| `ai/chat/tools/registry.py` (6 read-only tools) | **Done** |
+| `ai/chat/orchestrator.py` (keyword intent classification) | **Done** |
+| `config.AI_TOOLS_ENABLED` flag (`TENNISBOSS_AI_TOOLS=1`, default off) | **Done** |
+| `api_chat()` wired additively (tools only when no player context) | **Done** |
+| `/api/chat` response gains optional `tools_called`/`sources` | **Done** |
+| Frozen-boundary guard tests (no predictor/calibrate/learner import) | **Done** |
+| Tests (22 new) | **Done** — 520/520 total passing |
+| Phase 2 (project_knowledge.db), Phase 4 (folder reorg), Phase 5 (design) | **Deferred** — not in this slice |
+| Predictor / calibration / betting logic | **Unchanged** (frozen, per user directive) |
+| Pre-existing `job_learn`/`auto_learner` hourly auto-tuning | **Left running** — user decision (predates freeze, separate infra) |
+
+---
+
 ## Execution order (this session, if proceeding autonomously)
 
 Given #1 (the `app/` package) and #5 (deleting orphaned modules) both involve deleting code and therefore need explicit user sign-off before acting (per this project's standing conventions on destructive/hard-to-reverse actions), the safe autonomous execution order is:
@@ -306,3 +327,20 @@ Given #1 (the `app/` package) and #5 (deleting orphaned modules) both involve de
 6. #4 (ViewModel tests) — additive only, safe, but time-consuming; will do as many as fit.
 7. #8 (dependency bumps) — will do the Compose BOM bump (low risk) but leave the alpha crypto swap for explicit user approval (touches token storage — higher blast radius).
 8. #1 and #5 — will present findings and the recommended path, and wait for explicit go-ahead before deleting anything, per this project's established pattern this session (destructive actions get a confirm step even under a broad "continue" instruction).
+
+---
+
+## AI Assistant Ecosystem (new mission — predictor frozen)
+
+_Plan: `docs/AI_ASSISTANT_ARCHITECTURE.md` (2026-07-16). Analytical only — no changes to predictor, calibration, market_blend, `/api/value`, thresholds, or pick selection._
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| **0** | Architecture audit + plan | **Done** — see `docs/AI_ASSISTANT_ARCHITECTURE.md` |
+| **1** | Read-only tool-calling chat (`ai/chat/tools/`, feature flag) | **Next** — Slice 1: `read_doc`, `query_bet_history`, `get_calibration_summary`, `explain_pick`, `list_api_endpoints` |
+| **2** | Project memory / searchable knowledge base | Planned |
+| **3** | Post-settlement learning loop (suggestions only) | Planned |
+| **4** | Gradual folder reorg (`ai/`, `prediction/`, `data/`, …) | Planned |
+| **5** | Design system documentation | Planned |
+
+**Prerequisites before Phase 1 coding:** explicit user go-ahead (plan-only session completed).

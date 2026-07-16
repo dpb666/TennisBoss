@@ -82,6 +82,12 @@ SOFASCORE_LIVE_URL = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
 GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
+# AI Assistant — outils de lecture seule (ai/chat/), voir
+# docs/AI_ASSISTANT_ARCHITECTURE.md Phase 1. Désactivé par défaut : purement
+# additif, n'affecte jamais predictor.py/calibrate.py/api_value ni le chat
+# existant quand désactivé (comportement identique à avant ce flag).
+AI_TOOLS_ENABLED = os.environ.get("TENNISBOSS_AI_TOOLS", "0") == "1"
+
 # Surface detection from league/tournament name
 _GRASS_KEYWORDS = {
     "wimbledon", "queen", "halle", "eastbourne", "hertogenbosch",

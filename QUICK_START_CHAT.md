@@ -89,4 +89,41 @@ Response
 
 ---
 
-**Full docs:** See `TELEGRAM_SETUP.md` and `AI_CHAT_AUDIT.md`
+## AI Analyst Tools (Phase 1, 2026-07-16)
+
+`POST /api/chat` can now answer read-only analytical questions using
+structured tool output instead of only free-form LLM guessing — see
+`docs/AI_ASSISTANT_ARCHITECTURE.md` and `ai/chat/`. Disabled by default;
+enable with `TENNISBOSS_API_TOKEN`-style env var `TENNISBOSS_AI_TOOLS=1`.
+Purely additive: player-specific questions still use the existing
+`build_match_context()` grounding unchanged; tools only run as a fallback
+when no player is detected in the message.
+
+Example questions this unlocks:
+
+```
+"Quel est notre ROI sur les 30 derniers jours ?"        -> query_bet_history
+"Sommes-nous bien calibrés en ce moment ?"               -> get_calibration_summary
+"Le logging est-il complet cette semaine ?"              -> get_logging_health
+"Quels endpoints exposent le bet_history ?"              -> list_api_endpoints
+"Comment fonctionne l'architecture du projet ?"          -> read_doc(ai_architecture)
+```
+
+Response now includes (when tools fired):
+
+```json
+{
+  "reply": "...",
+  "context_used": true,
+  "tools_called": ["query_bet_history"],
+  "sources": ["bet_history"]
+}
+```
+
+**Never** does this layer place bets, change predictions, or modify
+`predictor.py`/`calibrate.py`/production logic — it only reads. See
+`ai/chat/tools/registry.py` for the exact read-only tool list and
+`tests/test_ai_tools.py` for the frozen-boundary guard tests.
+
+**Full docs:** See `TELEGRAM_SETUP.md`, `AI_CHAT_AUDIT.md` (stale — predates
+the `app/` removal), and `docs/AI_ASSISTANT_ARCHITECTURE.md` (current).

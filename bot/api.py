@@ -2955,9 +2955,27 @@ def api_chat():
         agent, clean_message = chat_mod.strip_agent_prefix(message)
         agent_prompt = chat_mod.AGENT_PROMPTS.get(agent, "") if agent else ""
         extra = chat_mod.build_match_context(clean_message, _MEM, agent=agent)
+        # AI Assistant Phase 1 (read-only tools, docs/AI_ASSISTANT_ARCHITECTURE.md
+        # §3) : ne s'exécute QUE si aucun joueur n'a été détecté (build_match_context
+        # vide) et seulement derrière un flag désactivé par défaut — comportement
+        # strictement identique à avant quand TENNISBOSS_AI_TOOLS n'est pas activé.
+        tools_called: list = []
+        sources: list = []
+        if config.AI_TOOLS_ENABLED and not extra:
+            try:
+                from ai.chat import orchestrator as ai_orchestrator
+                tool_context, tools_called, sources = ai_orchestrator.run_tools_for_message(clean_message)
+                if tool_context:
+                    extra = tool_context
+            except Exception as exc:  # noqa: BLE001
+                log(f"AI tools orchestrator échoué ({exc}) — chat inchangé.", "WARN")
         reply = chat_mod.chat(clean_message, history, _MEM, primary_url, model=primary_model,
                               extra_context=extra, agent_prompt=agent_prompt)
-        return jsonify({"reply": reply, "context_used": bool(extra), "agent": agent})
+        resp = {"reply": reply, "context_used": bool(extra), "agent": agent}
+        if tools_called:
+            resp["tools_called"] = tools_called
+            resp["sources"] = sources
+        return jsonify(resp)
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")
         return jsonify({"error": f"LLM inaccessible (modèle: {primary_model}) : {exc}"}), 503

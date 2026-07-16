@@ -228,7 +228,9 @@ def build_spec() -> Dict[str, Any]:
                     "required": ["token"]},
                 responses=_ok(), tags=["personalization"])},
             "/api/chat": {"post": _op(
-                "Assistant IA conversationnel (contexte prédiction ancré)",
+                "Assistant IA conversationnel (contexte prédiction ancré ; réponse "
+                "inclut tools_called/sources quand les outils analytiques en lecture "
+                "seule se déclenchent, voir docs/AI_ASSISTANT_ARCHITECTURE.md)",
                 request_body={"type": "object", "properties": {
                     "message": {"type": "string"}, "history": {"type": "array"}},
                     "required": ["message"]},
