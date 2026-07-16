@@ -84,12 +84,16 @@ fun ValueGroupScreen(onMatchClick: (String, String, String?) -> Unit) {
             Tab(selected = subTab == 3, onClick = { subTab = 3 },
                 modifier = Modifier.testTag("value_tab_edge"),
                 text = { Text("Edge", maxLines = 1, overflow = TextOverflow.Ellipsis) })
+            Tab(selected = subTab == 4, onClick = { subTab = 4 },
+                modifier = Modifier.testTag("value_tab_combo"),
+                text = { Text("Combo", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {
             0 -> ValueScreen(onMatchClick = onMatchClick)
             1 -> ScannerScreen()
             2 -> PerformanceScreen()
-            else -> EdgeScreen()
+            3 -> EdgeScreen()
+            else -> ComboBuilderScreen()
         }
     }
 }

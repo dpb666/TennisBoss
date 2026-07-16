@@ -115,6 +115,22 @@ def build_spec() -> Dict[str, Any]:
                 params=[_q("p1", required=True), _q("p2", required=True),
                         _q("surface", desc="hard | clay | grass")],
                 responses={**_ok(), "400": {"description": "Paramètres manquants"}}, tags=["core"])},
+            "/api/bet-builder/combo": {"post": _op(
+                "Combine 2-4 pronostics déjà calculés en un combiné (parlay) — "
+                "probabilité combinée = produit des probas (hypothèse d'indépendance), "
+                "aucune nouvelle logique de prédiction",
+                request_body={"type": "object", "properties": {
+                    "legs": {"type": "array", "items": {"type": "object", "properties": {
+                        "player1": {"type": "string"}, "player2": {"type": "string"},
+                        "side": {"type": "string", "enum": ["player1", "player2"]},
+                        "market": {"type": "string",
+                                  "enum": ["match", "set2", "total_sets", "handicap"]},
+                        "surface": {"type": "string"},
+                    }}}},
+                    "required": ["legs"]},
+                responses={**_ok(), "400": {"description": "2-4 legs requis"},
+                          "422": {"description": "Prédiction impossible pour une leg"}},
+                tags=["core"])},
             "/api/insight": {"get": _op(
                 "Sport Intelligence Layer : facteurs de décision, santé du modèle, "
                 "mouvement de marché, sentiment (opt-in ?sentiment=true)",

@@ -24,6 +24,9 @@ interface TennisBossApi {
         @Query("p2") p2: String,
     ): PredictResponse
 
+    @POST("api/bet-builder/combo")
+    suspend fun betBuilderCombo(@Body request: ComboRequest): ComboResult
+
     @GET("api/players")
     suspend fun players(
         @Query("q") q: String,

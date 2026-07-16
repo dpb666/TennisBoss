@@ -302,18 +302,71 @@ data class H2H(
     val meetings: List<H2HMeeting> = emptyList(),
 )
 
-/** Un marché à deux issues (proba J1 / proba J2), en %. */
+/** Un marché à deux issues (proba J1 / proba J2), en % — cote juste théorique
+ * (fair_odds1/2, 1 sur proba) toujours présente ; cote réelle + EV (odds1/2,
+ * ev1/2) seulement pour le marché "match" (seul marché avec une cote
+ * bookmaker dans ce pipeline, voir bot/api.py _bet_builder). */
 data class BetMarket(
     val prob1: Double = 0.0,
     val prob2: Double = 0.0,
+    val fair_odds1: Double? = null,
+    val fair_odds2: Double? = null,
+    val odds1: Double? = null,
+    val odds2: Double? = null,
+    val ev1: Double? = null,
+    val ev2: Double? = null,
+)
+
+/** Marché "Total sets" (plus/moins de 2.5 sets joués) — dérivé de
+ * third_set_prob, aucune nouvelle prédiction. */
+data class TotalSetsMarket(
+    val prob_over: Double = 0.0,
+    val prob_under: Double = 0.0,
+    val fair_odds_over: Double? = null,
+    val fair_odds_under: Double? = null,
 )
 
 /** Bet Builder : marchés dérivés de la proba 1er set (best-of-3). */
 data class BetBuilder(
     val match: BetMarket = BetMarket(),
     val set2: BetMarket = BetMarket(),
+    val total_sets: TotalSetsMarket = TotalSetsMarket(),
+    val handicap: BetMarket = BetMarket(),
     val third_set_prob: Double = 0.0,
     val correct_score: Map<String, Double> = emptyMap(),
+    val best_market: String? = null,
+    val best_market_confidence: Double? = null,
+)
+
+/** Une leg d'un combiné (parlay) — réponse de /api/bet-builder/combo. */
+data class ComboLeg(
+    val player1: String = "",
+    val player2: String = "",
+    val side: String = "",
+    val market: String = "",
+    val prob_pct: Double = 0.0,
+    val fair_odds: Double = 0.0,
+)
+
+data class ComboResult(
+    val legs: List<ComboLeg> = emptyList(),
+    val n_legs: Int = 0,
+    val combined_probability_pct: Double = 0.0,
+    val combined_fair_odds: Double = 0.0,
+    val note: String = "",
+)
+
+/** Requête envoyée à /api/bet-builder/combo. */
+data class ComboLegRequest(
+    val player1: String,
+    val player2: String,
+    val side: String,
+    val market: String = "match",
+    val surface: String? = null,
+)
+
+data class ComboRequest(
+    val legs: List<ComboLegRequest>,
 )
 
 data class PredictResponse(

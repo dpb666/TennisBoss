@@ -65,6 +65,70 @@ class TestBetBuilder(unittest.TestCase):
         for k in ("Sinner 2-0", "Sinner 2-1", "Alcaraz 2-1", "Alcaraz 2-0"):
             self.assertIn(k, bb["correct_score"])
 
+    def test_total_sets_over_egal_third_set_prob(self):
+        bb = api._bet_builder(0.6, "A", "B")
+        self.assertAlmostEqual(bb["total_sets"]["prob_over"], bb["third_set_prob"], places=1)
+        self.assertAlmostEqual(
+            bb["total_sets"]["prob_over"] + bb["total_sets"]["prob_under"], 100.0, places=1)
+
+    def test_handicap_droit_sets_coherent(self):
+        bb = api._bet_builder(0.7, "A", "B")
+        self.assertAlmostEqual(bb["handicap"]["prob1"], round(0.7 * 0.7 * 100, 1), places=1)
+        self.assertAlmostEqual(bb["handicap"]["prob2"], round(0.3 * 0.3 * 100, 1), places=1)
+
+    def test_fair_odds_sont_inverse_proba(self):
+        bb = api._bet_builder(0.65, "A", "B")
+        p1 = bb["match"]["prob1"] / 100.0
+        self.assertAlmostEqual(bb["match"]["fair_odds1"], round(1.0 / p1, 2), places=2)
+
+    def test_match_odds_ajoute_ev(self):
+        bb = api._bet_builder(0.65, "A", "B", match_odds=(1.8, 2.2))
+        self.assertIn("ev1", bb["match"])
+        self.assertIn("ev2", bb["match"])
+        p1 = bb["match"]["prob1"] / 100.0
+        self.assertAlmostEqual(bb["match"]["ev1"], (p1 * 1.8 - 1.0) * 100, delta=0.2)
+
+    def test_sans_match_odds_pas_de_ev(self):
+        bb = api._bet_builder(0.65, "A", "B")
+        self.assertNotIn("ev1", bb["match"])
+
+    def test_best_market_est_un_marche_connu(self):
+        bb = api._bet_builder(0.9, "A", "B")
+        self.assertIn(bb["best_market"], ("match", "set2", "total_sets", "handicap"))
+        # Écart extrême (0.9) -> le marché dominant doit être très confiant.
+        self.assertGreater(bb["best_market_confidence"], 80.0)
+
+    def test_retro_compat_cles_existantes_preservees(self):
+        # Les clés déjà consommées par UpcomingScreen/PredictScreen doivent
+        # rester présentes avec la même signification après l'extension.
+        bb = api._bet_builder(0.6, "A", "B")
+        self.assertIn("prob1", bb["match"])
+        self.assertIn("prob2", bb["match"])
+        self.assertIn("prob1", bb["set2"])
+        self.assertIn("third_set_prob", bb)
+        self.assertIn("correct_score", bb)
+
+
+class TestBetBuilderLeg(unittest.TestCase):
+    def setUp(self):
+        api._MEM = {
+            "players": {
+                "Jannik Sinner": {"serve": 0.72, "return1": 0.55, "return2": 0.58, "recent": 1.0, "n": 321, "tour": "atp"},
+                "Carlos Alcaraz": {"serve": 0.70, "return1": 0.53, "return2": 0.56, "recent": 0.95, "n": 280, "tour": "atp"},
+            },
+            "elo": {"Jannik Sinner": 2112.0, "Carlos Alcaraz": 2085.0},
+            "elo_surface": {}, "elo_blend": 0.4,
+            "weights": {"serve": 1.2, "return1": 0.8, "return2": 0.6, "recent": 0.5},
+            "bias": 0.0, "metrics": {}, "datasets_loaded": [],
+        }
+
+    def test_replays_prediction_and_bet_builder(self):
+        n1, n2, bb = api._bet_builder_leg("Jannik Sinner", "Carlos Alcaraz")
+        self.assertEqual(n1, "Jannik Sinner")
+        self.assertEqual(n2, "Carlos Alcaraz")
+        self.assertIn("match", bb)
+        self.assertIn("best_market", bb)
+
 
 class TestExplain(unittest.TestCase):
     def setUp(self):

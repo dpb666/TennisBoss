@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import os
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify, request
 from flask_limiter import Limiter
@@ -805,25 +805,169 @@ def _best_of_for(tour: str, league_name: str) -> int:
     return 5 if any(s in label for s in _SLAMS) else 3
 
 
-def _bet_builder(p1_set: float, n1: str, n2: str) -> Dict[str, Any]:
+def _bet_builder(p1_set: float, n1: str, n2: str,
+                 match_odds: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
     """Dérive plusieurs marchés à partir de la proba du 1er set (best-of-3).
 
-    La proba match est calibrée (Platt ou temperature scaling).
+    La proba match est calibrée (Platt ou temperature scaling) — logique de
+    prédiction inchangée, ce qui suit n'est que de la combinatoire pure sur
+    cette proba déjà calculée (aucun nouveau modèle, aucune nouvelle donnée).
+
+    `match_odds` (cote réelle home/away), si fournie par l'appelant (seul le
+    marché "match" a une vraie cote bookmaker dans ce pipeline), ajoute l'EV
+    réelle dessus. Les autres marchés (set2, total_sets, handicap,
+    correct_score) n'ont pas de cote bookmaker disponible ici — seule la
+    cote JUSTE théorique (1/proba, `fair_odds*`) leur est associée.
+    `best_market`/`best_market_confidence` : heuristique de présentation
+    (le marché où un côté est le plus dominant) pour un badge "pari sûr" —
+    ne modifie aucune décision de pari réelle (is_value/EV de production
+    restent dans /api/value, intacts).
     """
     p = max(0.0, min(1.0, p1_set))
     q = 1.0 - p
     pm1 = _calib(_set_to_match_prob(p))   # calibration Platt appliquée ici
+    pm2 = 1.0 - pm1
+
+    def _fair(prob: float) -> Optional[float]:
+        return round(1.0 / prob, 2) if prob > 1e-6 else None
+
+    third_set = round(2 * p * q * 100, 1)
+    straight_sets_prob1 = p * p   # côté 1 gagne 2-0
+    straight_sets_prob2 = q * q   # côté 2 gagne 2-0
+
+    match_market: Dict[str, Any] = {
+        "prob1": round(pm1 * 100, 1), "prob2": round(pm2 * 100, 1),
+        "fair_odds1": _fair(pm1), "fair_odds2": _fair(pm2),
+    }
+    if match_odds and match_odds[0] and match_odds[1]:
+        ho, ao = match_odds
+        match_market["odds1"], match_market["odds2"] = ho, ao
+        match_market["ev1"] = round((pm1 * ho - 1.0) * 100, 1)
+        match_market["ev2"] = round((pm2 * ao - 1.0) * 100, 1)
+
+    set2_market = {
+        "prob1": round(p * 100, 1), "prob2": round(q * 100, 1),
+        "fair_odds1": _fair(p), "fair_odds2": _fair(q),
+    }
+    total_sets_market = {
+        # "over" = le match va au 3e set (plus de 2.5 sets joués)
+        "prob_over": third_set, "prob_under": round(100 - third_set, 1),
+        "fair_odds_over": _fair(third_set / 100.0), "fair_odds_under": _fair(1 - third_set / 100.0),
+    }
+    handicap_market = {
+        # Handicap -1.5 sets : ce côté gagne-t-il le match 2-0 (sans perdre un set) ?
+        "prob1": round(straight_sets_prob1 * 100, 1), "prob2": round(straight_sets_prob2 * 100, 1),
+        "fair_odds1": _fair(straight_sets_prob1), "fair_odds2": _fair(straight_sets_prob2),
+    }
+
+    candidates = {
+        "match": max(match_market["prob1"], match_market["prob2"]),
+        "set2": max(set2_market["prob1"], set2_market["prob2"]),
+        "total_sets": max(total_sets_market["prob_over"], total_sets_market["prob_under"]),
+        "handicap": max(handicap_market["prob1"], handicap_market["prob2"]),
+    }
+    best_market = max(candidates, key=candidates.get)
+
     return {
-        "match": {"prob1": round(pm1 * 100, 1), "prob2": round((1 - pm1) * 100, 1)},
-        "set2": {"prob1": round(p * 100, 1), "prob2": round(q * 100, 1)},
-        "third_set_prob": round(2 * p * q * 100, 1),
+        "match": match_market,
+        "set2": set2_market,
+        "total_sets": total_sets_market,
+        "handicap": handicap_market,
+        "third_set_prob": third_set,   # conservé (déjà consommé ailleurs, ex. UpcomingScreen)
         "correct_score": {
             f"{n1} 2-0": round(p * p * 100, 1),
             f"{n1} 2-1": round(2 * p * p * q * 100, 1),
             f"{n2} 2-1": round(2 * p * q * q * 100, 1),
             f"{n2} 2-0": round(q * q * 100, 1),
         },
+        "best_market": best_market,
+        "best_market_confidence": round(candidates[best_market], 1),
     }
+
+
+_COMBO_MARKETS = ("match", "set2", "total_sets", "handicap")
+
+
+def _bet_builder_leg(p1_raw: str, p2_raw: str, surface: Optional[str] = None) -> Tuple[str, str, Dict[str, Any]]:
+    """Rejoue predictor.predict() + _bet_builder() pour une paire de joueurs —
+    réutilise exactement le même chemin que /api/predict et /api/upcoming,
+    aucune nouvelle logique de prédiction. Sert au combiné (/api/bet-builder/combo)."""
+    n1 = _resolve(p1_raw) or p1_raw.strip()
+    n2 = _resolve(p2_raw) or p2_raw.strip()
+    f1 = features.feature_vector(features.get_profile(_MEM, n1))
+    f2 = features.feature_vector(features.get_profile(_MEM, n2))
+    r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
+    bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
+    return n1, n2, bb
+
+
+@app.route("/api/bet-builder/combo", methods=["POST"])
+def api_bet_builder_combo():
+    """Combine 2 à 4 pronostics déjà calculés en un combiné (parlay).
+
+    Body JSON: {"legs": [{"player1","player2","side":"player1"|"player2",
+    "market":"match"|"set2"|"total_sets"|"handicap" (défaut "match"),
+    "surface"?}, ...]}
+
+    Probabilité combinée = produit des probas individuelles (hypothèse
+    d'indépendance ENTRE MATCHS DIFFÉRENTS — standard pour un parlay, mais
+    ignore toute corrélation éventuelle, ex. même tournoi/mêmes conditions —
+    signalé dans la réponse). Cote combinée = produit des cotes justes
+    théoriques (1/proba) de chaque leg — pas une cote de bookmaker réelle
+    pour les marchés autres que "match" (aucune source de cotes pour
+    set2/total_sets/handicap dans ce pipeline).
+
+    Ne modifie aucune logique de prédiction/calibration/décision de pari :
+    réutilise predictor.predict()/_bet_builder() tels quels, purement de la
+    combinatoire sur des sorties déjà calculées ailleurs.
+    """
+    data = request.get_json(silent=True) or {}
+    legs_in = data.get("legs") or []
+    if not isinstance(legs_in, list) or not (2 <= len(legs_in) <= 4):
+        return jsonify({"error": "2 à 4 legs requis (champ 'legs')"}), 400
+
+    legs_out: List[Dict[str, Any]] = []
+    combined_prob = 1.0
+    combined_fair_odds = 1.0
+
+    for leg in legs_in:
+        p1_raw, p2_raw = leg.get("player1"), leg.get("player2")
+        side = leg.get("side")
+        market = leg.get("market", "match")
+        if market not in _COMBO_MARKETS:
+            market = "match"
+        if not p1_raw or not p2_raw or side not in ("player1", "player2"):
+            return jsonify({"error": "chaque leg requiert player1, player2, "
+                                    "side ('player1'|'player2')"}), 400
+        try:
+            n1, n2, bb = _bet_builder_leg(p1_raw, p2_raw, surface=leg.get("surface"))
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"prédiction impossible pour {p1_raw} vs {p2_raw} : {exc}"}), 422
+
+        if market == "total_sets":
+            prob_pct = bb["total_sets"]["prob_over"] if side == "player1" else bb["total_sets"]["prob_under"]
+        else:
+            prob_pct = bb[market]["prob1"] if side == "player1" else bb[market]["prob2"]
+
+        p = max(1e-6, min(1 - 1e-6, prob_pct / 100.0))
+        fair_odds_leg = round(1.0 / p, 3)
+        combined_prob *= p
+        combined_fair_odds *= fair_odds_leg
+        legs_out.append({
+            "player1": n1, "player2": n2, "side": side, "market": market,
+            "prob_pct": round(prob_pct, 1), "fair_odds": round(fair_odds_leg, 2),
+        })
+
+    return jsonify({
+        "legs": legs_out,
+        "n_legs": len(legs_out),
+        "combined_probability_pct": round(combined_prob * 100, 2),
+        "combined_fair_odds": round(combined_fair_odds, 2),
+        "note": ("Probabilité combinée = produit des probas individuelles (hypothèse "
+                 "d'indépendance entre matchs différents — ignore toute corrélation "
+                 "éventuelle). Cote combinée = cote JUSTE théorique, pas une cote de "
+                 "bookmaker réelle pour les marchés hors 'match'."),
+    })
 
 
 @app.get("/api/predict")
@@ -1371,7 +1515,13 @@ def api_upcoming():
             if _itf_unreliable:
                 r["confidence"] = min(r.get("confidence", 0.0), 0.15)
                 r["confidence_label"] = "très faible (ITF / données insuffisantes)"
-            bb = _bet_builder(r["prob1"] / 100.0, n1, n2)
+            # Cote réelle (si dispo) récupérée AVANT _bet_builder pour lui passer
+            # match_odds — un seul appel _odds_for, réutilisé pour item["odds"]
+            # ci-dessous (pas de requête odds-api supplémentaire).
+            odds_result = _odds_for(odds_index, f["player1"], f["player2"]) if odds_index is not None else None
+            match_odds_tuple = ((odds_result["home_odds"], odds_result["away_odds"])
+                                if odds_result else None)
+            bb = _bet_builder(r["prob1"] / 100.0, n1, n2, match_odds=match_odds_tuple)
             fs_prob = max(r["prob1"], r["prob2"]) / 100.0
             fair_odds = round(1.0 / fs_prob, 2) if fs_prob > 0 else None
             item["prediction"] = {
@@ -1388,9 +1538,10 @@ def api_upcoming():
                 "set2_prob1": bb["set2"]["prob1"], "set2_prob2": bb["set2"]["prob2"],
                 "total_sets_over": bb["third_set_prob"],
                 "correct_score_probs": bb["correct_score"],
+                "bet_builder": bb,
             }
-            if odds_index is not None:
-                item["odds"] = _odds_for(odds_index, f["player1"], f["player2"])
+            if odds_result is not None:
+                item["odds"] = odds_result
 
             # ── Contexte pari : favori modèle vs marché ───────────────────────
             odds_item = item.get("odds")

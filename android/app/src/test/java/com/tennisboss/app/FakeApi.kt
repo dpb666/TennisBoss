@@ -4,6 +4,8 @@ import com.tennisboss.app.data.CalibrationResponse
 import com.tennisboss.app.data.ChatRequest
 import com.tennisboss.app.data.ChatResponse
 import com.tennisboss.app.data.ClvResponse
+import com.tennisboss.app.data.ComboRequest
+import com.tennisboss.app.data.ComboResult
 import com.tennisboss.app.data.DeviceRegisterRequest
 import com.tennisboss.app.data.DeviceRegisterResponse
 import com.tennisboss.app.data.FollowPlayerRequest
@@ -60,6 +62,7 @@ class FakeApi(
     private val intelligenceStatsResponse: IntelligenceStats? = null,
     private val learnerStatsResponse: LearnerStats? = null,
     private val scannerStatusResponse: ScannerStatus? = null,
+    private val comboResultResponse: ComboResult? = null,
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
@@ -68,6 +71,11 @@ class FakeApi(
     override suspend fun predict(p1: String, p2: String): PredictResponse {
         throwError?.let { throw it }
         return predictResponse ?: throw NotImplementedError("predictResponse non fourni")
+    }
+
+    override suspend fun betBuilderCombo(request: ComboRequest): ComboResult {
+        throwError?.let { throw it }
+        return comboResultResponse ?: throw NotImplementedError("comboResultResponse non fourni")
     }
 
     override suspend fun players(q: String, tour: String?, limit: Int): PlayersResponse {

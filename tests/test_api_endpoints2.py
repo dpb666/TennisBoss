@@ -536,3 +536,57 @@ def test_upload_returns_extracted_text():
     data = resp.get_json()
     assert resp.status_code == 200
     assert data["extracted_text"] == "contenu extrait"
+
+
+# ─── bet-builder/combo ────────────────────────────────────────────────────────
+
+def test_combo_requires_2_to_4_legs():
+    resp = _client().post("/api/bet-builder/combo", json={"legs": [{"player1": "A", "player2": "B", "side": "player1"}]})
+    assert resp.status_code == 400
+
+
+def test_combo_requires_valid_side():
+    legs = [
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "bogus"},
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player1"},
+    ]
+    resp = _client().post("/api/bet-builder/combo", json={"legs": legs})
+    assert resp.status_code == 400
+
+
+def test_combo_combines_two_legs():
+    legs = [
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player1", "market": "match"},
+        {"player1": "Carlos Alcaraz", "player2": "Jannik Sinner", "side": "player2", "market": "match"},
+    ]
+    resp = _client().post("/api/bet-builder/combo", json={"legs": legs})
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["n_legs"] == 2
+    assert len(data["legs"]) == 2
+    # Proba combinée = produit des probas individuelles.
+    expected = (data["legs"][0]["prob_pct"] / 100.0) * (data["legs"][1]["prob_pct"] / 100.0)
+    assert abs(data["combined_probability_pct"] / 100.0 - expected) < 1e-4
+
+
+def test_combo_defaults_unknown_market_to_match():
+    legs = [
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player1", "market": "nonsense"},
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player2"},
+    ]
+    resp = _client().post("/api/bet-builder/combo", json={"legs": legs})
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["legs"][0]["market"] == "match"
+
+
+def test_combo_supports_total_sets_market():
+    legs = [
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player1", "market": "total_sets"},
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player2", "market": "handicap"},
+    ]
+    resp = _client().post("/api/bet-builder/combo", json={"legs": legs})
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["legs"][0]["market"] == "total_sets"
+    assert data["legs"][1]["market"] == "handicap"
