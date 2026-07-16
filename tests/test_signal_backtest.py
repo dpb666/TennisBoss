@@ -194,5 +194,89 @@ class TestBacktestClutchVsElo(SignalBacktestTestCase):
             self.assertLessEqual(result["clutch_win_rate_elo_close"], 1.0)
 
 
+class TestEceAndConfidenceHelpers(unittest.TestCase):
+    def test_ece_perfect_calibration_is_zero(self):
+        # 10 points par bin, mean_pred == mean_actual dans chaque bin.
+        rows = []
+        for i in range(10):
+            p = (i + 0.5) / 10
+            n_pos = round(p * 10)
+            rows += [(p, 1.0)] * n_pos + [(p, 0.0)] * (10 - n_pos)
+        ece, curve = sb._ece(rows, n_bins=10)
+        self.assertLessEqual(ece, 0.05)
+        self.assertEqual(len(curve), 10)
+
+    def test_ece_empty_returns_none(self):
+        ece, curve = sb._ece([])
+        self.assertIsNone(ece)
+        self.assertEqual(curve, [])
+
+    def test_confidence_distribution_extreme_probs_are_high_confidence(self):
+        rows = [(0.95, 1.0)] * 10 + [(0.05, 0.0)] * 10
+        dist = sb._confidence_distribution(rows)
+        self.assertEqual(dist["n"], 20)
+        self.assertGreater(dist["mean_confidence"], 0.8)
+
+
+class TestPairedZtestAndBootstrap(unittest.TestCase):
+    def test_paired_ztest_all_zero_diffs_not_significant(self):
+        z, p = sb._paired_ztest([0.0] * 50)
+        self.assertEqual(z, 0.0)
+        self.assertEqual(p, 1.0)
+
+    def test_paired_ztest_clear_positive_effect_is_significant(self):
+        # Diffs positifs, faible variance -> z élevé, p petit.
+        diffs = [0.01 + 0.0001 * (i % 3 - 1) for i in range(200)]
+        z, p = sb._paired_ztest(diffs)
+        self.assertGreater(z, 3)
+        self.assertLess(p, 0.01)
+
+    def test_bootstrap_ci_brackets_the_mean(self):
+        diffs = [0.01] * 100
+        lo, hi = sb._bootstrap_ci(diffs, n_boot=200)
+        self.assertLessEqual(lo, 0.01)
+        self.assertGreaterEqual(hi, 0.01)
+
+    def test_bootstrap_ci_empty_returns_none(self):
+        lo, hi = sb._bootstrap_ci([])
+        self.assertIsNone(lo)
+        self.assertIsNone(hi)
+
+
+class TestBacktestClutchBlendWalkforward(SignalBacktestTestCase):
+    def test_too_few_matches_returns_note(self):
+        result = sb.backtest_clutch_blend_walkforward()
+        self.assertIn("note", result)
+        self.assertEqual(result["n_matches"], 0)
+
+    def test_runs_end_to_end_and_never_favors_unproven_signal_by_construction(self):
+        # 300 matchs neutres (pas de vrai signal clutch : BP saved/faced tirés
+        # de façon identique pour tout le monde) -> le blend ne doit RIEN
+        # apporter de systématique ; sert surtout de test de mécanique
+        # (pas de crash, structure de sortie complète, walk-forward strict).
+        import bot.config as config
+        from bot import db
+        with db.connect() as conn:
+            for i in range(300):
+                date = f"2026-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}"
+                winner, loser = f"P{i}", f"Q{i}"
+                conn.execute(
+                    "INSERT INTO matches (id,date,tour,winner,loser,w_serve,w_return1,w_return2,"
+                    "l_serve,l_return1,l_return2,surface,margin,"
+                    "w_bp_saved,w_bp_faced,l_bp_saved,l_bp_faced) VALUES "
+                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (f"m{i}", date, "atp", winner, loser, 0.6, 0.5, 0.5, 0.55, 0.5, 0.5,
+                     "hard", 0, 10.0, 20.0, 10.0, 20.0),
+                )
+        result = sb.backtest_clutch_blend_walkforward(n_folds=3, min_bp_faced=15)
+        self.assertEqual(result["recommendation"], "REJECT")
+        self.assertIn("blend_0.05", result["variants"])
+        self.assertIn("blend_0.20", result["variants"])
+        for variant in result["variants"].values():
+            self.assertIn("logloss", variant)
+            self.assertIn("bootstrap_ci95_mean_delta_logloss", variant)
+            self.assertIn("consistent_across_folds", variant)
+
+
 if __name__ == "__main__":
     unittest.main()

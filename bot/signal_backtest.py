@@ -38,7 +38,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import calibrate, config, db, elo as elo_mod, features, intelligence_layer
+from . import calibrate, config, db, elo as elo_mod, features, intelligence_layer, memory, predictor
 from .log import log
 from .ml_prep import features as ml_features
 
@@ -495,6 +495,315 @@ def backtest_clutch_vs_elo(min_bp_faced: float = None, diff_threshold: float = 0
         "baseline": 0.5,
         "verdict": verdict,
     }
+
+
+def _clamped_logit(p: float, eps: float = 0.03) -> float:
+    p = max(eps, min(1 - eps, p))
+    return math.log(p / (1 - p))
+
+
+def _ece(rows: List[Tuple[float, float]], n_bins: int = 10) -> Tuple[Optional[float], List[Dict[str, Any]]]:
+    """Expected Calibration Error (bins de largeur égale sur [0,1]) + courbe
+    de fiabilité (mean_pred vs mean_actual par bin, pour tracé/rapport)."""
+    if not rows:
+        return None, []
+    bins: List[List[Tuple[float, float]]] = [[] for _ in range(n_bins)]
+    for p, y in rows:
+        idx = min(int(p * n_bins), n_bins - 1)
+        bins[idx].append((p, y))
+    n_total = len(rows)
+    ece = 0.0
+    curve = []
+    for i, b in enumerate(bins):
+        lo, hi = i / n_bins, (i + 1) / n_bins
+        if not b:
+            curve.append({"bin": f"{lo:.1f}-{hi:.1f}", "n": 0, "mean_pred": None, "mean_actual": None})
+            continue
+        mean_pred = sum(p for p, _ in b) / len(b)
+        mean_actual = sum(y for _, y in b) / len(b)
+        ece += (len(b) / n_total) * abs(mean_pred - mean_actual)
+        curve.append({"bin": f"{lo:.1f}-{hi:.1f}", "n": len(b),
+                      "mean_pred": round(mean_pred, 4), "mean_actual": round(mean_actual, 4)})
+    return round(ece, 4), curve
+
+
+def _confidence_distribution(rows: List[Tuple[float, float]], n_bins: int = 5) -> Dict[str, Any]:
+    """Distribution de la confiance |p-0.5|*2 (0=pile, 1=certain)."""
+    if not rows:
+        return {"n": 0}
+    confs = [abs(p - 0.5) * 2 for p, _ in rows]
+    bins = [0] * n_bins
+    for c in confs:
+        idx = min(int(c * n_bins), n_bins - 1)
+        bins[idx] += 1
+    return {
+        "n": len(rows),
+        "mean_confidence": round(sum(confs) / len(confs), 4),
+        "buckets": {f"{i/n_bins:.1f}-{(i+1)/n_bins:.1f}": bins[i] for i in range(n_bins)},
+    }
+
+
+def _paired_ztest(diffs: List[float]) -> Tuple[Optional[float], Optional[float]]:
+    """Test bilatéral H0: moyenne(diffs)=0 (approximation normale, CLT — n
+    grand ici). diffs = logloss_baseline - logloss_variant par match ;
+    positif => la variante réduit la perte."""
+    n = len(diffs)
+    if n < 2:
+        return None, None
+    mean = sum(diffs) / n
+    var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
+    if var <= 0:
+        return (0.0, 1.0) if mean == 0 else (None, None)
+    se = math.sqrt(var / n)
+    z = round(mean / se, 3)
+    p = round(math.erfc(abs(z) / math.sqrt(2)), 4)
+    return z, p
+
+
+def _bootstrap_ci(diffs: List[float], n_boot: int = 2000, alpha: float = 0.05,
+                  seed: int = 42) -> Tuple[Optional[float], Optional[float]]:
+    """IC bootstrap (percentile) sur la moyenne des diffs — pas de scipy/numpy
+    dans ce projet, ré-échantillonnage stdlib (random.Random, seed fixe pour
+    reproductibilité)."""
+    import random
+    n = len(diffs)
+    if n == 0:
+        return None, None
+    rng = random.Random(seed)
+    means = []
+    for _ in range(n_boot):
+        means.append(sum(diffs[rng.randrange(n)] for _ in range(n)) / n)
+    means.sort()
+    lo_idx = max(0, int(alpha / 2 * n_boot))
+    hi_idx = min(n_boot - 1, int((1 - alpha / 2) * n_boot) - 1)
+    return round(means[lo_idx], 5), round(means[hi_idx], 5)
+
+
+def backtest_clutch_blend_walkforward(
+    blend_weights: Tuple[float, ...] = (0.05, 0.10, 0.15, 0.20),
+    min_bp_faced: float = None,
+    n_folds: int = 5,
+    n_bins_ece: int = 10,
+) -> Dict[str, Any]:
+    """Validation walk-forward complète : le predictor de PRODUCTION (poids/
+    biais/elo_blend gelés, tels que chargés depuis memory.json — cette
+    fonction ne re-fit RIEN) obtient-il une meilleure log-loss/Brier/ECE
+    hors-échantillon en ajoutant un terme clutch FAIBLE au logit, à
+    plusieurs poids de blend candidats ?
+
+    Découpage en `n_folds` blocs CHRONOLOGIQUES (walk-forward strict, jamais
+    de shuffle). Le bloc 0 sert de warm-up (accumulation EMA/ELO/clutch
+    initiale) et n'est jamais évalué — pour chaque match des blocs suivants,
+    l'état utilisé (profils EMA, ELO global+surface, taux de BP sauvées) est
+    reconstruit UNIQUEMENT à partir des matchs strictement antérieurs
+    (réutilise bot.features.update_profile et
+    bot.ml_prep.features.update_elo_state — code de production, pas une
+    réimplémentation).
+
+    Le baseline et chaque variante blend sont évalués sur EXACTEMENT le même
+    ensemble de matchs par fold (comparaison appariée) : quand le signal
+    clutch n'est pas disponible (historique BP insuffisant), la variante
+    blend est strictement identique au baseline pour ce match (le blend ne
+    peut donc jamais être *pénalisé* par un manque de données, seulement
+    jugé sur les matchs où il s'exprime réellement).
+
+    z = score(feat1) - score(feat2) + biais + elo_logit(...) + poids_blend *
+    (logit(taux_bp_p1) - logit(taux_bp_p2))  [logit clampé, eps=0.03]
+
+    Limite assumée : le baseline ELO ici est global+surface uniquement
+    (rejoué walk-forward depuis zéro) — la production mélange aussi un ELO
+    "forme récente 180j" (elo_recent) légèrement plus riche. La comparaison
+    RELATIVE (avec vs sans clutch) reste valide : les deux variantes
+    partagent rigoureusement le même baseline, seul le terme clutch diffère.
+
+    Décision : le signal est rejeté par défaut. Il n'est retenu (au moins
+    comme candidat expérimental) que si au moins un poids de blend améliore
+    la log-loss de façon CONSISTANTE (tous les folds évalués) ET
+    STATISTIQUEMENT significative (p<0.05 test apparié ET IC bootstrap 95%
+    de la différence de log-loss excluant zéro).
+    """
+    min_bp_faced = (min_bp_faced if min_bp_faced is not None
+                    else float(intelligence_layer.CLUTCH_MIN_BP_FACED))
+    alpha = config.DEFAULT_CONFIG["ema_alpha"]
+
+    prod_mem = memory.load()
+    weights = dict(prod_mem.get("weights") or {})
+    bias = float(prod_mem.get("bias") or 0.0)
+    elo_blend = float(prod_mem.get("elo_blend", predictor.ELO_BLEND))
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT date, tour, winner, loser, w_serve, w_return1, w_return2, "
+            "l_serve, l_return1, l_return2, surface, margin, "
+            "w_bp_saved, w_bp_faced, l_bp_saved, l_bp_faced FROM matches "
+            "ORDER BY REPLACE(date,'-','') ASC, id ASC"
+        ).fetchall()
+
+    n_total = len(rows)
+    if n_total < 200 or n_folds < 2:
+        return {"n_matches": n_total, "n_folds": n_folds,
+                "note": "Pas assez de matchs (ou n_folds invalide) pour un walk-forward multi-blocs fiable."}
+
+    fold_size = max(1, n_total // n_folds)
+
+    def fold_of(i: int) -> int:
+        return min(i // fold_size, n_folds - 1)
+
+    prof_mem: Dict[str, Any] = {"players": {}}
+    elo_ratings, elo_surface, elo_n, elo_surf_n = ml_features.init_elo_state()
+    clutch_acc: Dict[str, List[float]] = {}
+
+    baseline_by_fold: List[List[Tuple[float, float]]] = [[] for _ in range(n_folds)]
+    blend_by_fold: Dict[float, List[List[Tuple[float, float]]]] = {
+        bw: [[] for _ in range(n_folds)] for bw in blend_weights
+    }
+    n_clutch_avail_by_fold = [0] * n_folds
+    n_matches_by_fold = [0] * n_folds
+
+    for i, r in enumerate(rows):
+        fold = fold_of(i)
+        w_name, l_name = r["winner"], r["loser"]
+        surface = (r["surface"] or "").lower()
+
+        p1, p2, y = ml_features.orient_players(w_name, l_name)
+        feat1 = features.get_profile(prof_mem, p1)
+        feat2 = features.get_profile(prof_mem, p2)
+        score1 = predictor.weighted_score(weights, feat1)
+        score2 = predictor.weighted_score(weights, feat2)
+        elo_like_mem = {"elo": elo_ratings, "elo_surface": elo_surface, "elo_blend": elo_blend}
+        z = (score1 - score2) + bias + predictor.elo_logit(elo_like_mem, p1, p2, surface)
+        p_baseline = predictor._sigmoid(z)
+
+        if fold > 0:  # bloc 0 = warm-up, jamais évalué
+            baseline_by_fold[fold].append((p_baseline, float(y)))
+            n_matches_by_fold[fold] += 1
+
+        aw, al = clutch_acc.get(p1), clutch_acc.get(p2)
+        clutch_diff = 0.0
+        if aw and al and aw[1] >= min_bp_faced and al[1] >= min_bp_faced:
+            clutch_diff = _clamped_logit(aw[0] / aw[1]) - _clamped_logit(al[0] / al[1])
+            if fold > 0:
+                n_clutch_avail_by_fold[fold] += 1
+
+        if fold > 0:
+            for bw in blend_weights:
+                p_blend = predictor._sigmoid(z + bw * clutch_diff)
+                blend_by_fold[bw][fold].append((p_blend, float(y)))
+
+        # Mise à jour APRÈS évaluation (jamais avant) : évite toute fuite.
+        w_perf = {"serve": r["w_serve"] or 0.5, "return1": r["w_return1"] or 0.5, "return2": r["w_return2"] or 0.5}
+        l_perf = {"serve": r["l_serve"] or 0.5, "return1": r["l_return1"] or 0.5, "return2": r["l_return2"] or 0.5}
+        features.update_profile(prof_mem, w_name, w_perf, True, alpha, r["tour"])
+        features.update_profile(prof_mem, l_name, l_perf, False, alpha, r["tour"])
+        ml_features.update_elo_state(
+            {"winner_name": w_name, "loser_name": l_name, "surface": surface, "margin": r["margin"]},
+            elo_ratings, elo_surface, elo_n, elo_surf_n,
+        )
+        clutch_acc.setdefault(w_name, [0.0, 0.0])
+        clutch_acc.setdefault(l_name, [0.0, 0.0])
+        clutch_acc[w_name][0] += r["w_bp_saved"] or 0.0
+        clutch_acc[w_name][1] += r["w_bp_faced"] or 0.0
+        clutch_acc[l_name][0] += r["l_bp_saved"] or 0.0
+        clutch_acc[l_name][1] += r["l_bp_faced"] or 0.0
+
+    eval_folds = list(range(1, n_folds))  # fold 0 = warm-up
+    baseline_all = [pt for f in eval_folds for pt in baseline_by_fold[f]]
+    n_eval = len(baseline_all)
+    if n_eval == 0:
+        return {"n_matches": n_total, "n_folds": n_folds,
+                "note": "Aucun match évaluable après warm-up (augmenter les données ou réduire n_folds)."}
+
+    baseline_logloss_by_fold = [round(_logloss(baseline_by_fold[f]), 4) for f in eval_folds]
+    baseline_ece, baseline_curve = _ece(baseline_all, n_bins_ece)
+
+    result: Dict[str, Any] = {
+        "n_matches_total": n_total,
+        "n_folds": n_folds,
+        "n_evaluated": n_eval,
+        "min_bp_faced": min_bp_faced,
+        "baseline": {
+            "logloss": round(_logloss(baseline_all), 4),
+            "logloss_by_fold": baseline_logloss_by_fold,
+            "brier": round(_brier(baseline_all), 4),
+            "ece": baseline_ece,
+            "reliability_curve": baseline_curve,
+            "confidence_distribution": _confidence_distribution(baseline_all),
+        },
+        "note_roi": ("ROI non évaluable ici : la table `matches` (historique de résultats) ne contient "
+                     "pas de cotes de marché. settled_matches en a (paris réels), mais n=94 est bien trop "
+                     "petit pour un walk-forward de blend fiable — non utilisé pour cette validation."),
+        "variants": {},
+    }
+
+    best_weight = None
+    best_logloss = result["baseline"]["logloss"]
+    any_integrate_candidate = False
+
+    for bw in blend_weights:
+        variant_all = [pt for f in eval_folds for pt in blend_by_fold[bw][f]]
+        variant_logloss_by_fold = [round(_logloss(blend_by_fold[bw][f]), 4) for f in eval_folds]
+        variant_ece, variant_curve = _ece(variant_all, n_bins_ece)
+
+        # Diffs appariés par match (logloss baseline - logloss variant ; positif = variant meilleure)
+        per_match_diffs = []
+        for f in eval_folds:
+            for (pb, yb), (pv, yv) in zip(baseline_by_fold[f], blend_by_fold[bw][f]):
+                lb = -(yb * math.log(max(_EPS, pb)) + (1 - yb) * math.log(max(_EPS, 1 - pb)))
+                lv = -(yv * math.log(max(_EPS, pv)) + (1 - yv) * math.log(max(_EPS, 1 - pv)))
+                per_match_diffs.append(lb - lv)
+
+        z_score, p_value = _paired_ztest(per_match_diffs)
+        ci_lo, ci_hi = _bootstrap_ci(per_match_diffs)
+
+        deltas_by_fold = [round(baseline_logloss_by_fold[k] - variant_logloss_by_fold[k], 4)
+                          for k in range(len(eval_folds))]
+        consistent = all(d > 0 for d in deltas_by_fold)
+        significant = (p_value is not None and p_value < 0.05
+                       and ci_lo is not None and ci_lo > 0)
+
+        variant_result = {
+            "logloss": round(_logloss(variant_all), 4),
+            "logloss_by_fold": variant_logloss_by_fold,
+            "brier": round(_brier(variant_all), 4),
+            "ece": variant_ece,
+            "reliability_curve": variant_curve,
+            "confidence_distribution": _confidence_distribution(variant_all),
+            "delta_logloss_by_fold_vs_baseline": deltas_by_fold,
+            "mean_delta_logloss": round(sum(per_match_diffs) / len(per_match_diffs), 5) if per_match_diffs else None,
+            "paired_ztest_z": z_score,
+            "paired_ztest_p": p_value,
+            "bootstrap_ci95_mean_delta_logloss": [ci_lo, ci_hi],
+            "consistent_across_folds": consistent,
+            "statistically_significant": significant,
+            "n_matches_with_clutch_signal": sum(n_clutch_avail_by_fold[f] for f in eval_folds),
+        }
+        result["variants"][f"blend_{bw:.2f}"] = variant_result
+
+        if consistent and significant and variant_result["logloss"] < best_logloss:
+            any_integrate_candidate = True
+            best_logloss = variant_result["logloss"]
+            best_weight = bw
+
+    if any_integrate_candidate:
+        result["recommendation"] = "INTEGRATE_AS_EXPERIMENTAL"
+        result["verdict"] = (
+            f"Poids {best_weight:.2f} : amélioration de log-loss consistante (tous les folds) et "
+            f"statistiquement significative (IC bootstrap 95% > 0). Candidat pour un déploiement "
+            f"EXPÉRIMENTAL (feature-flaggé, pas dans predictor.predict() en direct) avec suivi ROI/CLV "
+            f"réel avant généralisation — l'échantillon settled_matches (paris réels) reste trop petit "
+            f"pour valider le ROI in vivo à ce stade."
+        )
+    else:
+        result["recommendation"] = "REJECT"
+        result["verdict"] = (
+            "Aucun poids de blend testé n'améliore la log-loss de façon à la fois consistante sur "
+            "tous les folds ET statistiquement significative (IC bootstrap 95%). Conforme à la règle "
+            "du projet : aucun signal n'entre dans predictor.predict() sans preuve walk-forward solide — "
+            "le résidu clutch identifié par backtest_clutch_vs_elo() est réel mais trop faible/bruité "
+            "pour justifier une intégration, même expérimentale, à ce stade. Continuer d'accumuler des "
+            "données (rejouer cette analyse périodiquement) plutôt que d'intégrer sur cette base."
+        )
+    return result
 
 
 def run_all() -> Dict[str, Any]:
