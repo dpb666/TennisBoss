@@ -19,7 +19,7 @@ TennisBoss est **production-ready côté Android** et **fonctionnel côté backe
 | P0-1 | **Scheduler sans ingest rankings hebdo** | `ranking_feeder.ingest()` existe (`run.py ingest-rankings`) mais le worker 24/7 ne l'appelle pas → dérive des classements | **Fixé cette session** (`job_rankings`) |
 | P0-2 | **Pas de rapport calibration automatique** | `calibration-report` CLI existe mais rien ne l'exécute → métriques ROI/CLV non suivies sans action manuelle | **Fixé cette session** (`job_calibration_report`) |
 | P0-3 | **OpenAPI incomplet Phase 12** | `/api/match/intelligence`, `/api/engineer/today`, `/api/bet-history/*`, `/api/clv/weekly` absents de Swagger | **Fixé cette session** |
-| P0-4 | **Deploy prod en attente** | Logs WARN api.py (#7), watchlist loop, endpoints Phase 12 non actifs sans restart service | **Documenté — OK utilisateur requis** |
+| P0-4 | **Deploy prod en attente** | Logs WARN api.py (#7), watchlist loop, endpoints Phase 12 non actifs sans restart service | **Résolu 2026-07-15** — `tennisboss-bot.service` tournait déjà le code à jour (vérifié en direct via `/api/engineer/today`, `/api/bet-history/stats`). Mais `tennisboss-scheduler.service` tournait du code du 13 juillet (avant tout Phase 12) — `job_rankings`/`job_calibration_report`/`job_bet_history_backfill` codés et testés mais **jamais exécutés en pratique**. Redémarré (accord utilisateur) : les 11 jobs sont maintenant confirmés actifs dans les logs (`bet_history 4h30/j, rankings Mon 3h, calibration Sun 22h`). |
 
 ---
 
