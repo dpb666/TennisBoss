@@ -277,3 +277,6 @@ BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 )
+
+# Track Record : mise unitaire analytique (ROI/yield affichés, n'affecte pas les paris).
+TRACK_RECORD_STAKE = float(os.environ.get("TENNISBOSS_TRACK_RECORD_STAKE", "1.0"))
