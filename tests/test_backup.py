@@ -18,7 +18,12 @@ from bot import backup, config, db
 
 class TestBackup(unittest.TestCase):
     def setUp(self):
-        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        fd, self._path = tempfile.mkstemp(suffix=".db")
+        # Fermer le fd tout de suite : sqlite/db.init() n'utilise que le CHEMIN,
+        # et un fd resté ouvert rend os.remove/os.replace impossibles sous
+        # Windows (WinError 32) — c'était le "flake Windows" documenté de
+        # test_backup_now_returns_none_without_source_db.
+        os.close(fd)
         self._save_db = config.DB_FILE
         config.DB_FILE = self._path
         db.init()
@@ -29,9 +34,13 @@ class TestBackup(unittest.TestCase):
 
     def tearDown(self):
         config.DB_FILE = self._save_db
-        os.close(self._fd)
-        if os.path.exists(self._path):
-            os.remove(self._path)
+        # -wal/-shm : sidecars WAL éventuels laissés par sqlite.
+        for path in (self._path, self._path + "-wal", self._path + "-shm"):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass  # verrou résiduel Windows — fichier temp nettoyé par l'OS
         backup.BACKUP_DIR = self._save_backup_dir
 
     def test_backup_now_creates_a_consistent_copy(self):

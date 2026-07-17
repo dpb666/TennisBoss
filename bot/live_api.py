@@ -52,8 +52,21 @@ def _cached_request(params: Dict[str, Any], ttl: float) -> Optional[Any]:
     return payload
 
 
-def load_env() -> None:
-    """Charge les paires CLE=VALEUR du fichier .env dans l'environnement."""
+# Clés d'authentification de NOTRE propre API : chargées uniquement par les
+# points d'entrée serveur (api.serve, include_auth=True). Les injecter en
+# effet de bord de n'importe quel fetch_* polluait os.environ en cours de
+# process : un simple appel live_api pouvait activer l'auth à retardement
+# (401 constatés dans la suite de tests, 2026-07-16). En prod, systemd charge
+# déjà tout le .env via EnvironmentFile= — ce chemin n'est qu'un confort dev.
+_AUTH_KEYS = {"TENNISBOSS_API_TOKEN", "TENNISBOSS_ADMIN_TOKEN"}
+
+
+def load_env(include_auth: bool = False) -> None:
+    """Charge les paires CLE=VALEUR du fichier .env dans l'environnement.
+
+    Par défaut les clés d'auth TennisBoss (_AUTH_KEYS) sont exclues — seuls
+    les points d'entrée serveur les chargent explicitement (include_auth=True).
+    """
     path = os.path.join(config.ROOT, ".env")
     if not os.path.exists(path):
         return
@@ -63,7 +76,10 @@ def load_env() -> None:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, val = line.partition("=")
-            os.environ.setdefault(key.strip(), val.strip())
+            key = key.strip()
+            if not include_auth and key in _AUTH_KEYS:
+                continue
+            os.environ.setdefault(key, val.strip())
 
 
 def _key(name: str, cfg: Dict[str, Any]) -> Optional[str]:

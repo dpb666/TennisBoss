@@ -105,7 +105,12 @@ def _rows_to_csv(rows: list) -> str:
 
 class IngestTestCase(unittest.TestCase):
     def setUp(self):
-        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        fd, self._path = tempfile.mkstemp(suffix=".db")
+        # fd fermé immédiatement : un fd resté ouvert bloque os.replace/os.remove
+        # sous Windows (WinError 32). memory.save() faisait alors silencieusement
+        # échouer son os.replace -> mem["processed"] jamais persisté -> le 2e
+        # ingest ré-entraînait le même match ("flake Windows" documenté).
+        os.close(fd)
         self._save_db = config.DB_FILE
         config.DB_FILE = self._path
         db.init()
@@ -117,16 +122,26 @@ class IngestTestCase(unittest.TestCase):
         # gitignored : sur un checkout CI propre il n'existe pas encore
         # (contrairement à une machine de dev avec un état de prod local).
         os.makedirs(config.STATE_DIR, exist_ok=True)
-        self._mem_fd, self._mem_path = tempfile.mkstemp(suffix=".json", dir=config.STATE_DIR)
+        mem_fd, self._mem_path = tempfile.mkstemp(suffix=".json", dir=config.STATE_DIR)
+        # "{}" et pas un fichier vide : memory.load() sur un fichier vide le
+        # considère corrompu et le renomme *.json.corrupt — c'est exactement
+        # l'origine des dizaines de tmp*.json.corrupt accumulés dans state/
+        # (un par exécution de cette suite). "{}" se charge proprement (les
+        # clés manquantes sont complétées par default_memory()).
+        os.write(mem_fd, b"{}")
+        os.close(mem_fd)
         config.MEMORY_FILE = self._mem_path
 
     def tearDown(self):
         config.DB_FILE = self._save_db
         config.MEMORY_FILE = self._save_mem
-        os.close(self._fd)
-        os.remove(self._path)
-        os.close(self._mem_fd)
-        os.remove(self._mem_path)
+        for path in (self._path, self._path + "-wal", self._path + "-shm",
+                     self._mem_path):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass  # verrou résiduel Windows — fichier temp nettoyé par l'OS
 
 
 class TestIngest(IngestTestCase):
