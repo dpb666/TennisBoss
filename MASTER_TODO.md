@@ -111,7 +111,7 @@ _Generated from `PROJECT_STATUS.md` (2026-07-13). Every task references real fil
 - **Priority**: High (parieur — budget odds-api concentré sur les matchs suivis)
 - **Status**: **Done — 2026-07-15.**
 - **API**: `POST /api/match/follow`, `POST /api/match/unfollow`, `GET /api/matches/followed` (DB table `followed_matches` existed, endpoints were missing).
-- **Background loop**: `_followed_matches_refresh_loop()` in `bot/api.py` — refresh 60s, TTL 30s live / 60s pré-match, alertes steam via `realtime_alerts.on_odds_move` si mouvement ≥ 3%.
+- **Background loop**: `bot/workers/match_refresh_worker.py` (shim: `api._followed_matches_refresh_loop`) — refresh 60s, TTL 30s live / 60s pré-match, alertes steam ≥ 3%.
 - **Android UI**: not wired yet — joueurs suivis déjà dans `PlayersScreen.kt`; bouton match à ajouter sur `MatchDetailScreen` si souhaité.
 - **Usage**:
   ```bash
@@ -299,6 +299,7 @@ this work (5/10 required fields were previously unlogged).
 See **`docs/AI_ASSISTANT_ARCHITECTURE.md`** for the full 5-phase plan
 (chat tools, project memory, self-learning, folder reorg, design system)
 and its "Implementation log" section for what's actually shipped.
+**Dev audit (2026-07-16):** `docs/DEVELOPMENT_AUDIT_2026-07-16.md`.
 
 | Item | Status |
 |------|--------|
@@ -358,3 +359,83 @@ Commit `44beaa5`. `predictor.py`/`calibrate.py`/`/api/value` inchangés — pure
 | Android : `BetBuilderView.kt` étendu + nouvel onglet Combo (Value > Combo) | **Done** |
 | Tests (21 nouveaux : 13 backend + 8 Android) | **Done** — 533/533 backend, 61/61 Android |
 | Vérifié en direct sur émulateur (service redémarré, accord utilisateur) | **Done** |
+
+---
+
+## Stratégie parieur — benchmark tipsters (2026-07-16)
+
+Recherche + comparaison : **`docs/TIPSTER_COMPARISON.md`** (CLV-first, flat stake, line shopping Pinnacle, n≥200 avant Kelly).
+
+| Priorité | Ajout analytique (predictor gelé) | Status |
+|----------|-----------------------------------|--------|
+| Haute | Dashboard CLV utilisateur (`clv_log`) | Planned |
+| Haute | Alerte line shopping vs Pinnacle | Planned |
+| Haute | Page track record publique (`bet_history`) | **Done** — API `/api/track-record/*`, voir `docs/TRACK_RECORD.md` |
+| Moyenne | Filtre favori–longshot (FLB) | Planned |
+| Moyenne | Calculateur bankroll flat / ¼ Kelly | Planned |
+| Moyenne | Rapport CLV par temps-avant-match | Planned |
+| Moyenne | Outil IA `compare_to_tipster_benchmarks` | Planned |
+
+---
+
+## API decomposition — Phase 1 worker extraction (2026-07-16)
+
+Blueprint: `docs/ARCHITECTURE_BLUEPRINT.md` §5.3. Log: `docs/API_DECOMPOSITION.md`.
+
+| Worker extracted | Module | Tests | Status |
+|------------------|--------|-------|--------|
+| Watchlist odds refresh | `bot/workers/match_refresh_worker.py` | 10 (`tests/test_match_refresh_worker.py`) | **Done** |
+| Inplay settlement | `bot/workers/inplay_settlement_worker.py` | 8 (`tests/test_inplay_settlement_worker.py`) | **Done** |
+| CLV closing | `bot/workers/clv_worker.py` | 10 (`tests/test_clv_worker.py`) | **Done** |
+| Settlement + calibration refit | `bot/workers/settlement_worker.py` | 8 (`tests/test_settlement_worker.py`) | **Done** |
+| Value scanner | `bot/workers/value_scanner.py` | 10 (`tests/test_value_scanner_worker.py`) | **Done** |
+| Telegram digest/poll | `bot/workers/telegram_worker.py` | 17 (`tests/test_telegram_worker.py`) | **Done** |
+
+**Frozen core:** unchanged. **api.py shim:** `_followed_matches_refresh_loop()` delegates to worker.
+
+---
+
+## Architecture blueprint + Q3 foundation slices (2026-07-16, Claude/CTO session)
+
+**Reference:** `docs/ARCHITECTURE_BLUEPRINT.md` (permanent architecture doc — vision, bounded contexts, ADRs, debt D-1..D-18, risks R-1..R-11, 12-month roadmap, agent ownership matrix §13/§19). Amend via `docs/adr/`, never by editing history.
+
+| Slice | Files | Tests | Status |
+|-------|-------|-------|--------|
+| ADR log seeded (12 ADRs + index) | `docs/adr/ADR-001..012`, `docs/adr/README.md` | — (docs) | **Done** |
+| `compare-engines` CLI wired (debt D-9, audit ROI #4) | `run.py` (+`cmd_compare_engines`) | smoke via `--help`; offline report unchanged | **Done** |
+| State janitor: purge `tmp*.json.corrupt` / `tmp*.tmp` > 7j (debt D-7 — 86 fichiers 0 octet constatés) | `bot/backup.py` (+`prune_state_tmp`), `bot/scheduler.py` (`job_backup`) | 5 (`tests/test_state_janitor.py`) | **Done** |
+| Log rotation par taille 10 MB × 3 (debt D-18) | `bot/log.py` | 4 (`tests/test_log_rotation.py`) | **Done** |
+
+**Suite:** 610 passed / 3 failed — les 2 flakes Windows file-lock documentés (#5 : `test_backup`, `test_mantennisdata_feeder`, passent sous Linux/CI) + `test_value_scanner_worker.py::test_scanner_status_endpoint` (401, lane extraction workers en cours par l'autre agent, fichier créé 21:19 — pas lié à ces slices).
+
+**Frozen core:** untouched (aucun import predictor/calibrate ajouté). **Not done (next per roadmap Q3):** default-deny auth prod + admin token (#3), deploy script + `deployment_history` (#5), refresh `PROJECT_STATUS.md`, archivage `docs/audits/`.
+
+### Q3 #5 : deploy script + deployment_history + refresh statut (2026-07-16, suite session CTO)
+
+| Slice | Files | Tests | Status |
+|-------|-------|-------|--------|
+| Table `deployment_history` + `record_deployment()`/`list_deployments()` | `bot/db.py` (additif, CREATE IF NOT EXISTS) | 4 (`tests/test_deployment_history.py`) | **Done** |
+| CLI `python run.py record-deploy` (hash auto via rev-parse) | `run.py` | smoke `--help` OK | **Done** |
+| `scripts/deploy.sh` — pull → pip → restart (systemd/compose) → health check 60s → rollback auto + journal | `scripts/deploy.sh` | `bash -n` OK | **Done** |
+| `PROJECT_STATUS.md` rafraîchi (16/07, remplace version 14/07, pointe audit + blueprint) | `PROJECT_STATUS.md` | — (docs) | **Done** |
+
+**Suite complète :** 631 passed / 3 failed (les 2 flakes Windows documentés + `test_value_scanner_worker` 401 — lane workers de l'autre agent, inchangé). **Frozen core :** untouched. **Adoption :** prochain déploiement prod = `scripts/deploy.sh` (journalise dans `deployment_history` ; visible via `run.py record-deploy --show`). **Reste Q3 (déféré, `bot/api.py` en cours d'édition par l'agent workers) :** default-deny auth prod + admin token (#3), déplacement `firebase-adminsdk.json` → `secrets/` (#2, coordonner avec restart prod).
+
+### Suite verte + plans d'auth + install téléphone (2026-07-16, suite session CTO)
+
+**Fix des 3 échecs de tests — tous à la racine, plus aucun "flake accepté" :**
+
+| Échec | Cause racine réelle | Fix | Status |
+|-------|---------------------|-----|--------|
+| `test_value_scanner_worker` 401 | `live_api.load_env()` injectait TOUT le .env (dont `TENNISBOSS_API_TOKEN`) dans os.environ en effet de bord de n'importe quel fetch — `test_realtime` le déclenchait, tout test API suivant héritait de l'auth | `load_env(include_auth=False)` par défaut (clés d'auth exclues) ; seul `api.serve()` charge avec `include_auth=True`. Prod inchangée (systemd `EnvironmentFile=`) | **Done** — 3 tests `test_env_isolation.py` |
+| `test_backup` "flake Windows" | fd `mkstemp` gardé ouvert dans setUp → `os.remove` WinError 32 | fd fermé immédiatement ; teardown tolérant + purge -wal/-shm | **Done** |
+| `test_mantennisdata_feeder` "flake Windows" | même pattern fd ouvert → `memory.save()` échouait silencieusement sous Windows → `processed` jamais persisté → ré-entraînement au 2e ingest. **Bonus élucidé :** le fichier mémoire mkstemp VIDE était renommé `tmp*.json.corrupt` par `memory.load()` à chaque run de tests — c'est l'origine des 86 fichiers corrupt de state/ (pas la prod) | fd fermé + seed `b"{}"` (plus aucun fichier corrupt généré) | **Done** |
+
+**Roadmap Q3 #3 — plans d'auth (additif, opt-in) :**
+
+| Slice | Files | Tests | Status |
+|-------|-------|-------|--------|
+| Plan admin : `TENNISBOSS_ADMIN_TOKEN` ⇒ `X-Admin-Token` requis sur settlement/learn/ingest/backfill/intelligence/cycle + inplay picks POST/PUT/DELETE (403 sinon). Absent = comportement historique | `bot/api.py` (`_is_admin_request`, `_auth`) | 7 (`tests/test_auth_planes.py`) | **Done** |
+| Default-deny prod : `TENNISBOSS_ENV=prod` sans token ⇒ SystemExit au démarrage (dev : warn historique conservé) | `bot/api.py` (`_enforce_prod_token`), `.env.example` | 4 | **Done** |
+
+**Vérification complète :** backend **648/648 passed** (première suite 100% verte sous Windows) ; Android **64/64** (`--rerun` forcé, XML JUnit vérifié). **Install téléphone :** APK debug versionCode 2 / 1.1 installé sur Pixel 9 Pro XL (`adb install -r`, upgrade depuis 1.0), lancement vérifié sans crash (topResumedActivity OK, logcat propre). **Frozen core :** untouched. **Activation prod (opt-in humain) :** ajouter `TENNISBOSS_ENV=prod` (+ `TENNISBOSS_ADMIN_TOKEN` souhaité) au .env puis redéployer via `scripts/deploy.sh`.

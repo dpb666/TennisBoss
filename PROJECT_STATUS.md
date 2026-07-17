@@ -1,80 +1,58 @@
 # TennisBoss — Project Status
 
-_Audit date: 2026-07-14. Backend: Python/Flask (`bot/`). Android: Kotlin/Compose (`android/`). This supersedes nothing in `docs/AUDIT.md` (2026-07-11) or `android/ANDROID_AUDIT.md` — it verifies both against the current repo state and adds what they missed._
+_Refreshed: 2026-07-16 (evening). Backend: Python/Flask (`bot/`). Android: Kotlin/Compose (`android/`). Primary sources: `docs/DEVELOPMENT_AUDIT_2026-07-16.md` (full audit), `docs/ARCHITECTURE_BLUEPRINT.md` (permanent architecture reference + ADRs), `MASTER_TODO.md` (work ledger). The previous version of this file (2026-07-14) is superseded; its release-readiness verdict still stands._
 
 ## Completion estimate
 
 | Area | Estimate | Basis |
 |---|---|---|
-| Backend prediction/data pipeline | ~90% | Elo, form, fatigue, rest-days, opponent quality, clutch, H2H, service/return, odds/value all wired and tested. WTA clutch stats gap closed 2026-07-12/13 via `bot/mcp_feeder.py`. |
-| Backend API (`bot/api.py`) | ~95% | ~45 routes, centralized auth, rate limiting where it matters (odds quota), Swagger/OpenAPI. |
-| Autonomous mode (scheduler/supervisor) | 100% | 7 scheduled jobs, systemd services, all confirmed active. |
-| Android app | ~85% | 13 screens/ViewModels, MVVM, real error/loading states. No Room/offline (deliberately deferred). |
-| Testing | Backend 357 tests passing / Android 54 tests passing | See TEST_REPORT.md — 13/13 Android ViewModels covered. |
-| Release readiness | **READY** | See `RELEASE_AUDIT.md` (2026-07-14, Phase 11) + `MASTER_TODO.md` #0. Both release blockers found this phase are now resolved: `assembleRelease` was broken (fixed, commit `cf46a5e`), and the `java.time.*`/minSdk 24-25 crash bug is fixed via core library desugaring (`minSdk` unchanged at 24) — `lintDebug` now reports 0 errors (was 45), `assembleRelease`/`bundleRelease`/`testDebugUnitTest` (54/54) all pass, verified crash-free on-device across Dashboard/MatchDetail/Matchs/Value/Chat. |
-| Deployment (Docker/systemd/CI) | ~95% | Working GitHub Actions CI (backend pytest + Android unit tests), Dockerfile + compose, systemd units, DEPLOYMENT.md. |
-| Documentation hygiene | ~80% | `docs/AUDIT.md` didn't know about the dormant `app/` FastAPI service (see below) until this audit — **since removed**, closing that gap. |
+| Backend prediction/data pipeline | ~90% | Frozen core (ADR-005) + full signal/odds/value pipeline. No model work until n≥200 settled picks (currently n≈97). |
+| Backend API (`bot/api.py`) | ~95% | 52+ routes, centralized auth, OpenAPI/Swagger. **Decomposition in progress** (2026-07-16): daemon loops being extracted to `bot/workers/` (6 workers, see `docs/API_DECOMPOSITION.md`) — uncommitted WIP at refresh time. |
+| Autonomous mode (scheduler/supervisor) | 100% | 11 scheduled jobs + janitor (state tmp-file pruning) added 2026-07-16. |
+| AI assistant | Phase 1 done (flag off) | 6 read-only tools + `mode=analyst` shipped 2026-07-16; `TENNISBOSS_AI_TOOLS=1` not yet enabled in prod. Phases 2–5 planned (`docs/AI_ASSISTANT_ARCHITECTURE.md`). |
+| Android app | ~85% | 14 screens/ViewModels (incl. ComboBuilder), MVVM, no Repository/DI layer yet (ADR-010 gates offline features on it). |
+| Testing | ~613 backend / ~64 Android | 2026-07-16 21:20 run: 610 passed, 2 documented Windows-only file-lock flakes (`test_backup`, `test_mantennisdata_feeder` — pass on Linux/CI), 1 failure in the in-flight worker-extraction WIP. |
+| Release readiness | **READY** (since 2026-07-14) | Both former blockers fixed and verified (`RELEASE_AUDIT.md`). Deferred items unchanged (alpha `security-crypto`, R8 off). |
+| Deployment (Docker/systemd/CI) | ~95% | CI (pytest + Android unit), compose, systemd. **New 2026-07-16:** `scripts/deploy.sh` (pull → restart → health check → auto-rollback) + `deployment_history` table — closes the prod/repo drift risk once adopted. |
+| Architecture & docs | Blueprint ratified-pending | `docs/ARCHITECTURE_BLUEPRINT.md` + 12 ADRs (`docs/adr/`). Human ratification of ADRs pending. |
 
-**Overall: ~90% toward a stable, production-usable app — release-ready as of 2026-07-14.** Both blockers surfaced by `RELEASE_AUDIT.md` (broken `assembleRelease`, and the `java.time.*` crash on API 24-25) are now fixed and verified. Remaining lower-priority items (`security-crypto` alpha, R8 shrinking disabled, dependency staleness, 102 non-blocking lint warnings) are documented but explicitly deferred, not gaps to close before shipping.
+**Overall: ~92% toward a stable, production-usable single-operator product.** The binding constraint is statistical, not technical: `bet_history` needs n≥200 settled picks before any edge verdict or model unfreeze (ADR-005).
 
-## Working features (verified this session, not just claimed)
+## What changed since 2026-07-14 (verified, not just claimed)
 
-- Dashboard, Predict, Chat all manually driven on the Android emulator (screenshots taken, real network calls to the live backend) — all three work end-to-end with real data.
-- Chat correctly grounds answers in real DB state and labels them (`📊 Basé sur nos données (ELO, forme, H2H)`), confirming the anti-hallucination work from earlier this session is live.
-- `/api/upcoming` correctly prioritizes ATP/WTA over Challenger/ITF under the `limit` cap (fixed 2026-07-12).
-- WTA clutch signal (break points saved/faced) now fires on real data (e.g., a real player flagged "fragile sur balles de break" from live DB stats).
-- Player-identity dedup: 635 duplicate profiles merged in production (`Andreeva M.` / `Mirra Andreeva` no longer split ELO/EMA across two profiles), with a safety guard that correctly refused to merge genuinely distinct people sharing a surname (Nakashima brothers, Tsitsipas brothers, three different "Wang"s).
+- **AI Assistant Phase 1 + `mode=analyst`** shipped behind `TENNISBOSS_AI_TOOLS` (default off) — `ai/chat/` package, 6 read-only tools, frozen-boundary guard tests.
+- **Bet Builder** (markets, EV, combo endpoint + Android Combo tab).
+- **Architecture Blueprint + ADR log** created (2026-07-16): bounded contexts, strangler-fig migration plan (ADR-004), debt register D-1..D-18, risk register R-1..R-11, 12-month roadmap, AI-agent ownership matrix.
+- **Q3 roadmap slices landed 2026-07-16:** `compare-engines` CLI wired (closes documented gap D-9); state janitor pruning `tmp*.json.corrupt` leftovers (D-7 — 86 zero-byte files found); log rotation 10 MB × 3 (D-18); `deployment_history` table + `run.py record-deploy` + `scripts/deploy.sh` with health-check and auto-rollback (Q3 #5, risk R-6).
+- **API decomposition Phase 1 (in progress, parallel agent):** value scanner, settlement, CLV, inplay-settlement, match-refresh, telegram loops extracted from `bot/api.py` into `bot/workers/` with per-worker tests — see `docs/API_DECOMPOSITION.md` and the MASTER_TODO ledger entry.
 
 ## Broken / genuinely risky
 
-1. ~~`SurfaceBadge` name collision~~ — **fixed** (`MASTER_TODO.md` #2).
-2. ~~Dashboard "Meilleures opportunités" card shows contradictory tags~~ — **fixed** (`MASTER_TODO.md` #3).
-3. ~~Undocumented dormant `app/` FastAPI package~~ — **removed 2026-07-13** with user sign-off, after confirming no reachable code depended on it (`bot/clv.py`'s import already had a working fallback; the two `bot/` files with hard imports were themselves dead code). Restore point: git tag `pre-app-removal-backup`. See MASTER_TODO.md #1.
-4. **`"1er set jouable : null"` displayed in Matchs à venir** — found live in production 2026-07-14: `pred.favorite` (nullable, intentionally `None` for near-50/50 matches per `bot/predictor.py`) was interpolated into a `Text(...)` without a null-guard. **Fixed** (commit `b96e478`) — a targeted follow-up scan of every other nullable-field interpolation across the Android UI found no other instances of this bug class (all other sites already correctly guarded).
+1. **Uncommitted multi-lane work tree** — blueprint slices + worker extraction are both uncommitted at refresh time. Needs two clean commits (one per lane) once the worker lane stabilizes. (Debt D-14.)
+2. **Prod not yet redeployed** with post-15/07 code: AI tools flag, analyst mode, Bet Builder, janitor, rotation, workers — all need a service restart (human-triggered; use `scripts/deploy.sh` going forward).
+3. **`state/` still produces `tmp*.json.corrupt` files** (newest seen 2026-07-16 19:21) — the janitor cleans them up after 7 days, but the *producer* is likely an older write path still running in the WSL prod processes; will resolve itself at next prod redeploy, worth confirming after.
+4. **LAN unauthenticated-serve fallback** when `TENNISBOSS_API_TOKEN` unset — default-deny in prod (Q3 #3) is designed (blueprint §11.1) but **not yet implemented** (deferred while `bot/api.py` is under active parallel edit).
 
 ## Missing features (deliberately deferred, not bugs)
 
-- Room/offline caching on Android (every screen reloads from network on each visit — acceptable for a betting-value app where staleness is actively bad, per prior session decision, but worth re-confirming with the user before RC1).
-- `bot/agent_router.py`'s "OpenClaw sub-agent" spawn feature is stubbed and incomplete (2 TODOs, `bot/agent_router.py:84,96`) — not wired to anything failing, just unfinished.
+- Room/offline caching + chat persistence on Android — gated on the Repository/DI seam (ADR-010).
+- `TENNISBOSS_AI_TOOLS=1` in prod + Android analyst-mode UI (`tools_called` sources chip) — audit ROI ranks #1–2.
+- Knowledge base (`project_knowledge.db`, FTS5) — roadmap Q4 #8.
+- Admin-token plane split + default-deny prod auth — roadmap Q3 #3 (see above).
 
 ## Technical debt
 
-- **Orphaned modules, confirmed zero references anywhere** (safe to delete or explicitly document as future work): `bot/ai_resolver.py` (401 lines), `bot/alerts.py` (145 lines — dangerously similar name to the actually-used `bot/realtime_alerts.py`), `bot/telegram_handler.py` + `bot/telegram_poll.py` (two competing unused Telegram integrations).
-- ~~Heavy `except Exception: pass` silent-swallow pattern in `bot/api.py` (31 occurrences)~~ — **fixed this session**: 26 now log a specific `WARN` message, 3 left intentionally silent with a documented reason (see `MASTER_TODO.md` #7). Not yet deployed to the live service (needs a restart).
-- Android: `StatCard` duplicated byte-for-byte in `EdgeScreen.kt:183` and `PerformanceScreen.kt:320`; `RecentRow` likely duplicated the same way.
-- `androidx.security:security-crypto:1.1.0-alpha06` — still alpha, used for token storage (`TokenManager.kt`) in what is otherwise a production app.
-- ~~Compose BOM (`2024.09.03`) is over a year old~~ — **bumped to `2026.06.01` 2026-07-14**, verified against real Maven Google metadata, zero compile errors, confirmed on-device with no visual regression.
-- Zero Compose `testTag`/semantics anywhere in the Android UI — makes any future UI-automation testing fragile (confirmed hands-on this session: every interaction had to be located by raw text or hand-computed pixel coordinates via `uiautomator dump`).
+Tracked as D-1..D-18 in `docs/ARCHITECTURE_BLUEPRINT.md` §16 — the authoritative register. Closed since the blueprint was written: D-7 (janitor), D-9 (compare-engines), D-18 (log rotation); D-1/D-3 (api.py god-module / embedded daemons) actively being reduced by the worker extraction; D-14 (work-tree drift) mitigated by `deployment_history` once adopted, closed by committing the current lanes.
 
 ## Risks
 
-- LAN-exposed API without `TENNISBOSS_API_TOKEN` set logs a warning but still serves unauthenticated (`bot/api.py:3182-3186`) — intentional per code comment, but worth re-confirming that's still the desired behavior before wider deployment.
-- No proven statistical edge yet (small settled-picks sample) — this is a modeling/data reality, not a code bug, and the app's own copy already reflects this honestly ("aide à la décision", not "gagnant garanti").
-- Single-machine (WSL) deployment — a hardware failure interrupts service; docker-compose exists for fast redeploy to a VPS if needed.
+Tracked as R-1..R-11 in `docs/ARCHITECTURE_BLUEPRINT.md` §17. Highest-likelihood items unchanged: upstream data-source death (R-1, Sackmann already gone once), single-host total loss (R-2 — off-host backups still pending, roadmap Q4 #11), no proven statistical edge yet (R-4 — expected until n≥200).
 
-## Performance issues
+## Security posture
 
-- One confirmed-and-fixed instance this session (`bot/mcp_feeder.py` opening ~12,000 individual SQLite connections in a loop — fixed, now ~2s instead of 15+ min). A dedicated audit pass found **no other instance** of this pattern anywhere else in `bot/*.py` — it was isolated, not systemic.
-- No O(n²)-or-worse hot path found on any per-request code path (`predictor.py`, `features.py`, `elo.py` — all O(n) full-history rebuilds are confined to startup/background jobs, never per-request).
-- No Compose recomposition-storm patterns found in the 3 screens sampled (Dashboard, MatchDetail, Value).
-
-## Security issues
-
-- No secrets ever committed to git history (`.env` verified never committed, `git log --all -- .env` empty).
-- No hardcoded secrets found in `bot/*.py` or Android Kotlin.
-- Auth (`X-API-Token`) enforced centrally via `before_request`, not per-route — no risk of a forgotten route.
-- Android: `usesCleartextTraffic="false"` enforced in release, debug-only exceptions correctly scoped to `src/debug/`.
-- The one open item is the alpha crypto dependency noted above under Technical Debt.
-
-## API issues
-
-- None structural. Rate limiting is deliberately scoped to the 3 odds-consuming endpoints (protecting the odds-api.io quota), not applied blanket — this is a design decision, not an oversight, confirmed by sampling other routes.
-
-## Build issues
-
-- `assembleDebug`, `compileDebugKotlin`, `testDebugUnitTest` all succeed cleanly. Backend test suite (357 tests, post-`app/`-removal) passes in ~30s.
-- ~~`assembleRelease`/`bundleRelease` were completely broken~~ — **fixed 2026-07-14** (commit `cf46a5e`): `lintVitalRelease` failed on `InvalidFragmentVersionForActivityResult` (Google Play Services transitively pulls `androidx.fragment:1.1.0`, too old for the `ActivityResult` APIs used in `MainActivity.kt`). Fixed by pinning `androidx.fragment:fragment-ktx:1.8.9` as a direct dependency. Verified: `assembleRelease` now succeeds (confirmed it failed before the fix, and succeeds after, twice).
-- ~~Full `lintDebug` revealed a real crash bug~~ — **fixed 2026-07-14** (`MASTER_TODO.md` #0): 44 `NewApi` errors, `java.time.*` (used throughout `DateUtils.kt`/`UpcomingScreen.kt`) requiring API 26 on a `minSdk=24` app with no desugaring — guaranteed crash on Android 7.0/7.1. Fixed via `coreLibraryDesugaring` (`desugar_jdk_libs:2.1.5`), `minSdk` unchanged. `lintDebug` now reports 0 errors. Verified crash-free on-device.
+- No secrets in git history (verified 2026-07-14, unchanged).
+- Central `before_request` auth; rate limiting scoped to odds-quota routes.
+- Open items: `firebase-adminsdk.json` still inside `state/` (move to `secrets/` — Q3 #2, partially done: janitor yes, key move pending); alpha `security-crypto` on Android; no chat-route rate limit (D-17).
 
 ---
-See `MASTER_TODO.md` for the prioritized, file-referenced action list derived from this audit.
+See `MASTER_TODO.md` for the dated, file-referenced work ledger (both agent lanes), and `docs/ARCHITECTURE_BLUEPRINT.md` §18 for the 12-month roadmap this work follows.
