@@ -69,6 +69,38 @@ def _prune(keep: Optional[int] = None) -> int:
     return len(excess)
 
 
+# Restes d'écritures atomiques interrompues dans state/ (mkstemp + os.replace,
+# voir bot/memory.py::save). Constaté en production : 86 fichiers
+# tmp*.json.corrupt de 0 octet accumulés (2026-07-12 → 16). Sans valeur après
+# coup — contrairement à memory.json.corrupt (artefact de self-healing,
+# volontairement PAS couvert par ces motifs). Voir docs/ARCHITECTURE_BLUEPRINT.md D-7.
+_JANITOR_PATTERNS = ("tmp*.json.corrupt", "tmp*.tmp")
+JANITOR_MAX_AGE_DAYS = 7
+
+
+def prune_state_tmp(max_age_days: Optional[int] = None) -> int:
+    """Supprime les fichiers temporaires orphelins de state/ plus vieux que
+    `max_age_days` jours (JANITOR_MAX_AGE_DAYS par défaut). Renvoie le nombre
+    supprimé. Appelé par le scheduler (job_backup, cadence 6h + boot) — PAS
+    par backup_now() directement, pour que les tests de backup restent
+    hermétiques (ils ne patchent que DB_FILE, pas STATE_DIR)."""
+    if max_age_days is None:
+        max_age_days = JANITOR_MAX_AGE_DAYS
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for pattern in _JANITOR_PATTERNS:
+        for path in glob.glob(os.path.join(config.STATE_DIR, pattern)):
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    removed += 1
+            except OSError as exc:
+                log(f"Janitor: échec suppression {path}: {exc}", "WARN")
+    if removed:
+        log(f"Janitor: {removed} fichier(s) temporaire(s) orphelin(s) purgé(s) de state/.")
+    return removed
+
+
 def backup_now() -> Optional[str]:
     """Crée une sauvegarde cohérente de la DB courante. Renvoie le chemin créé.
 

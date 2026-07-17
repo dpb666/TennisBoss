@@ -278,6 +278,17 @@ CREATE TABLE IF NOT EXISTS player_rankings (
     updated_ts  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_player_rankings_tour ON player_rankings(tour);
+-- Journal des déploiements (docs/ARCHITECTURE_BLUEPRINT.md §9.3, roadmap Q3 #5) :
+-- chaque déploiement/rollback prod est enregistré (scripts/deploy.sh →
+-- run.py record-deploy) pour éliminer la dérive prod vs repo (risque R-6).
+CREATE TABLE IF NOT EXISTS deployment_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    deployed_at TEXT NOT NULL,
+    git_hash    TEXT,
+    component   TEXT,   -- 'bot' | 'scheduler' | 'android' | 'all'
+    result      TEXT,   -- 'success' | 'rollback' | 'failed'
+    notes       TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_clv_date ON clv_log(date);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
 CREATE INDEX IF NOT EXISTS idx_players_tour ON players(tour);
@@ -963,6 +974,32 @@ def set_app_version(version_code: int, version_name: str,
         "published_ts": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     set_meta(APP_VERSION_META_KEY, json.dumps(payload, ensure_ascii=False))
+
+
+def record_deployment(git_hash: str, component: str = "all",
+                      result: str = "success", notes: str = "") -> int:
+    """Journalise un déploiement prod (voir scripts/deploy.sh). Renvoie l'id.
+
+    But : rendre chaque changement prod traçable (quoi, quand, quel commit,
+    succès ou rollback) — docs/ARCHITECTURE_BLUEPRINT.md §9.3, risque R-6."""
+    import datetime as _dt
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO deployment_history (deployed_at, git_hash, component, result, notes) "
+            "VALUES (?,?,?,?,?)",
+            (_dt.datetime.now().isoformat(timespec="seconds"),
+             git_hash, component, result, notes))
+        return int(cur.lastrowid)
+
+
+def list_deployments(limit: int = 20) -> List[Dict[str, Any]]:
+    """Derniers déploiements enregistrés, les plus récents d'abord."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, deployed_at, git_hash, component, result, notes "
+            "FROM deployment_history ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+    return [dict(zip(("id", "deployed_at", "git_hash", "component", "result", "notes"), r))
+            for r in rows]
 
 
 def get_meta(key: str) -> Optional[str]:

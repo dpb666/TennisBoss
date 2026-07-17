@@ -92,7 +92,9 @@ class TennisBossScheduler:
             log(f"Monitor job failed: {e}", "ERROR")
 
     def job_backup(self):
-        """Sauvegarde cohérente de state/tennisboss.db (voir bot/backup.py)."""
+        """Sauvegarde cohérente de state/tennisboss.db (voir bot/backup.py)
+        + janitor : purge des fichiers temporaires orphelins de state/
+        (tmp*.json.corrupt de 0 octet — voir backup.prune_state_tmp)."""
         log("=== SCHEDULER: DB backup ===", "INFO")
         try:
             path = backup.backup_now()
@@ -100,6 +102,10 @@ class TennisBossScheduler:
                 self.jobs_run += 1
         except Exception as e:  # noqa: BLE001
             log(f"Backup job failed: {e}", "ERROR")
+        try:
+            backup.prune_state_tmp()
+        except Exception as e:  # noqa: BLE001
+            log(f"Janitor failed: {e}", "WARN")
 
     def job_daily_digest(self):
         """Notification push quotidienne (bot/recommendations.py::daily_digest).

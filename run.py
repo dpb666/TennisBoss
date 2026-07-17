@@ -513,6 +513,43 @@ def cmd_surface_data_audit(_args) -> None:
     subprocess.run([sys.executable, str(script)], check=False)
 
 
+def cmd_record_deploy(args) -> None:
+    """Journalise un déploiement prod dans deployment_history (appelé par
+    scripts/deploy.sh — voir docs/ARCHITECTURE_BLUEPRINT.md §9.3)."""
+    git_hash = args.git_hash
+    if not git_hash:
+        import subprocess
+        try:
+            git_hash = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, check=True,
+                cwd=str(Path(__file__).resolve().parent),
+            ).stdout.strip()
+        except Exception:  # noqa: BLE001
+            git_hash = "unknown"
+    db.init()
+    dep_id = db.record_deployment(git_hash, component=args.component,
+                                  result=args.result, notes=args.notes or "")
+    print(f"Déploiement #{dep_id} enregistré : {git_hash} "
+          f"[{args.component}] {args.result}")
+    for d in db.list_deployments(limit=args.show):
+        print(f"  #{d['id']} {d['deployed_at']} {d['git_hash']} "
+              f"[{d['component']}] {d['result']} {d['notes'] or ''}".rstrip())
+
+
+def cmd_compare_engines(_args) -> None:
+    """Comparaison offline moteur heuristique vs ML (voir bot/compare_engines.py).
+
+    Ne modifie PAS le prédicteur de production (frontière figée, ADR-005) —
+    écrit reports/engine_comparison.md et affiche le verdict."""
+    from bot import compare_engines
+    path, report = compare_engines.generate(write_file=True)
+    if path:
+        print(f"Rapport écrit : {path}")
+    _safe_print(f"Verdict : {report.get('verdict')}")
+    print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
+
+
 def cmd_set_app_version(args) -> None:
     """Publie la dernière version Android connue (bandeau "mise à jour
     disponible" côté app, avant publication Play Store — voir
@@ -662,6 +699,24 @@ def main() -> None:
     sub.add_parser("surface-data-audit",
                    help="Rapport couverture surface (matches, bet_history)").set_defaults(
         func=cmd_surface_data_audit)
+
+    sub.add_parser("compare-engines",
+                   help="Compare moteur heuristique vs ML offline "
+                        "(reports/engine_comparison.md, aucun changement production)").set_defaults(
+        func=cmd_compare_engines)
+
+    p_dep = sub.add_parser("record-deploy",
+                           help="Journalise un déploiement prod (deployment_history)")
+    p_dep.add_argument("--git-hash", dest="git_hash", default="",
+                       help="Hash git déployé (défaut : rev-parse HEAD)")
+    p_dep.add_argument("--component", default="all",
+                       choices=["bot", "scheduler", "android", "all"])
+    p_dep.add_argument("--result", default="success",
+                       choices=["success", "rollback", "failed"])
+    p_dep.add_argument("--notes", default="", help="Note libre (motif, incident...)")
+    p_dep.add_argument("--show", type=int, default=5,
+                       help="Nb de déploiements récents affichés après enregistrement")
+    p_dep.set_defaults(func=cmd_record_deploy)
 
     p_dedupe = sub.add_parser("dedupe-players",
                               help="Fusionne les profils joueurs dupliqués (ex. 'Andreeva M.' / 'Mirra Andreeva')")
