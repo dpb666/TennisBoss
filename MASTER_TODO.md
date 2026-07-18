@@ -360,6 +360,16 @@ Commit `44beaa5`. `predictor.py`/`calibrate.py`/`/api/value` inchangés — pure
 | Tests (21 nouveaux : 13 backend + 8 Android) | **Done** — 533/533 backend, 61/61 Android |
 | Vérifié en direct sur émulateur (service redémarré, accord utilisateur) | **Done** |
 
+**Audit (2026-07-17):** `docs/COMBO_BUILDER_AUDIT.md` — MVP OK, predictor gelé respecté.
+
+| Priorité | Amélioration Combo (Value) | Status |
+|----------|---------------------------|--------|
+| Haute | Bouton « Ajouter au combo » depuis picks Value EV+ | **Done** |
+| Haute | UI total_sets : labels Plus/Moins (pas noms joueurs) | **Done** |
+| Moyenne | Banner éducatif parlay (variance, CLV combo) | **Done** |
+| Moyenne | EV combo vs cote bookmaker (analytique) | **Done** |
+| Basse | Autocomplete joueurs + champ surface dans Combo | Planned |
+
 ---
 
 ## Stratégie parieur — benchmark tipsters (2026-07-16)
@@ -386,12 +396,25 @@ Blueprint: `docs/ARCHITECTURE_BLUEPRINT.md` §5.3. Log: `docs/API_DECOMPOSITION.
 |------------------|--------|-------|--------|
 | Watchlist odds refresh | `bot/workers/match_refresh_worker.py` | 10 (`tests/test_match_refresh_worker.py`) | **Done** |
 | Inplay settlement | `bot/workers/inplay_settlement_worker.py` | 8 (`tests/test_inplay_settlement_worker.py`) | **Done** |
-| CLV closing | `bot/workers/clv_worker.py` | 10 (`tests/test_clv_worker.py`) | **Done** |
+| CLV closing | `bot/workers/clv_worker.py` | 11 (`tests/test_clv_worker.py`) | **Done** — event_key lookup fix 2026-07-18 |
 | Settlement + calibration refit | `bot/workers/settlement_worker.py` | 8 (`tests/test_settlement_worker.py`) | **Done** |
 | Value scanner | `bot/workers/value_scanner.py` | 10 (`tests/test_value_scanner_worker.py`) | **Done** |
 | Telegram digest/poll | `bot/workers/telegram_worker.py` | 17 (`tests/test_telegram_worker.py`) | **Done** |
 
 **Frozen core:** unchanged. **api.py shim:** `_followed_matches_refresh_loop()` delegates to worker.
+
+### CTO go-max execution (2026-07-18)
+
+| Item | Status |
+|------|--------|
+| CLV closing fix (event_key lookup) | **Done** — `bot/workers/clv_worker.py` |
+| Logging completeness Telegram alert (&lt;90%/24h) | **Done** — `bot/monitor.py`, `bot/realtime_alerts.py` |
+| `python run.py weekly-audit` + Sunday scheduler | **Done** — `bot/weekly_audit.py`, `tests/test_weekly_audit.py` |
+| ADR-013 verdict protocol | **Done** — `docs/adr/ADR-013-verdict-protocol.md` |
+| Off-site backup scripts | **Done** — `scripts/backup_offsite.{sh,ps1}`, `docs/BACKUP.md` |
+| Android analyst mode + sources chip | **Done** — `ChatViewModel.kt`, `ChatScreen.kt` |
+| Prod redeploy | **Done** — WSL restart 2026-07-18, `/health` OK |
+| Execution report | **Done** — `docs/CTO_EXECUTION_REPORT_2026-07-18.md` |
 
 ---
 
