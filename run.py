@@ -511,6 +511,31 @@ def cmd_backfill_bet_history(args) -> None:
         print(f"bet_history : {arch['patched']} surfaces corrigées (archive matches)")
 
 
+def cmd_backfill_clv_closing(args) -> None:
+    """Recalcule CLV pour picks réglés avec closing_src=last_seen (post Jul-2026 bug)."""
+    from bot import clv_backfill
+
+    db.init()
+    result = clv_backfill.backfill_last_seen_closing(
+        since=args.since,
+        dry_run=args.dry_run,
+        use_odds_api=not args.no_odds_api,
+        limit=args.limit,
+    )
+    print(
+        f"CLV backfill depuis {result['since']} : "
+        f"{result['fixed']}/{result['candidates']} corrigés "
+        f"(snapshot={result['fixed_from_snapshot']}, "
+        f"odds-api={result['fixed_from_odds_api']}), "
+        f"skipped no_source={result['skipped_no_source']}, "
+        f"invalid_odds={result['skipped_invalid_odds']}"
+        + (" [DRY-RUN]" if result["dry_run"] else "")
+    )
+    if args.verbose:
+        import json
+        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+
+
 def cmd_surface_benchmark(args) -> None:
     from bot import surface_experiment
     db.init()
@@ -711,6 +736,20 @@ def main() -> None:
     p_bh.add_argument("--archive", action="store_true",
                       help="Aussi backfill surface depuis archive matches")
     p_bh.set_defaults(func=cmd_backfill_bet_history)
+
+    p_clvb = sub.add_parser(
+        "backfill-clv-closing",
+        help="Recalcule CLV pour picks closing_src=last_seen (market_snapshots / odds-api)",
+    )
+    p_clvb.add_argument("--since", default="2026-07-15",
+                        help="Date ISO min pick_ts (défaut 2026-07-15)")
+    p_clvb.add_argument("--limit", type=int, default=5000, help="Max lignes clv_log")
+    p_clvb.add_argument("--dry-run", action="store_true",
+                        help="Diagnostic sans écriture DB")
+    p_clvb.add_argument("--no-odds-api", action="store_true",
+                        help="N'utiliser que market_snapshots locaux")
+    p_clvb.add_argument("--verbose", action="store_true", help="JSON détaillé")
+    p_clvb.set_defaults(func=cmd_backfill_clv_closing)
 
     p_surf = sub.add_parser("surface-benchmark",
                             help="Walk-forward benchmark surface features (offline)")

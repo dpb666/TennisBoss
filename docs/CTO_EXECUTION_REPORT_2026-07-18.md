@@ -15,7 +15,7 @@
 | P1-4 ADR-013 | `docs/adr/ADR-013-verdict-protocol.md` |
 | P1-5 weekly-audit | CLI + scheduler + tests |
 | P1-6 Calendar note | In weekly-audit output |
-| P2-7 Off-site backup | `scripts/backup_offsite.{sh,ps1}` + `docs/BACKUP.md` |
+| P2-7 Off-site backup | `scripts/backup_offsite.{sh,ps1}` + `docs/BACKUP.md` (incl. Task Scheduler) |
 | P2-8 Android analyst + Sources | ChatViewModel + ChatScreen chips |
 | P2-9 Ledger updates | `MASTER_TODO.md`, `PROJECT_STATUS.md` |
 
@@ -182,12 +182,67 @@ Combo builder (prior WIP): `book_odds` → server-side `ev_pct` / `edge` on `/ap
 
 1. ~~**`git push`** from dev machine~~ — **completed** (see Post-push completion)
 2. ~~**`TENNISBOSS_AI_TOOLS=1`** in prod `.env`~~ — **already enabled**
-3. **Off-site backup cron / Task Scheduler** — scripts verified; schedule weekly with `BACKUP_DEST` on a cloud-sync folder (see `docs/BACKUP.md` and Post-push section above)
-4. **Backfill CLV** for picks settled with `closing_src=last_seen` since 2026-07-15 — optional manual re-run once worker has cycled (no automatic backfill shipped; consider SQL audit)
+3. ~~**Off-site backup cron / Task Scheduler**~~ — **Done** — see `docs/BACKUP.md` (WSL cron + Windows Task Scheduler examples)
+4. ~~**Backfill CLV** for picks settled with `closing_src=last_seen` since 2026-07-15~~ — **Done** (see CLV backfill section below)
 5. **Fix 4 flaky tests** in `test_api_endpoints2` / `test_telegram_worker` (pre-existing)
 6. **Ratify ADR-013** at next architecture review
 
 **Note:** WSL git working tree on `/mnt/c/Users/donpa/TennisBoss` shows unrelated local modifications (android/dashboard, oddspapi); prod services run from shared path @ `3cea335` — reconcile or stash before next `git pull --ff-only` on that host.
+
+---
+
+## CLV backfill — `last_seen` since 2026-07-15 (2026-07-18 evening)
+
+### Investigation
+
+- **19** settled picks with `closing_src=last_seen` and `pick_ts >= 2026-07-15` (all had `clv_pct=0`).
+- **18/19** had `market_snapshots` with a pre-match last quote (`hours_ahead ≈ -1h`).
+- **1** row (`72666938`, Bondioli vs Justo) had **zero** snapshots and no odds-api settled match — left unchanged.
+
+### Command shipped
+
+```bash
+python run.py backfill-clv-closing              # apply (default since 2026-07-15)
+python run.py backfill-clv-closing --dry-run      # audit only
+python run.py backfill-clv-closing --no-odds-api   # snapshots only
+```
+
+Additive only: `bot/clv_backfill.py`, `db.patch_clv_closing_settled()`, `db.latest_market_snapshot()`. Does **not** touch predictor/calibration/value gates.
+
+### Results (prod DB)
+
+| Metric | Count |
+|---|---|
+| Candidates | 19 |
+| Fixed (`snapshot_backfill`) | **18** |
+| Skipped (no source) | **1** |
+| Skipped (invalid odds ratio) | **0** |
+| odds-api fallback used | 0 |
+
+Post-backfill `weekly-audit` (7d): avg CLV **+18.1%** (was 0% on `last_seen` rows), scanner n=50, verdict **prometteur**.
+
+---
+
+## WSL dirty tree (documented — user work preserved)
+
+Uncommitted on shared `/mnt/c/Users/donpa/TennisBoss` path (not stashed — no data destroyed):
+
+| Path | Notes |
+|---|---|
+| `android/.../DashboardScreen.kt` | Local UI edits (~640 lines touched) |
+| `android/.../DashboardViewModel.kt` | Local VM edits |
+| `android/.../MatchDetailViewModel.kt` | Local VM edits |
+| `bot/oddspapi_feeder.py` | Local feeder refactor (~374 lines) |
+| `tests/test_oddspapi_feeder.py` | Matching test updates |
+| `.gitignore` | Minor local tweak |
+
+**Before next `git pull --ff-only` on WSL:** review diffs or stash:
+
+```bash
+git stash push -m "WIP android dashboard + oddspapi" -- android/ bot/oddspapi_feeder.py tests/test_oddspapi_feeder.py .gitignore
+```
+
+Prod services unaffected — they load Python from the same tree but run committed code paths unless restarted after uncommitted edits.
 
 ---
 

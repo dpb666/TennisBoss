@@ -1949,6 +1949,51 @@ def list_clv_open() -> List[sqlite3.Row]:
             "SELECT * FROM clv_log WHERE closing_odds IS NULL").fetchall()
 
 
+def list_clv_last_seen_since(since: str, limit: int = 5000) -> List[sqlite3.Row]:
+    """Picks réglés avec closing fallback ``last_seen`` depuis ``since`` (ISO date/ts)."""
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM clv_log WHERE closing_src IN ('last_seen', 'snapshot_backfill') "
+            "AND pick_ts >= ? AND result IS NOT NULL "
+            "ORDER BY pick_ts ASC LIMIT ?",
+            (since, limit),
+        ).fetchall()
+
+
+def patch_clv_closing_settled(event_key: str, closing_odds: float, src: str) -> bool:
+    """Recalcule CLV sur un pick déjà réglé (backfill ``last_seen`` uniquement).
+
+    Met aussi à jour ``bet_history.clv_pct`` quand une ligne existe pour ``event_key``.
+    """
+    if not event_key or closing_odds <= 1.0:
+        return False
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT pick_odds, closing_src FROM clv_log "
+            "WHERE event_key=? AND result IS NOT NULL",
+            (event_key,),
+        ).fetchone()
+        if not row or row["closing_src"] not in ("last_seen", "snapshot_backfill"):
+            return False
+        pick_odds = float(row["pick_odds"] or 0)
+        if pick_odds <= 1.0:
+            return False
+        if closing_odds / pick_odds > 2.5 or pick_odds / closing_odds > 2.5:
+            return False
+        clv_pct = round((pick_odds / closing_odds - 1.0) * 100, 2)
+        beat = 1 if pick_odds > closing_odds else 0
+        conn.execute(
+            "UPDATE clv_log SET closing_odds=?, closing_src=?, clv_pct=?, beat_closing=? "
+            "WHERE event_key=?",
+            (closing_odds, src, clv_pct, beat, event_key),
+        )
+        conn.execute(
+            "UPDATE bet_history SET clv_pct=?, bookmaker=? WHERE event_key=?",
+            (clv_pct, src, event_key),
+        )
+    return True
+
+
 def update_clv_closing(event_key: str, closing_odds: float, src: str) -> None:
     """Rafraîchit la closing line tant que le match n'est pas réglé.
 
@@ -2571,6 +2616,18 @@ def line_movement(event_key: str) -> Optional[Dict[str, Any]]:
         "move_home_pct": _pct(opening["odds_home"], closing["odds_home"]),
         "move_away_pct": _pct(opening["odds_away"], closing["odds_away"]),
     }
+
+
+def latest_market_snapshot(event_key: str) -> Optional[sqlite3.Row]:
+    """Dernier snapshot de cote pour un event (proxy closing line pré-match)."""
+    if not event_key:
+        return None
+    with connect() as conn:
+        return conn.execute(
+            "SELECT ts, player1, player2, odds_home, odds_away, hours_ahead "
+            "FROM market_snapshots WHERE event_key=? ORDER BY ts DESC LIMIT 1",
+            (event_key,),
+        ).fetchone()
 
 
 def earliest_market_snapshot(event_key: str) -> Optional[sqlite3.Row]:
