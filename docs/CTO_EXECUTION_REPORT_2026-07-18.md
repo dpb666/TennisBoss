@@ -52,6 +52,34 @@ Or: `scripts/deploy.sh --no-pull` when already on the target commit.
 
 ---
 
+## Post-push completion (2026-07-18 evening)
+
+| Step | Status |
+|---|---|
+| `git push -u origin main` | **Done** — `8e3deeb..3cea335` → [origin/main](https://github.com/dpb666/TennisBoss/tree/main) |
+| Prod commit | **Aligned** — `/mnt/c/Users/donpa/TennisBoss` @ `3cea335` (shared path; no separate pull required) |
+| `sudo systemctl restart tennisboss-bot tennisboss-scheduler` | **Done** — both **active** after restart |
+| `TENNISBOSS_AI_TOOLS=1` | **Already set** in prod `.env` (`EnvironmentFile` for bot + scheduler) |
+| `/health` post-restart | **OK** — `{"status":"ok","players_loaded":4524,...}` |
+| `/api/chat?mode=analyst` | **Reachable** — returns `401 unauthorized` without auth token (expected) |
+| `python run.py weekly-audit` | **Smoke OK** (7d window) |
+| `pytest -k clv_worker` | **11 passed** |
+| Off-site backup dry-run | **Partial** — archive created under `%TEMP%\tennisboss-backup-dryrun`; `state/backups/*.db` skipped when locked by running bot (expected on live host) |
+
+### Off-site backup scheduling (manual)
+
+Scripts verified: `scripts/backup_offsite.sh`, `scripts/backup_offsite.ps1`. Set **`BACKUP_DEST`** to a cloud-sync or off-machine folder; optional **`BACKUP_ENCRYPT_PASS`** for encryption (host `.env` only — never commit). See `docs/BACKUP.md`.
+
+**WSL cron (suggested — Sunday 04:00 UTC):**
+
+```bash
+0 4 * * 0 cd /mnt/c/Users/donpa/TennisBoss && BACKUP_DEST=/mnt/backups/tennisboss ./scripts/backup_offsite.sh >> /var/log/tennisboss-backup.log 2>&1
+```
+
+**Windows Task Scheduler:** weekly trigger → PowerShell `-File scripts\backup_offsite.ps1` with user env `BACKUP_DEST` (and optional `BACKUP_ENCRYPT_PASS`) set in the task or profile.
+
+---
+
 ## P0-2 — Closing odds / CLV = 0
 
 ### Root cause
@@ -152,12 +180,14 @@ Combo builder (prior WIP): `book_odds` → server-side `ev_pct` / `edge` on `/ap
 
 ## Remaining manual steps
 
-1. **`git push`** from dev machine if prod pulls from remote
-2. **`TENNISBOSS_AI_TOOLS=1`** in prod `.env` when ready to surface AI tools (Android UI now displays sources)
-3. **Off-site backup cron** — schedule `scripts/backup_offsite.sh` weekly; set `BACKUP_DEST` on a cloud-sync folder
+1. ~~**`git push`** from dev machine~~ — **completed** (see Post-push completion)
+2. ~~**`TENNISBOSS_AI_TOOLS=1`** in prod `.env`~~ — **already enabled**
+3. **Off-site backup cron / Task Scheduler** — scripts verified; schedule weekly with `BACKUP_DEST` on a cloud-sync folder (see `docs/BACKUP.md` and Post-push section above)
 4. **Backfill CLV** for picks settled with `closing_src=last_seen` since 2026-07-15 — optional manual re-run once worker has cycled (no automatic backfill shipped; consider SQL audit)
 5. **Fix 4 flaky tests** in `test_api_endpoints2` / `test_telegram_worker` (pre-existing)
 6. **Ratify ADR-013** at next architecture review
+
+**Note:** WSL git working tree on `/mnt/c/Users/donpa/TennisBoss` shows unrelated local modifications (android/dashboard, oddspapi); prod services run from shared path @ `3cea335` — reconcile or stash before next `git pull --ff-only` on that host.
 
 ---
 
