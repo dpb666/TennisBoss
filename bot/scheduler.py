@@ -220,6 +220,23 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"Calibration report job failed: {e}", "ERROR")
 
+    def job_weekly_audit(self):
+        """Audit opérationnel hebdo → Telegram (Sunday digest)."""
+        log("=== SCHEDULER: Weekly audit ===", "INFO")
+        iso_week = datetime.now().strftime("%G-W%V")
+        if db.get_meta("last_weekly_audit_week") == iso_week:
+            return
+        try:
+            from . import weekly_audit
+
+            audit = weekly_audit.run_audit(days=7, logging_hours=24)
+            sent = weekly_audit.send_telegram_digest(audit)
+            db.set_meta("last_weekly_audit_week", iso_week)
+            log(f"Weekly audit: Telegram {'sent' if sent else 'skipped (no token)'}", "INFO")
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"Weekly audit job failed: {e}", "ERROR")
+
     def setup_jobs(self):
         """Configure job schedule."""
         schedule.every(1).hours.do(self.job_learn)
@@ -234,9 +251,11 @@ class TennisBossScheduler:
         # Quotidien 03:00 avec garde-fou ISO week : retry auto si échec lundi.
         schedule.every().day.at("03:00").do(self.job_rankings)
         schedule.every().sunday.at("22:00").do(self.job_calibration_report)
-        log("Scheduler: 11 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+        schedule.every().sunday.at("21:00").do(self.job_weekly_audit)
+        log("Scheduler: 12 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
             "mcp_backfill 12h, monitor 5m, espn_warm 2m, backup 6h, digest 9h/j, "
-            "bet_history 4h30/j, rankings Mon 3h, calibration Sun 22h)", "INFO")
+            "bet_history 4h30/j, rankings Mon 3h, weekly_audit Sun 21h, "
+            "calibration Sun 22h)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()

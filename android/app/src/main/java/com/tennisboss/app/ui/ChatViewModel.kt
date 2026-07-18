@@ -25,6 +25,18 @@ class ChatViewModel : ViewModel() {
     var loading by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
 
+    /** Analyst mode for technical / ROI / calibration questions (API mode=analyst). */
+    internal fun resolveChatMode(text: String): String {
+        val t = text.trim()
+        if (t.startsWith("@")) return "analyst"
+        val lower = t.lowercase()
+        val analystHints = listOf(
+            "roi", "clv", "calibration", "bet_history", "logging",
+            "architecture", "verdict", "edge", "completeness", "beat closing",
+        )
+        return if (analystHints.any { lower.contains(it) }) "analyst" else "chat"
+    }
+
     fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isBlank() || loading) return
@@ -37,12 +49,21 @@ class ChatViewModel : ViewModel() {
             try {
                 // Historique glissant : tous les messages sauf le dernier ajouté
                 val history = messages.dropLast(1)
+                val mode = resolveChatMode(trimmed)
                 val response = ApiClient.create().chat(
-                    ChatRequest(message = trimmed, history = history)
+                    ChatRequest(message = trimmed, history = history, mode = mode)
                 )
                 val reply = response.reply
                 if (!reply.isNullOrBlank()) {
-                    messages.add(ChatMessage("assistant", reply, context_used = response.context_used))
+                    messages.add(
+                        ChatMessage(
+                            role = "assistant",
+                            content = reply,
+                            context_used = response.context_used,
+                            tools_called = response.tools_called.orEmpty(),
+                            sources = response.sources.orEmpty(),
+                        )
+                    )
                 } else {
                     val err = response.error ?: "Réponse vide"
                     messages.add(ChatMessage("assistant", "⚠️ $err"))

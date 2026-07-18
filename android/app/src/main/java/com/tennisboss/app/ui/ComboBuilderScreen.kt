@@ -1,5 +1,6 @@
 package com.tennisboss.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,12 +36,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tennisboss.app.data.ComboLeg
+import java.util.Locale
 
 private val MARKET_LABELS = mapOf(
     "match" to "Vainqueur du match",
@@ -47,6 +51,20 @@ private val MARKET_LABELS = mapOf(
     "total_sets" to "Total sets (+/- 2.5)",
     "handicap" to "Handicap -1.5 sets",
 )
+
+private const val TOTAL_SETS_OVER = "Plus de 2.5 sets"
+private const val TOTAL_SETS_UNDER = "Moins de 2.5 sets"
+
+/** Labels des chips côté — pour total_sets, player1/player2 = Over/Under, pas les joueurs. */
+private fun sideChipLabels(leg: ComboLegInput): Pair<String, String> = when (leg.market) {
+    "total_sets" -> TOTAL_SETS_OVER to TOTAL_SETS_UNDER
+    else -> (leg.player1.ifBlank { "Joueur 1" }) to (leg.player2.ifBlank { "Joueur 2" })
+}
+
+private fun legSideDisplayName(leg: ComboLeg): String = when (leg.market) {
+    "total_sets" -> if (leg.side == "player1") TOTAL_SETS_OVER else TOTAL_SETS_UNDER
+    else -> if (leg.side == "player1") leg.player1 else leg.player2
+}
 
 @Composable
 fun ComboBuilderScreen(vm: ComboBuilderViewModel = viewModel()) {
@@ -67,6 +85,10 @@ fun ComboBuilderScreen(vm: ComboBuilderViewModel = viewModel()) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        if (!vm.parlayBannerDismissed) {
+            ParlayEducationalBanner(onDismiss = { vm.dismissParlayBanner() })
+        }
 
         vm.legs.forEachIndexed { index, leg ->
             LegEditor(
@@ -95,7 +117,12 @@ fun ComboBuilderScreen(vm: ComboBuilderViewModel = viewModel()) {
             is ComboUiState.Loading -> CircularProgressIndicator()
             is ComboUiState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error)
             is ComboUiState.Success -> ComboResultCard(
-                s.result.legs, s.result.combined_probability_pct, s.result.combined_fair_odds, s.result.note)
+                result = s.result,
+                bookComboOdds = vm.bookComboOdds,
+                onBookComboOddsChange = { vm.updateBookComboOdds(it) },
+                evPct = vm.displayedEvPct(s.result),
+                edge = vm.displayedEdge(s.result),
+            )
             ComboUiState.Idle -> {}
         }
     }
@@ -111,6 +138,7 @@ private fun LegEditor(
     onRemove: () -> Unit,
 ) {
     var marketExpanded by remember { mutableStateOf(false) }
+    val (side1Label, side2Label) = sideChipLabels(leg)
 
     Card(modifier = Modifier.fillMaxWidth().testTag("combo_leg_$index")) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -141,7 +169,7 @@ private fun LegEditor(
                 FilterChip(
                     selected = leg.side == "player1",
                     onClick = { onChange(leg.copy(side = "player1")) },
-                    label = { Text(leg.player1.ifBlank { "Joueur 1" }) },
+                    label = { Text(side1Label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer),
                     modifier = Modifier.testTag("combo_side1_$index"),
@@ -149,7 +177,7 @@ private fun LegEditor(
                 FilterChip(
                     selected = leg.side == "player2",
                     onClick = { onChange(leg.copy(side = "player2")) },
-                    label = { Text(leg.player2.ifBlank { "Joueur 2" }) },
+                    label = { Text(side2Label) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer),
                     modifier = Modifier.testTag("combo_side2_$index"),
@@ -187,16 +215,23 @@ private fun LegEditor(
 }
 
 @Composable
-private fun ComboResultCard(legs: List<ComboLeg>, combinedProb: Double, combinedOdds: Double, note: String) {
+private fun ComboResultCard(
+    result: com.tennisboss.app.data.ComboResult,
+    bookComboOdds: String,
+    onBookComboOddsChange: (String) -> Unit,
+    evPct: Double?,
+    edge: Double?,
+) {
     val AccentColor = Color(0xFF00E5A0)
+    val GoodColor = Color(0xFF00E5A0)
+    val BadColor = Color(0xFFFF6B6B)
     Card(modifier = Modifier.fillMaxWidth().testTag("combo_result")) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Résultat du combiné", style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold)
-            legs.forEach { leg ->
+            result.legs.forEach { leg ->
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    val side = if (leg.side == "player1") leg.player1 else leg.player2
-                    Text("$side — ${MARKET_LABELS[leg.market] ?: leg.market}",
+                    Text("${legSideDisplayName(leg)} — ${MARKET_LABELS[leg.market] ?: leg.market}",
                         style = MaterialTheme.typography.bodySmall)
                     Text("${leg.prob_pct}% · cote ${leg.fair_odds}",
                         style = MaterialTheme.typography.bodySmall,
@@ -205,13 +240,86 @@ private fun ComboResultCard(legs: List<ComboLeg>, combinedProb: Double, combined
             }
             HorizontalDivider()
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Combiné", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text("${combinedProb}% · cote $combinedOdds",
+                Text("Proba combinée", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("${result.combined_probability_pct}%",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold, color = AccentColor)
             }
-            Text(note, style = MaterialTheme.typography.labelSmall,
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Cote juste combo", style = MaterialTheme.typography.bodySmall)
+                Text(String.format(Locale.US, "%.2f", result.combined_fair_odds),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold, color = AccentColor)
+            }
+            OutlinedTextField(
+                value = bookComboOdds,
+                onValueChange = onBookComboOddsChange,
+                label = { Text("Cote combo bookmaker") },
+                placeholder = { Text("ex. 4.50") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("combo_book_odds"),
+            )
+            if (evPct != null) {
+                val evColor = if (evPct >= 0.0) GoodColor else BadColor
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("EV vs cote saisie", style = MaterialTheme.typography.bodySmall)
+                    Text(formatComboEvPct(evPct) + "%",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold, color = evColor,
+                        modifier = Modifier.testTag("combo_ev_pct"))
+                }
+                if (edge != null) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Edge vs marché", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatComboEdgePct(edge) + " pts",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Text(result.note, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Rappel éducatif : les parieurs pros évitent les parlays (variance, pas de CLV combo). */
+@Composable
+private fun ParlayEducationalBanner(onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .testTag("combo_parlay_banner"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            Icons.Filled.Info, contentDescription = null,
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                "Parlays : variance élevée",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                "Les parieurs pros privilégient les singles (CLV, flat stake). " +
+                    "Ce combiné est un outil éducatif — probabilités théoriques, " +
+                    "EV analytique si vous saisissez la cote bookmaker du parlay.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.testTag("combo_parlay_banner_dismiss")) {
+            Icon(
+                Icons.Filled.Close, contentDescription = "Ignorer",
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+            )
         }
     }
 }

@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Text
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * Groupes de navigation — regroupent la bottom nav de 9 à 5 destinations
@@ -70,6 +71,7 @@ fun MatchesGroupScreen(liveVM: LiveViewModel, onMatchClick: (String, String, Str
 @Composable
 fun ValueGroupScreen(onMatchClick: (String, String, String?) -> Unit) {
     var subTab by remember { mutableIntStateOf(0) }
+    val comboVM: ComboBuilderViewModel = viewModel()
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 },
@@ -89,11 +91,17 @@ fun ValueGroupScreen(onMatchClick: (String, String, String?) -> Unit) {
                 text = { Text("Combo", maxLines = 1, overflow = TextOverflow.Ellipsis) })
         }
         when (subTab) {
-            0 -> ValueScreen(onMatchClick = onMatchClick)
+            0 -> ValueScreen(
+                onMatchClick = onMatchClick,
+                onAddToCombo = { pick ->
+                    comboVM.addLegFromValuePick(pick)
+                    subTab = 4
+                },
+            )
             1 -> ScannerScreen()
             2 -> PerformanceScreen()
             3 -> EdgeScreen()
-            else -> ComboBuilderScreen()
+            else -> ComboBuilderScreen(vm = comboVM)
         }
     }
 }

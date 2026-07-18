@@ -68,6 +68,8 @@ class FakeApi(
     private val throwError: Throwable? = null,
 ) : TennisBossApi {
 
+    var lastChatRequest: ChatRequest? = null
+
     override suspend fun health(): Health = Health("ok", "test", "1.0", 0)
 
     override suspend fun predict(p1: String, p2: String): PredictResponse {
@@ -188,6 +190,7 @@ class FakeApi(
     override suspend fun valueHistory(limit: Int): ValueHistoryResponse = throw NotImplementedError("non utilisé")
     override suspend fun chat(request: ChatRequest): ChatResponse {
         throwError?.let { throw it }
+        lastChatRequest = request
         return chatResponse ?: throw NotImplementedError("chatResponse non fourni")
     }
 

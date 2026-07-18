@@ -6,6 +6,11 @@ import com.tennisboss.app.data.ComboResult
 import com.tennisboss.app.ui.ComboBuilderViewModel
 import com.tennisboss.app.ui.ComboLegInput
 import com.tennisboss.app.ui.ComboUiState
+import com.tennisboss.app.data.ValueComparison
+import com.tennisboss.app.ui.computeComboEdge
+import com.tennisboss.app.ui.computeComboEvPct
+import com.tennisboss.app.ui.parseBookComboOdds
+import com.tennisboss.app.ui.toComboLegInput
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -115,5 +120,98 @@ class ComboBuilderViewModelTest {
         vm.calculate()
         advanceUntilIdle()
         assertTrue(vm.state is ComboUiState.Error)
+    }
+
+    @Test
+    fun `toComboLegInput mappe best_side vers player1 ou player2`() {
+        val pick = ValueComparison(
+            player1 = "Sinner",
+            player2 = "Alcaraz",
+            best_side = "Alcaraz",
+            ev1 = 2.0,
+            ev2 = 8.0,
+            value = true,
+        )
+        val leg = pick.toComboLegInput()
+        assertEquals("Sinner", leg.player1)
+        assertEquals("Alcaraz", leg.player2)
+        assertEquals("player2", leg.side)
+        assertEquals("match", leg.market)
+    }
+
+    @Test
+    fun `addLegFromValuePick remplit la premiere leg vide`() {
+        val vm = ComboBuilderViewModel()
+        vm.updateLeg(1, ComboLegInput(player1 = "X", player2 = "Y"))
+        vm.addLegFromValuePick(
+            ValueComparison(
+                player1 = "A",
+                player2 = "B",
+                best_side = "A",
+                value = true,
+            ),
+        )
+        assertEquals("A", vm.legs[0].player1)
+        assertEquals("B", vm.legs[0].player2)
+        assertEquals("player1", vm.legs[0].side)
+        assertEquals("X", vm.legs[1].player1)
+    }
+
+    @Test
+    fun `addLegFromValuePick ajoute une leg si toutes sont remplies et moins de 4`() {
+        val vm = ComboBuilderViewModel()
+        vm.updateLeg(0, ComboLegInput(player1 = "A", player2 = "B"))
+        vm.updateLeg(1, ComboLegInput(player1 = "C", player2 = "D"))
+        vm.addLegFromValuePick(
+            ValueComparison(
+                player1 = "E",
+                player2 = "F",
+                best_side = "F",
+                value = true,
+            ),
+        )
+        assertEquals(3, vm.legs.size)
+        assertEquals("E", vm.legs[2].player1)
+        assertEquals("player2", vm.legs[2].side)
+    }
+
+    @Test
+    fun `dismissParlayBanner masque le bandeau`() {
+        val vm = ComboBuilderViewModel()
+        assertFalse(vm.parlayBannerDismissed)
+        vm.dismissParlayBanner()
+        assertTrue(vm.parlayBannerDismissed)
+    }
+
+    @Test
+    fun `computeComboEvPct calcule EV analytique`() {
+        assertEquals(25.0, computeComboEvPct(25.0, 5.0), 0.01)
+        assertEquals(-10.0, computeComboEvPct(30.0, 3.0), 0.01)
+    }
+
+    @Test
+    fun `computeComboEdge calcule edge vs marche`() {
+        assertEquals(0.05, computeComboEdge(25.0, 5.0), 0.001)
+        assertEquals(-0.0333, computeComboEdge(30.0, 3.0), 0.001)
+    }
+
+    @Test
+    fun `parseBookComboOdds accepte decimales et virgule`() {
+        assertEquals(4.5, parseBookComboOdds("4,50")!!, 0.001)
+        assertEquals(null, parseBookComboOdds("1.0"))
+        assertEquals(null, parseBookComboOdds("abc"))
+    }
+
+    @Test
+    fun `displayedEvPct utilise saisie locale apres calcul`() {
+        val vm = ComboBuilderViewModel()
+        val result = ComboResult(
+            legs = emptyList(),
+            combined_probability_pct = 20.0,
+            combined_fair_odds = 5.0,
+            ev_pct = 999.0,
+        )
+        vm.updateBookComboOdds("6.0")
+        assertEquals(20.0, vm.displayedEvPct(result)!!, 0.01)
     }
 }

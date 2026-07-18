@@ -88,7 +88,7 @@ fun BetBuilderView(
         bb?.total_sets?.let { ts ->
             if (ts.prob_over > 0 || ts.prob_under > 0) {
                 MarketBar(
-                    "Total sets (2.5)", "Plus", ts.prob_over, "Moins", ts.prob_under,
+                    "Total sets (2.5)", "Plus de 2.5", ts.prob_over, "Moins de 2.5", ts.prob_under,
                     AmberColor, MaterialTheme.colorScheme.onSurfaceVariant,
                     fairOdds1 = ts.fair_odds_over, fairOdds2 = ts.fair_odds_under,
                 )

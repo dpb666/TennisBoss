@@ -26,7 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -246,6 +247,46 @@ private fun MessageBubble(msg: ChatMessage) {
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+                }
+                if (msg.tools_called.isNotEmpty() || msg.sources.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (msg.tools_called.isNotEmpty()) {
+                            AssistChip(
+                                onClick = {},
+                                enabled = false,
+                                label = {
+                                    Text(
+                                        "Outils : ${msg.tools_called.joinToString(", ")}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                ),
+                            )
+                        }
+                        if (msg.sources.isNotEmpty()) {
+                            AssistChip(
+                                onClick = {},
+                                enabled = false,
+                                label = {
+                                    Text(
+                                        "Sources : ${msg.sources.take(2).joinToString(" · ")}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    disabledContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                    disabledLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                ),
+                            )
+                        }
+                    }
                 }
             }
         }

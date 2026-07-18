@@ -127,4 +127,42 @@ class ChatViewModelTest {
         assertTrue(vm.messages.isEmpty())
         assertEquals(null, vm.error)
     }
+
+    @Test
+    fun `resolveChatMode uses analyst for agent prefix and technical keywords`() {
+        val vm = ChatViewModel()
+        assertEquals("analyst", vm.resolveChatMode("@stats_agent Sinner vs Alcaraz"))
+        assertEquals("analyst", vm.resolveChatMode("Quel est notre ROI cette semaine ?"))
+        assertEquals("chat", vm.resolveChatMode("Qui domine sur terre ?"))
+    }
+
+    @Test
+    fun `send uses analyst mode for agent queries`() = runTest(dispatcher) {
+        val fake = FakeApi(chatResponse = ChatResponse(reply = "Analyse ROI", mode = "analyst"))
+        ApiClient.apiOverride = fake
+        val vm = ChatViewModel()
+
+        vm.send("@odds_agent meilleurs value bets")
+        advanceUntilIdle()
+
+        assertEquals("analyst", fake.lastChatRequest?.mode)
+    }
+
+    @Test
+    fun `send stores tools_called and sources on assistant message`() = runTest(dispatcher) {
+        ApiClient.apiOverride = FakeApi(
+            chatResponse = ChatResponse(
+                reply = "ROI flat +2%",
+                tools_called = listOf("query_bet_history"),
+                sources = listOf("bet_history"),
+            ),
+        )
+        val vm = ChatViewModel()
+
+        vm.send("Quel est notre ROI ?")
+        advanceUntilIdle()
+
+        assertEquals(listOf("query_bet_history"), vm.messages[1].tools_called)
+        assertEquals(listOf("bet_history"), vm.messages[1].sources)
+    }
 }

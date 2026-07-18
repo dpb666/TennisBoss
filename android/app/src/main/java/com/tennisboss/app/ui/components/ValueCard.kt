@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -43,7 +44,11 @@ private val P2Color = Color(0xFF00C2A8)
  * badge confiance.
  */
 @Composable
-fun ValueCard(c: ValueComparison, onClick: (() -> Unit)? = null) {
+fun ValueCard(
+    c: ValueComparison,
+    onClick: (() -> Unit)? = null,
+    onAddToCombo: (() -> Unit)? = null,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -132,6 +137,12 @@ fun ValueCard(c: ValueComparison, onClick: (() -> Unit)? = null) {
                     fontWeight = FontWeight.Bold,
                     color = GoodColor,
                 )
+                if (onAddToCombo != null) {
+                    OutlinedButton(
+                        onClick = onAddToCombo,
+                        modifier = Modifier.fillMaxWidth().testTag("value_add_to_combo"),
+                    ) { Text("🧩 Ajouter au combo") }
+                }
             }
         }
     }

@@ -946,7 +946,12 @@ def api_bet_builder_combo():
 
     Body JSON: {"legs": [{"player1","player2","side":"player1"|"player2",
     "market":"match"|"set2"|"total_sets"|"handicap" (défaut "match"),
-    "surface"?}, ...]}
+    "surface"?}, ...], "book_odds"?}
+
+    Si ``book_odds`` (cote combinée bookmaker saisie par l'utilisateur) est
+    fournie (> 1), la réponse inclut ``ev_pct`` et ``edge`` analytiques :
+    EV% = (proba_combinée × book_odds − 1) × 100 ;
+    edge = proba_combinée − 1/book_odds (vs probabilité implicite marché).
 
     Probabilité combinée = produit des probas individuelles (hypothèse
     d'indépendance ENTRE MATCHS DIFFÉRENTS — standard pour un parlay, mais
@@ -964,6 +969,15 @@ def api_bet_builder_combo():
     legs_in = data.get("legs") or []
     if not isinstance(legs_in, list) or not (2 <= len(legs_in) <= 4):
         return jsonify({"error": "2 à 4 legs requis (champ 'legs')"}), 400
+
+    book_odds: Optional[float] = None
+    if "book_odds" in data and data.get("book_odds") is not None:
+        try:
+            book_odds = float(data["book_odds"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "book_odds doit être un nombre > 1"}), 400
+        if book_odds <= 1.0:
+            return jsonify({"error": "book_odds doit être > 1"}), 400
 
     legs_out: List[Dict[str, Any]] = []
     combined_prob = 1.0
@@ -997,7 +1011,7 @@ def api_bet_builder_combo():
             "prob_pct": round(prob_pct, 1), "fair_odds": round(fair_odds_leg, 2),
         })
 
-    return jsonify({
+    out: Dict[str, Any] = {
         "legs": legs_out,
         "n_legs": len(legs_out),
         "combined_probability_pct": round(combined_prob * 100, 2),
@@ -1006,7 +1020,12 @@ def api_bet_builder_combo():
                  "d'indépendance entre matchs différents — ignore toute corrélation "
                  "éventuelle). Cote combinée = cote JUSTE théorique, pas une cote de "
                  "bookmaker réelle pour les marchés hors 'match'."),
-    })
+    }
+    if book_odds is not None:
+        out["book_odds"] = round(book_odds, 2)
+        out["ev_pct"] = round((combined_prob * book_odds - 1.0) * 100, 1)
+        out["edge"] = round(combined_prob - 1.0 / book_odds, 4)
+    return jsonify(out)
 
 
 @app.get("/api/predict")

@@ -452,6 +452,21 @@ def cmd_clv_weekly(args) -> None:
     print(json.dumps(stats, indent=2, ensure_ascii=True, default=str))
 
 
+def cmd_weekly_audit(args) -> None:
+    """Audit opérationnel hebdo : bet_history, logging, CLV, volume picks."""
+    from bot import weekly_audit
+    days = max(1, int(getattr(args, "days", 7)))
+    hours = max(1, int(getattr(args, "logging_hours", 24)))
+    audit = weekly_audit.run_audit(days=days, logging_hours=hours)
+    _safe_print(weekly_audit.format_report(audit))
+    if getattr(args, "json", False):
+        print("\n--- JSON ---")
+        print(json.dumps(audit, indent=2, ensure_ascii=True, default=str))
+    if getattr(args, "telegram", False):
+        sent = weekly_audit.send_telegram_digest(audit)
+        print(f"\nTelegram : {'envoyé' if sent else 'non envoyé (token/chat manquant)'}")
+
+
 def cmd_validate_tis(args) -> None:
     from bot import validate_tis
     db.init()
@@ -662,6 +677,15 @@ def main() -> None:
     p_clv = sub.add_parser("clv-weekly", help="Rapport CLV des N derniers jours")
     p_clv.add_argument("--days", type=int, default=7, help="Fenêtre glissante (défaut 7)")
     p_clv.set_defaults(func=cmd_clv_weekly)
+
+    p_wa = sub.add_parser("weekly-audit",
+                          help="Audit opérationnel (bet_history, logging, CLV, picks)")
+    p_wa.add_argument("--days", type=int, default=7, help="Fenêtre glissante (défaut 7)")
+    p_wa.add_argument("--logging-hours", type=int, default=24,
+                      help="Fenêtre complétude logging (défaut 24h)")
+    p_wa.add_argument("--json", action="store_true", help="Afficher le JSON complet")
+    p_wa.add_argument("--telegram", action="store_true", help="Envoyer le digest Telegram")
+    p_wa.set_defaults(func=cmd_weekly_audit)
 
     p_vtis = sub.add_parser("validate-tis", help="Validation Tennis Intelligence Score")
     p_vtis.add_argument("--limit", type=int, default=50, help="Nb de paires à tester")

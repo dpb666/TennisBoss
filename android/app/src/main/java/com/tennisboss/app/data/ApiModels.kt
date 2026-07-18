@@ -88,17 +88,23 @@ data class ChatMessage(
     val role: String,    // "user" ou "assistant"
     val content: String,
     val context_used: Boolean = false,   // réponse ancrée dans nos données (pas juste le LLM seul)
+    val tools_called: List<String> = emptyList(),
+    val sources: List<String> = emptyList(),
 )
 
 data class ChatRequest(
     val message: String,
     val history: List<ChatMessage> = emptyList(),
+    val mode: String = "chat",   // "chat" | "analyst" — voir docs/AI_ASSISTANT_ARCHITECTURE.md §3.5
 )
 
 data class ChatResponse(
     val reply: String? = null,
     val error: String? = null,
     val context_used: Boolean = false,
+    val mode: String? = null,
+    val tools_called: List<String>? = null,
+    val sources: List<String>? = null,
 )
 
 data class FirstSet(
@@ -354,6 +360,12 @@ data class ComboResult(
     val combined_probability_pct: Double = 0.0,
     val combined_fair_odds: Double = 0.0,
     val note: String = "",
+    /** Cote combinée bookmaker (si envoyée dans la requête). */
+    val book_odds: Double? = null,
+    /** EV analytique % = (proba × book_odds − 1) × 100. */
+    val ev_pct: Double? = null,
+    /** Edge vs marché = proba − 1/book_odds. */
+    val edge: Double? = null,
 )
 
 /** Requête envoyée à /api/bet-builder/combo. */
@@ -367,6 +379,8 @@ data class ComboLegRequest(
 
 data class ComboRequest(
     val legs: List<ComboLegRequest>,
+    /** Cote combinée bookmaker optionnelle — déclenche ev_pct/edge dans la réponse. */
+    val book_odds: Double? = null,
 )
 
 data class PredictResponse(

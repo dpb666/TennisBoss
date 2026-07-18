@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tennisboss.app.data.ValueComparison
 import com.tennisboss.app.data.ValuePickHistory
 import com.tennisboss.app.ui.components.SkeletonList
 import com.tennisboss.app.ui.components.SurfaceBadge
@@ -62,6 +63,7 @@ private val P2Color = Color(0xFF00C2A8)
 @Composable
 fun ValueScreen(
     onMatchClick: ((String, String, String?) -> Unit)? = null,
+    onAddToCombo: ((ValueComparison) -> Unit)? = null,
     vm: ValueViewModel = viewModel()
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -119,7 +121,7 @@ fun ValueScreen(
         }
 
         when (selectedTab) {
-            0 -> ValuePicksTab(onMatchClick, vm)
+            0 -> ValuePicksTab(onMatchClick, onAddToCombo, vm)
             1 -> ValueHistoryTab(vm)
         }
     }
@@ -129,6 +131,7 @@ fun ValueScreen(
 @Composable
 private fun ValuePicksTab(
     onMatchClick: ((String, String, String?) -> Unit)? = null,
+    onAddToCombo: ((ValueComparison) -> Unit)? = null,
     vm: ValueViewModel
 ) {
     Column(
@@ -201,7 +204,15 @@ private fun ValuePicksTab(
                                         )
                                     }
                                 }
-                                items(filtered) { ValueCard(it, onClick = { onMatchClick?.invoke(it.player1, it.player2, null) }) }
+                                items(filtered) {
+                                    ValueCard(
+                                        it,
+                                        onClick = { onMatchClick?.invoke(it.player1, it.player2, null) },
+                                        onAddToCombo = if (it.value && it.best_side != null) {
+                                            { onAddToCombo?.invoke(it) }
+                                        } else null,
+                                    )
+                                }
                             }
                         }
                     }

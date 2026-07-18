@@ -620,3 +620,27 @@ def test_combo_supports_total_sets_market():
     assert resp.status_code == 200
     assert data["legs"][0]["market"] == "total_sets"
     assert data["legs"][1]["market"] == "handicap"
+
+
+def test_combo_with_book_odds_returns_ev_and_edge():
+    legs = [
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player1", "market": "match"},
+        {"player1": "Carlos Alcaraz", "player2": "Jannik Sinner", "side": "player2", "market": "match"},
+    ]
+    book_odds = 3.5
+    resp = _client().post("/api/bet-builder/combo", json={"legs": legs, "book_odds": book_odds})
+    data = resp.get_json()
+    assert resp.status_code == 200
+    prob = data["combined_probability_pct"] / 100.0
+    assert data["book_odds"] == book_odds
+    assert abs(data["ev_pct"] - (prob * book_odds - 1.0) * 100) < 0.15
+    assert abs(data["edge"] - (prob - 1.0 / book_odds)) < 1e-4
+
+
+def test_combo_rejects_invalid_book_odds():
+    legs = [
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player1"},
+        {"player1": "Jannik Sinner", "player2": "Carlos Alcaraz", "side": "player2"},
+    ]
+    resp = _client().post("/api/bet-builder/combo", json={"legs": legs, "book_odds": 0.9})
+    assert resp.status_code == 400
