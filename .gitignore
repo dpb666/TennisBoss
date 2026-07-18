@@ -26,3 +26,4 @@ venv/
 
 # Logs de build/émulateur Android (générés localement)
 android/*.log
+hs_err_pid*.log
