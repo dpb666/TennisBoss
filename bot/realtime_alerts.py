@@ -269,6 +269,33 @@ class _Compat:
         return bool(_bot_token() and _chat_id())
 
 
+def alert_logging_completeness(pct: float, n: int, n_complete: int,
+                               *, hours: int = 24) -> None:
+    """Telegram alert when CLV repro logging completeness drops (dedup 1×/jour)."""
+    from . import db
+
+    today = time.strftime("%Y-%m-%d")
+    if db.get_meta("last_logging_completeness_alert_date") == today:
+        return
+    if not _bot_token() or not _chat_id():
+        return
+    worst = ""
+    try:
+        report = db.clv_logging_completeness_recent(hours=hours)
+        worst = report.get("most_incomplete_field") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    worst_s = f"\nChamp le plus absent : `{worst}`" if worst else ""
+    msg = (
+        f"⚠️ *Logging CLV incomplet*\n"
+        f"Complétude *{pct:.0f}%* sur {n_complete}/{n} picks ({hours}h) "
+        f"(seuil 90%).{worst_s}\n"
+        f"Vérifier `/api/logging/health` et les champs repro (ADR-005 gate)."
+    )
+    _send(msg)
+    db.set_meta("last_logging_completeness_alert_date", today)
+
+
 _SINGLETON: Optional[_Compat] = None
 
 

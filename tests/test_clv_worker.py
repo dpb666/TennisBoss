@@ -60,8 +60,38 @@ class TestRefreshClvOnce:
             out = worker.refresh_clv_once()
 
         assert out["closing_updated"] == 1
+        assert out["matched_by_id"] == 1
         refresh.assert_called_once()
         alert.assert_called_once()
+
+    def test_updates_prematch_closing_by_event_key_when_names_mismatch(self):
+        picks = [_open_pick(event_key="odds-99", p1="Last, First", p2="Other, Player")]
+        prematch_ev = {
+            "id": "odds-99",
+            "status": "pending",
+            "date": "2026-07-17",
+            "home": "First Last",
+            "away": "Player Other",
+        }
+        mw = {"home_odds": 2.05, "away_odds": 1.80}
+        sharp = {"home_odds": 2.00, "away_odds": 1.85}
+
+        with patch.object(worker, "log"), patch("bot.db.list_clv_open", return_value=picks), patch(
+            "bot.odds_api.is_enabled", return_value=True,
+        ), patch("bot.odds_api._current_key", return_value="key"), patch(
+            "bot.odds_api.fetch_tennis_events", return_value=[prematch_ev],
+        ), patch("bot.odds_api.build_event_index", side_effect=[{}, {}]), patch(
+            "bot.odds_api.fetch_match_winner", side_effect=[mw, sharp]), patch(
+            "bot.odds_api._sharp_book", return_value="betfair",
+        ), patch("bot.clv.refresh_closing") as refresh, patch(
+            "bot.realtime_alerts.on_odds_move",
+        ):
+            out = worker.refresh_clv_once()
+
+        assert out["closing_updated"] == 1
+        assert out["matched_by_id"] == 1
+        assert out["event_not_found"] == 0
+        refresh.assert_called_once()
 
     def test_live_settle_when_match_finished(self):
         picks = [_open_pick()]

@@ -1906,6 +1906,42 @@ def clv_logging_completeness_report(bucket: str = "week", limit_buckets: int = 2
     }
 
 
+def clv_logging_completeness_recent(hours: int = 24) -> Dict[str, Any]:
+    """Complétude des champs repro sur les picks des N dernières heures."""
+    import datetime as _dt
+
+    hours = max(1, int(hours))
+    cutoff = (
+        _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=hours)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clv_log WHERE COALESCE(pick_ts, date || 'T00:00:00') >= ?",
+            (cutoff,),
+        ).fetchall()
+
+    n = len(rows)
+    n_complete = 0
+    field_missing_counts: Dict[str, int] = {f: 0 for f in CLV_REPRO_FIELDS}
+    for r in rows:
+        missing = validate_clv_pick_row(r)
+        if not missing:
+            n_complete += 1
+        for f in missing:
+            field_missing_counts[f] += 1
+
+    return {
+        "hours": hours,
+        "cutoff": cutoff,
+        "n": n,
+        "n_complete": n_complete,
+        "completeness_pct": round(n_complete / n * 100, 1) if n else None,
+        "missing_field_counts": field_missing_counts,
+        "most_incomplete_field": (max(field_missing_counts, key=field_missing_counts.get)
+                                  if n and any(field_missing_counts.values()) else None),
+    }
+
+
 def list_clv_open() -> List[sqlite3.Row]:
     """Picks sans closing line encore captée (à snapshotter avant le match)."""
     with connect() as conn:

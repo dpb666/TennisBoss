@@ -20,6 +20,8 @@ from ..log import log
 LIVE_STATUSES: Set[str] = {"live", "inplay"}
 DEFAULT_STARTUP_DELAY_S = 30
 DEFAULT_LOOP_INTERVAL_S = 600
+# Closing odds TTL : plus court que TTL_ODDS (10min) pour capturer le drift pré-match.
+CLV_ODDS_TTL_S = 120
 
 
 def _env_int(name: str, default: int) -> int:
@@ -38,6 +40,37 @@ def _sets_target(h_sets: int, a_sets: int) -> int:
     return 3 if max(h_sets, a_sets) >= 3 else 2
 
 
+def _find_event_for_pick(
+    pick: Dict[str, Any],
+    prematch_idx: Dict[frozenset, Dict[str, Any]],
+    live_idx: Dict[frozenset, Dict[str, Any]],
+    all_events: List[Dict[str, Any]],
+) -> tuple[Optional[Dict[str, Any]], str]:
+    """Resolve odds-api event for a CLV pick.
+
+    Prefer ``event_key`` (odds-api id stored at seed time) — name matching
+    alone failed silently when player name formats diverged (~Jul 2026),
+    leaving closing_odds NULL until settle's last_seen fallback (CLV=0).
+    """
+    from .. import odds_api
+
+    event_key = str(pick.get("event_key") or "").strip()
+    if event_key:
+        for ev in all_events:
+            if str(ev.get("id") or "") == event_key:
+                return ev, "id"
+
+    p1 = pick["player1"]
+    p2 = pick["player2"]
+    lev = odds_api.find_event(live_idx, p1, p2)
+    if lev:
+        return lev, "name"
+    ev = odds_api.find_event(prematch_idx, p1, p2)
+    if ev:
+        return ev, "name"
+    return None, ""
+
+
 def refresh_clv_once() -> Dict[str, Any]:
     """Run one CLV closing / live-settle cycle (testable, no sleep)."""
     from .. import clv, db, odds_api
@@ -48,6 +81,9 @@ def refresh_clv_once() -> Dict[str, Any]:
         "open_picks": len(open_picks),
         "closing_updated": 0,
         "settled_live": 0,
+        "matched_by_id": 0,
+        "matched_by_name": 0,
+        "event_not_found": 0,
         "skipped": False,
         "reason": None,
     }
@@ -76,9 +112,17 @@ def refresh_clv_once() -> Dict[str, Any]:
         p2 = pick["player2"]
         pick_side = pick["pick_side"]
 
-        lev = odds_api.find_event(idx_live, p1, p2)
-        if lev:
-            scores = lev.get("scores") or {}
+        ev, match_method = _find_event_for_pick(pick, idx, idx_live, all_events)
+        if not ev:
+            summary["event_not_found"] += 1
+            continue
+        if match_method == "id":
+            summary["matched_by_id"] += 1
+        elif match_method == "name":
+            summary["matched_by_name"] += 1
+
+        if ev.get("status") in LIVE_STATUSES:
+            scores = ev.get("scores") or {}
             try:
                 h_sets = int(scores.get("home", 0))
                 a_sets = int(scores.get("away", 0))
@@ -86,7 +130,7 @@ def refresh_clv_once() -> Dict[str, Any]:
                 h_sets = a_sets = 0
             target = _sets_target(h_sets, a_sets)
             if h_sets >= target or a_sets >= target:
-                live_winner = lev.get("home") if h_sets > a_sets else lev.get("away")
+                live_winner = ev.get("home") if h_sets > a_sets else ev.get("away")
                 if live_winner:
                     try:
                         clv.settle(p1, p2, live_winner)
@@ -99,14 +143,13 @@ def refresh_clv_once() -> Dict[str, Any]:
                         log(f"CLV live-settle erreur: {exc}", "WARN")
             continue
 
-        ev = odds_api.find_event(idx, p1, p2)
-        if not ev:
-            continue
-        mw = odds_api.fetch_match_winner(ev["id"])
+        mw = odds_api.fetch_match_winner(ev["id"], ttl=CLV_ODDS_TTL_S)
         if not mw:
             continue
         curr_odds = mw["home_odds"] if pick_side == p1 else mw["away_odds"]
-        mw_sharp = odds_api.fetch_match_winner(ev["id"], bookmakers=odds_api._sharp_book())
+        mw_sharp = odds_api.fetch_match_winner(
+            ev["id"], bookmakers=odds_api._sharp_book(), ttl=CLV_ODDS_TTL_S,
+        )
         if mw_sharp:
             sharp_h = mw_sharp["home_odds"]
             sharp_a = mw_sharp["away_odds"]

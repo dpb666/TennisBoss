@@ -152,6 +152,26 @@ class SystemMonitor:
             "accuracy_drift_pts": drift_pts,
         }
 
+    def check_logging_completeness(self, *, hours: int = 24,
+                                   threshold_pct: float = 90.0) -> Dict[str, Any]:
+        """Alert if CLV repro-field completeness in the last N hours drops below threshold."""
+        report = db.clv_logging_completeness_recent(hours=hours)
+        pct = report.get("completeness_pct")
+        n = report.get("n") or 0
+        status = "ok"
+        if n >= 3 and pct is not None and pct < threshold_pct:
+            status = "warning"
+            self.alerts.append(
+                f"CLV logging completeness {pct}% < {threshold_pct}% "
+                f"({report.get('n_complete', 0)}/{n} picks, {hours}h)"
+            )
+            try:
+                from . import realtime_alerts as _ra
+                _ra.alert_logging_completeness(pct, n, report.get("n_complete", 0), hours=hours)
+            except Exception as exc:  # noqa: BLE001
+                log(f"Logging completeness Telegram alert failed: {exc}", "WARN")
+        return {"status": status, **report}
+
     def run_full_check(self) -> Dict[str, Any]:
         """Execute all health checks."""
         log("=== SYSTEM MONITOR: Full check ===", "INFO")
@@ -161,6 +181,7 @@ class SystemMonitor:
             "api_endpoints": self.check_api_endpoints(),
             "odds_api": self.check_odds_api(),
             "model_drift": self.check_model_drift(),
+            "logging_completeness": self.check_logging_completeness(),
         }
         try:
             endpoint_timings = json.loads(db.get_meta("endpoint_timings") or "{}")
