@@ -66,17 +66,25 @@ Or: `scripts/deploy.sh --no-pull` when already on the target commit.
 | `pytest -k clv_worker` | **11 passed** |
 | Off-site backup dry-run | **Partial** — archive created under `%TEMP%\tennisboss-backup-dryrun`; `state/backups/*.db` skipped when locked by running bot (expected on live host) |
 
-### Off-site backup scheduling (manual)
+### Off-site backup scheduling
 
-Scripts verified: `scripts/backup_offsite.sh`, `scripts/backup_offsite.ps1`. Set **`BACKUP_DEST`** to a cloud-sync or off-machine folder; optional **`BACKUP_ENCRYPT_PASS`** for encryption (host `.env` only — never commit). See `docs/BACKUP.md`.
+**scheduled:** yes — Windows task `TennisBoss-OffsiteBackup-Weekly` (Sunday 00:00 local / 04:00 UTC EDT).
 
-**WSL cron (suggested — Sunday 04:00 UTC):**
+| Item | Detail |
+|---|---|
+| `BACKUP_DEST` | `C:\Users\donpa\Documents\TennisBoss-backups` |
+| Next run (verified) | `2026-07-19 00:00:00` local |
+| Test (2026-07-18) | **OK** — `tennisboss-state-20260719T013603Z.zip` (~347 MiB) under `%TEMP%\tennisboss-backup-test-*`; exit 0 |
 
-```bash
-0 4 * * 0 cd /mnt/c/Users/donpa/TennisBoss && BACKUP_DEST=/mnt/backups/tennisboss ./scripts/backup_offsite.sh >> /var/log/tennisboss-backup.log 2>&1
+Task action:
+
+```text
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$env:BACKUP_DEST='C:\Users\donpa\Documents\TennisBoss-backups'; Set-Location 'C:\Users\donpa\TennisBoss'; & 'C:\Users\donpa\TennisBoss\scripts\backup_offsite.ps1' *>> 'C:\Users\donpa\Documents\TennisBoss-backups\backup.log'"
 ```
 
-**Windows Task Scheduler:** weekly trigger → PowerShell `-File scripts\backup_offsite.ps1` with user env `BACKUP_DEST` (and optional `BACKUP_ENCRYPT_PASS`) set in the task or profile.
+WSL cron (optional, not installed): `0 4 * * 0 cd /mnt/c/Users/donpa/TennisBoss && BACKUP_DEST=/mnt/c/Users/donpa/Documents/TennisBoss-backups ./scripts/backup_offsite.sh >> /mnt/c/Users/donpa/Documents/TennisBoss-backups/backup-wsl.log 2>&1`
+
+See `docs/BACKUP.md`.
 
 ---
 
