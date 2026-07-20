@@ -16,7 +16,7 @@
 | Value scanner | `_value_scanner_loop` + `_SCANNER_STATE` | `bot/workers/value_scanner.py` | **Done** (2026-07-16) | ~320 |
 | Telegram digest | `_digest_loop` | `bot/workers/telegram_worker.py` | **Done** (2026-07-16) | ~43 |
 | Telegram poll | `_tg_poll_loop` | `bot/workers/telegram_worker.py` | **Done** (2026-07-16) | ~103 |
-| Data refresh | `_data_refresh_loop` | `bot/workers/data_refresh_worker.py` | Planned | ~35 |
+| Data refresh | `_data_refresh_loop` | `bot/workers/data_refresh_worker.py` | **Done** (2026-07-20) | ~31 |
 
 **Still in api.py (not daemons):** HTTP routes, `_SCANNER_STATE` + `/api/scanner/status`, caches, `_MEM`, calibration refit hooks used by settlement.
 
@@ -186,10 +186,41 @@ from bot.workers.telegram_worker import (
 
 ---
 
+## Phase 7 — `data_refresh_worker` (shipped)
+
+### Notes
+
+- Nightly ingest from tennis-data.co.uk at 02:00 local; ELO rebuild when new rows inserted.
+- Uses ``db``, ``tennisdata_feeder``, ``elo``, ``memory`` — no predictor or settlement deps.
+
+### Interface
+
+```python
+from bot.workers.data_refresh_worker import (
+    DataRefreshCycleState,
+    refresh_data_once,
+    run_loop,
+    start_daemon_thread,
+)
+```
+
+### Environment variables (optional)
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `DATA_REFRESH_STARTUP_DELAY_S` | 60 | Delay before first cycle |
+| `DATA_REFRESH_INTERVAL_S` | 1800 | Seconds between checks (30 min) |
+| `DATA_REFRESH_HOUR` | 2 | Local hour for nightly ingest |
+
+### Tests
+
+`tests/test_data_refresh_worker.py` — 8 tests.
+
+---
+
 ## Remaining decomposition plan
 
-1. **Data refresh** — `_data_refresh_loop`.
-2. **Flask blueprints** — Phase 2 (roadmap #7).
+1. **Flask blueprints** — Phase 2 (roadmap #7).
 
 ---
 
@@ -206,4 +237,4 @@ from bot.workers.telegram_worker import (
 
 ## Next recommended task
 
-Extract **data refresh** (`_data_refresh_loop`) into `bot/workers/data_refresh_worker.py`.
+Extract HTTP routes into Flask blueprints (roadmap #7).

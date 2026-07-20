@@ -3602,36 +3602,9 @@ def _digest_loop() -> None:
 
 
 def _data_refresh_loop() -> None:
-    """Rafraîchit les données tennis (tennis-data.co.uk) à 2h du matin."""
-    import datetime as _dt_r
-    import time as _time_r
-    _refreshed_on: str = ""
-    _time_r.sleep(60)  # attendre démarrage complet
-    while True:
-        try:
-            now = _dt_r.datetime.now()
-            today = now.date().isoformat()
-            if now.hour == 2 and _refreshed_on != today:
-                log("Data refresh: ingest tennis-data.co.uk...")
-                from . import tennisdata_feeder as _tdf
-                result = _tdf.ingest(years=[now.year, now.year - 1])
-                inserted = result.get("inserted", 0)
-                log(f"Data refresh: {inserted} nouveaux matchs.")
-                if inserted > 0:
-                    # Rebuild ELO incrémental
-                    from . import elo as _elo, memory as _mem
-                    rows = db.all_matches_chrono()
-                    elo_r = {}
-                    for row in rows:
-                        _elo.update(elo_r, dict(row).get("winner"), dict(row).get("loser"))
-                    mem = _mem.load()
-                    mem["elo"] = elo_r
-                    _mem.save(mem)
-                    log(f"ELO rebuild: {len(elo_r)} joueurs.")
-                _refreshed_on = today
-        except Exception as exc:
-            log(f"Data refresh erreur: {exc}", "WARN")
-        _time_r.sleep(1800)  # check toutes les 30min
+    """Compatibility shim — implementation: ``bot.workers.data_refresh_worker``."""
+    from .workers.data_refresh_worker import run_loop
+    run_loop()
 
 
 def _tg_poll_loop() -> None:
