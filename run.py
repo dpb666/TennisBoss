@@ -511,6 +511,23 @@ def cmd_backfill_bet_history(args) -> None:
         print(f"bet_history : {arch['patched']} surfaces corrigées (archive matches)")
 
 
+def cmd_backfill_clv_repro(args) -> None:
+    db.init()
+    result = db.backfill_clv_repro_fields(
+        limit=args.limit,
+        since=args.since or None,
+        dry_run=args.dry_run,
+    )
+    print(
+        f"clv_log repro backfill depuis {result['since']} : "
+        f"{result['patched_rows']}/{result['candidates']} lignes patchées "
+        f"(legacy ignorés={result['skipped_legacy_no_model']}, "
+        f"dry_run={result['dry_run']})"
+    )
+    if result.get("fields_patched"):
+        print(f"  champs : {result['fields_patched']}")
+
+
 def cmd_backfill_clv_closing(args) -> None:
     """Recalcule CLV pour picks réglés avec closing_src=last_seen (post Jul-2026 bug)."""
     from bot import clv_backfill
@@ -750,6 +767,17 @@ def main() -> None:
                         help="N'utiliser que market_snapshots locaux")
     p_clvb.add_argument("--verbose", action="store_true", help="JSON détaillé")
     p_clvb.set_defaults(func=cmd_backfill_clv_closing)
+
+    p_clvr = sub.add_parser(
+        "backfill-clv-repro",
+        help="Remplit surface/tournoi/rankings manquants sur clv_log (post-migration)",
+    )
+    p_clvr.add_argument("--since", default=db.CLV_REPRO_EPOCH,
+                        help="Timestamp ISO min pick_ts (défaut repro epoch)")
+    p_clvr.add_argument("--limit", type=int, default=5000, help="Max lignes clv_log")
+    p_clvr.add_argument("--dry-run", action="store_true",
+                        help="Diagnostic sans écriture DB")
+    p_clvr.set_defaults(func=cmd_backfill_clv_repro)
 
     p_surf = sub.add_parser("surface-benchmark",
                             help="Walk-forward benchmark surface features (offline)")

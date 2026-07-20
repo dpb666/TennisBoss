@@ -29,8 +29,13 @@ def run_audit(*, days: int = 7, logging_hours: int = 24) -> Dict[str, Any]:
     since = period_start.isoformat()
 
     bh = db.bet_history_stats(days=days)
-    logging_recent = db.clv_logging_completeness_recent(hours=logging_hours)
-    logging_week = db.clv_logging_completeness_report(bucket="week")
+    logging_recent = db.clv_logging_completeness_recent(
+        hours=logging_hours, since=db.CLV_REPRO_EPOCH,
+    )
+    logging_week = db.clv_logging_completeness_report(
+        bucket="week", since=db.CLV_REPRO_EPOCH,
+    )
+    logging_all = db.clv_logging_completeness_report(bucket="week")
     clv_stats = clv.weekly_stats(days=days)
 
     with db.connect() as conn:
@@ -58,6 +63,7 @@ def run_audit(*, days: int = 7, logging_hours: int = 24) -> Dict[str, Any]:
         "logging_recent_hours": logging_hours,
         "logging_recent": logging_recent,
         "logging_week": logging_week,
+        "logging_all_time": logging_all,
         "clv": clv_stats,
         "pick_volume": {
             "clv_seeded": n_clv_picks,
@@ -69,6 +75,9 @@ def run_audit(*, days: int = 7, logging_hours: int = 24) -> Dict[str, Any]:
         "summary": {
             "bet_history_n": bh.get("n") or 0,
             "logging_completeness_pct": logging_recent.get("completeness_pct"),
+            "logging_completeness_post_migration_pct": logging_week.get(
+                "completeness_pct_overall",
+            ),
             "avg_clv_pct": scanner.get("avg_clv_pct") or glob.get("avg_clv_pct"),
             "n_clv_settled": scanner.get("n_clv") or glob.get("n_clv") or 0,
             "verdict": clv_stats.get("verdict"),

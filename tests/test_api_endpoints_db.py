@@ -253,6 +253,23 @@ class TestLoggingHealthEndpoint(ApiDbTestCase):
         clv.seed_pick("lh1", "2026-07-15", "A", "B", "A", 2.0, 0.55, 0.7)
         resp = self.client.get("/api/logging/health")
         data = resp.get_json()
+        self.assertEqual(data["completeness_all_time"]["n_total"], 1)
+        self.assertEqual(data["completeness_all_time"]["n_complete"], 0)
+        self.assertEqual(data["completeness"]["n_total"], 0)
+        self.assertEqual(len(data["incomplete_picks"]), 0)
+
+    def test_post_migration_incomplete_pick_listed(self):
+        repro = {
+            "tournament": None, "tournament_level": "tour", "surface": "hard",
+            "player_rank": 10, "opponent_rank": 20, "ranking_diff": 10,
+            "model_prob_raw": 0.6, "model_prob_calibrated": 0.55, "market_prob": 0.52,
+            "market_disagreement": 0.03, "ev_pct": 8.5, "calib_k": 0.21,
+            "market_blend_w": 0.0, "calibration_version": "1.0",
+            "predictor_version": "1.0", "feature_set_version": "1.0",
+        }
+        clv.seed_pick("lh2", "2026-07-16", "A", "B", "A", 2.0, 0.55, 0.7, repro=repro)
+        resp = self.client.get("/api/logging/health")
+        data = resp.get_json()
         self.assertEqual(data["completeness"]["n_total"], 1)
         self.assertEqual(data["completeness"]["n_complete"], 0)
         self.assertEqual(len(data["incomplete_picks"]), 1)

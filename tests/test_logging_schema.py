@@ -128,5 +128,56 @@ class TestEarliestMarketSnapshot(LoggingSchemaTestCase):
         self.assertEqual(snap["odds_home"], 2.5)
 
 
+class TestRankingAwareValidation(LoggingSchemaTestCase):
+    def test_unranked_opponent_not_counted_missing(self):
+        repro = self._complete_repro(
+            player_rank=50.0, opponent_rank=None, ranking_diff=None,
+        )
+        clv.seed_pick("rk1", "2026-07-16", "A", "B", "A", 2.0, 0.55, 0.6, repro=repro)
+        row = db.list_clv()[0]
+        rankings = {"A": 50}
+        self.assertEqual(db.validate_clv_pick_row(row, rankings=rankings), [])
+
+    def test_lookup_player_rank_name_variants(self):
+        rankings = {"Gentzsch, Tom": 212}
+        self.assertEqual(db.lookup_player_rank("Tom Gentzsch", rankings), 212)
+
+
+class TestResolvePickSurface(LoggingSchemaTestCase):
+    def test_league_city_dict(self):
+        surf = db.resolve_pick_surface(
+            "A", "B", "Challenger - Pozoblanco, Spain",
+        )
+        self.assertEqual(surf, "clay")
+
+    def test_value_pick_fallback(self):
+        db.log_value_pick("2026-07-16", "A", "B", "A", 2.0, 10.0, surface="grass")
+        surf = db.resolve_pick_surface("A", "B", "Unknown Event")
+        self.assertEqual(surf, "grass")
+
+
+class TestCompletenessSinceFilter(LoggingSchemaTestCase):
+    def test_since_excludes_legacy_rows(self):
+        clv.seed_pick("old1", "2026-06-01", "A", "B", "A", 2.0, 0.55, 0.6)
+        clv.seed_pick("new1", "2026-07-16", "C", "D", "C", 2.0, 0.55, 0.6,
+                      repro=self._complete_repro())
+        report = db.clv_logging_completeness_report(since=db.CLV_REPRO_EPOCH)
+        self.assertEqual(report["n_total"], 1)
+        self.assertEqual(report["n_complete"], 1)
+        self.assertEqual(report["completeness_pct_overall"], 100.0)
+
+
+class TestBackfillClvRepro(LoggingSchemaTestCase):
+    def test_backfills_surface_from_league(self):
+        clv.seed_pick(
+            "bf1", "2026-07-16", "A", "B", "A", 2.0, 0.55, 0.6,
+            repro=self._complete_repro(surface=None, tournament="Challenger - Winnipeg, Canada"),
+        )
+        result = db.backfill_clv_repro_fields(since=db.CLV_REPRO_EPOCH)
+        self.assertGreaterEqual(result["patched_rows"], 1)
+        row = db.list_clv()[0]
+        self.assertEqual(row["surface"], "hard")
+
+
 if __name__ == "__main__":
     unittest.main()

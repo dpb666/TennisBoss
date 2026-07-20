@@ -178,6 +178,10 @@ _CITY_SURFACE: dict = {
     "boca raton": "hard",
     "budapest": "clay",    # WTA Budapest clay
     "olomouc": "clay",     # Czech Republic clay
+    "pozoblanco": "clay",  # Challenger Spain (Jul 2026)
+    "bunschoten": "clay",  # Challenger Netherlands
+    "tampere": "hard",     # Challenger Finland (outdoor hard)
+    "winnipeg": "hard",    # Challenger Canada
 }
 
 import re as _re_surf

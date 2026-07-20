@@ -48,6 +48,7 @@ class TestWeeklyAudit(unittest.TestCase):
         self.assertIn("clv", audit)
         self.assertIn("pick_volume", audit)
         self.assertIn("calendar_note", audit)
+        self.assertIn("logging_all_time", audit)
         self.assertEqual(audit["pick_volume"]["clv_seeded"], 1)
 
     def test_format_report_includes_calendar_note(self):

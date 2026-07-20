@@ -1803,12 +1803,52 @@ CLV_REPRO_FIELDS = (
     "calibration_version", "predictor_version", "feature_set_version",
 )
 
+# Picks loggés avant ce timestamp n'avaient pas les colonnes repro (pré-migration).
+CLV_REPRO_EPOCH = "2026-07-15T00:00:00"
 
-def validate_clv_pick_row(row: Any) -> List[str]:
+_RANKING_REPRO_FIELDS = frozenset({"player_rank", "opponent_rank", "ranking_diff"})
+
+
+def lookup_player_rank(name: str, rankings: Dict[str, int]) -> Optional[int]:
+    """Classement officiel pour un nom joueur (variantes Last,First incluses)."""
+    if not name or not rankings:
+        return None
+    direct = rankings.get(name)
+    if direct is not None:
+        return int(direct)
+    for variant in _name_variants(name):
+        found = rankings.get(variant)
+        if found is not None:
+            return int(found)
+    return None
+
+
+def resolve_pick_surface(
+    p1: str, p2: str, league_name: str = "",
+    event_surface: str = "", date: str = "",
+) -> str:
+    """Surface pour logging : événement → nom tournoi → value_picks → archive."""
+    surf = (event_surface or "").strip()
+    if surf:
+        return surf
+    from . import config
+    surf = config.surface_from_league(league_name)
+    if surf:
+        return surf
+    return resolve_bet_surface(p1, p2, date)
+
+
+def validate_clv_pick_row(
+    row: Any, rankings: Optional[Dict[str, int]] = None,
+) -> List[str]:
     """Renvoie la liste des champs de reproductibilité manquants (NULL) pour
     une ligne clv_log. Liste vide = pick complet. `opening_odds` et
     `closing_odds` sont exclus (légitimement absents tant que le marché n'a
-    pas encore bougé/le match n'est pas terminé — pas un défaut de capture)."""
+    pas encore bougé/le match n'est pas terminé — pas un défaut de capture).
+
+    Si `rankings` est fourni, les champs player_rank/opponent_rank/ranking_diff
+    ne comptent pas manquants quand le joueur n'a pas de classement officiel
+    (cf. docs/LOGGING_SCHEMA.md §6 — NULL légitime, pas un défaut de capture)."""
     missing = []
     for field in CLV_REPRO_FIELDS:
         try:
@@ -1817,6 +1857,20 @@ def validate_clv_pick_row(row: Any) -> List[str]:
             val = None
         if val is None:
             missing.append(field)
+
+    if rankings is not None and missing:
+        side = str(row["pick_side"] or "")
+        p1, p2 = str(row["player1"] or ""), str(row["player2"] or "")
+        opponent = p2 if side == p1 else (p1 if side == p2 else "")
+        if side and opponent:
+            picked_ranked = lookup_player_rank(side, rankings) is not None
+            opp_ranked = lookup_player_rank(opponent, rankings) is not None
+            if not picked_ranked:
+                missing = [f for f in missing if f != "player_rank"]
+            if not opp_ranked:
+                missing = [f for f in missing if f != "opponent_rank"]
+            if not picked_ranked or not opp_ranked:
+                missing = [f for f in missing if f != "ranking_diff"]
     return missing
 
 
@@ -1824,16 +1878,22 @@ def find_incomplete_clv_picks(limit: int = 200, since: Optional[str] = None) -> 
     """Picks dont au moins un champ de reproductibilité requis est NULL —
     détection automatique des enregistrements incomplets (voir
     docs/LOGGING_SCHEMA.md, section validation)."""
-    where = "WHERE date >= ?" if since else ""
-    params: Tuple[Any, ...] = (since,) if since else ()
+    where_parts: List[str] = []
+    params: List[Any] = []
+    if since:
+        where_parts.append("COALESCE(pick_ts, date || 'T00:00:00') >= ?")
+        params.append(since)
+        where_parts.append("calibration_version IS NOT NULL")
+    where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    rankings = get_all_player_rankings()
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM clv_log {where} ORDER BY pick_ts DESC LIMIT ?",
-            params + (limit,),
+            tuple(params) + (limit,),
         ).fetchall()
     out = []
     for r in rows:
-        missing = validate_clv_pick_row(r)
+        missing = validate_clv_pick_row(r, rankings=rankings)
         if missing:
             out.append({"event_key": r["event_key"], "date": r["date"],
                        "player1": r["player1"], "player2": r["player2"],
@@ -1841,16 +1901,21 @@ def find_incomplete_clv_picks(limit: int = 200, since: Optional[str] = None) -> 
     return out
 
 
-def clv_logging_completeness_report(bucket: str = "week", limit_buckets: int = 26) -> Dict[str, Any]:
+def clv_logging_completeness_report(
+    bucket: str = "week", limit_buckets: int = 26,
+    since: Optional[str] = None,
+) -> Dict[str, Any]:
     """Taux de complétude des champs de reproductibilité, agrégé par période
     (`bucket` = 'week' ou 'day') — pour un rapport de santé du logging dans le
     temps (voir docs/LOGGING_SCHEMA.md). Une ligne est "complète" si TOUS les
     champs CLV_REPRO_FIELDS sont renseignés (hors opening/closing odds, cf.
-    validate_clv_pick_row)."""
+    validate_clv_pick_row). `since` limite aux picks post-migration (ISO ts/date)."""
     with connect() as conn:
         rows = conn.execute(
             "SELECT * FROM clv_log ORDER BY date ASC"
         ).fetchall()
+
+    rankings = get_all_player_rankings()
 
     def _period_key(date_str: str) -> str:
         d = (date_str or "")[:10]
@@ -1866,17 +1931,32 @@ def clv_logging_completeness_report(bucket: str = "week", limit_buckets: int = 2
         except ValueError:
             return d
 
+    def _row_ts(row: Any) -> str:
+        return str(row["pick_ts"] or (str(row["date"] or "")[:10] + "T00:00:00"))
+
+    def _row_in_scope(row: Any) -> bool:
+        if not since:
+            return True
+        if _row_ts(row) < since:
+            return False
+        # Gate ADR-013 : exclure les picks pré-migration sans capture repro.
+        if since == CLV_REPRO_EPOCH and row["calibration_version"] is None:
+            return False
+        return True
+
     by_period: Dict[str, Dict[str, int]] = {}
     field_missing_counts: Dict[str, int] = {f: 0 for f in CLV_REPRO_FIELDS}
     n_total = 0
     n_complete = 0
 
     for r in rows:
+        if not _row_in_scope(r):
+            continue
         n_total += 1
         period = _period_key(r["date"])
         stats = by_period.setdefault(period, {"n": 0, "n_complete": 0})
         stats["n"] += 1
-        missing = validate_clv_pick_row(r)
+        missing = validate_clv_pick_row(r, rankings=rankings)
         if not missing:
             stats["n_complete"] += 1
             n_complete += 1
@@ -1896,6 +1976,7 @@ def clv_logging_completeness_report(bucket: str = "week", limit_buckets: int = 2
 
     return {
         "bucket": bucket,
+        "since": since,
         "n_total": n_total,
         "n_complete": n_complete,
         "completeness_pct_overall": round(n_complete / n_total * 100, 1) if n_total else None,
@@ -1906,7 +1987,9 @@ def clv_logging_completeness_report(bucket: str = "week", limit_buckets: int = 2
     }
 
 
-def clv_logging_completeness_recent(hours: int = 24) -> Dict[str, Any]:
+def clv_logging_completeness_recent(
+    hours: int = 24, since: Optional[str] = None,
+) -> Dict[str, Any]:
     """Complétude des champs repro sur les picks des N dernières heures."""
     import datetime as _dt
 
@@ -1914,17 +1997,23 @@ def clv_logging_completeness_recent(hours: int = 24) -> Dict[str, Any]:
     cutoff = (
         _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=hours)
     ).strftime("%Y-%m-%dT%H:%M:%S")
+    if since and since > cutoff:
+        cutoff = since
+    sql = (
+        "SELECT * FROM clv_log WHERE COALESCE(pick_ts, date || 'T00:00:00') >= ?"
+    )
+    params: Tuple[Any, ...] = (cutoff,)
+    if since:
+        sql += " AND calibration_version IS NOT NULL"
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM clv_log WHERE COALESCE(pick_ts, date || 'T00:00:00') >= ?",
-            (cutoff,),
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
 
+    rankings = get_all_player_rankings()
     n = len(rows)
     n_complete = 0
     field_missing_counts: Dict[str, int] = {f: 0 for f in CLV_REPRO_FIELDS}
     for r in rows:
-        missing = validate_clv_pick_row(r)
+        missing = validate_clv_pick_row(r, rankings=rankings)
         if not missing:
             n_complete += 1
         for f in missing:
@@ -1933,6 +2022,7 @@ def clv_logging_completeness_recent(hours: int = 24) -> Dict[str, Any]:
     return {
         "hours": hours,
         "cutoff": cutoff,
+        "since": since,
         "n": n,
         "n_complete": n_complete,
         "completeness_pct": round(n_complete / n * 100, 1) if n else None,
@@ -2397,6 +2487,129 @@ def backfill_bet_history_from_clv(limit: int = 500) -> Dict[str, int]:
                 )
             patched += 1
     return {"added": added, "patched": patched}
+
+
+def _value_pick_row_for_pair(p1: str, p2: str) -> Optional[sqlite3.Row]:
+    """Dernier value_pick pour une paire (variantes de noms)."""
+    for a in _name_variants(p1):
+        for b in _name_variants(p2):
+            with connect() as conn:
+                row = conn.execute(
+                    "SELECT league, surface, ev, side FROM value_picks "
+                    "WHERE ((player1=? AND player2=?) OR (player1=? AND player2=?)) "
+                    "ORDER BY ts DESC LIMIT 1",
+                    (a, b, b, a),
+                ).fetchone()
+            if row:
+                return row
+    return None
+
+
+def backfill_clv_repro_fields(
+    limit: int = 5000, since: Optional[str] = None, dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Remplit les champs repro manquants sur clv_log (surface, tournoi, rankings).
+
+    Ne touche pas aux probas modèle déjà NULL sur les picks pré-migration —
+    seuls les champs récupérables depuis value_picks / archive / rankings sont
+    patchés. Voir docs/LOGGING_SCHEMA.md."""
+    from . import config
+
+    since = since or CLV_REPRO_EPOCH
+    rankings = get_all_player_rankings()
+    patched_rows = 0
+    field_counts: Dict[str, int] = {f: 0 for f in CLV_REPRO_FIELDS}
+    skipped_legacy = 0
+
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clv_log WHERE COALESCE(pick_ts, date || 'T00:00:00') >= ? "
+            "AND calibration_version IS NOT NULL "
+            "ORDER BY pick_ts DESC LIMIT ?",
+            (since, limit),
+        ).fetchall()
+
+    for r in rows:
+        missing = validate_clv_pick_row(r, rankings=rankings)
+        if not missing:
+            continue
+        if r["calibration_version"] is None and len(missing) >= 10:
+            skipped_legacy += 1
+            continue
+
+        vp = _value_pick_row_for_pair(r["player1"], r["player2"])
+        tournament = r["tournament"] or (vp["league"] if vp else None) or None
+        tournament = (tournament or "").strip() or None
+        surface = (r["surface"] or "").strip() or None
+        if not surface:
+            surface = resolve_pick_surface(
+                r["player1"], r["player2"],
+                tournament or "",
+                vp["surface"] if vp else "",
+                r["date"] or "",
+            ) or None
+        side = str(r["pick_side"] or "")
+        opponent = (
+            r["player2"] if side == r["player1"]
+            else (r["player1"] if side == r["player2"] else "")
+        )
+        player_rank = r["player_rank"]
+        opponent_rank = r["opponent_rank"]
+        ranking_diff = r["ranking_diff"]
+        if side and opponent:
+            if player_rank is None:
+                player_rank = lookup_player_rank(side, rankings)
+            if opponent_rank is None:
+                opponent_rank = lookup_player_rank(opponent, rankings)
+            if ranking_diff is None and player_rank is not None and opponent_rank is not None:
+                ranking_diff = opponent_rank - player_rank
+        ev_pct = r["ev_pct"]
+        if ev_pct is None and vp:
+            ev_pct = vp["ev"]
+
+        updates: Dict[str, Any] = {}
+        if r["tournament"] is None and tournament:
+            updates["tournament"] = tournament
+        if r["tournament_level"] is None and tournament:
+            updates["tournament_level"] = config.tournament_level_from_name(tournament)
+        if r["surface"] is None and surface:
+            updates["surface"] = surface
+        if r["player_rank"] is None and player_rank is not None:
+            updates["player_rank"] = float(player_rank)
+        if r["opponent_rank"] is None and opponent_rank is not None:
+            updates["opponent_rank"] = float(opponent_rank)
+        if r["ranking_diff"] is None and ranking_diff is not None:
+            updates["ranking_diff"] = float(ranking_diff)
+        if r["ev_pct"] is None and ev_pct is not None:
+            updates["ev_pct"] = float(ev_pct)
+
+        if not updates:
+            continue
+        if dry_run:
+            patched_rows += 1
+            for k in updates:
+                field_counts[k] = field_counts.get(k, 0) + 1
+            continue
+
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        vals = list(updates.values()) + [r["event_key"]]
+        with connect() as conn:
+            conn.execute(
+                f"UPDATE clv_log SET {set_clause} WHERE event_key=?",
+                vals,
+            )
+        patched_rows += 1
+        for k in updates:
+            field_counts[k] = field_counts.get(k, 0) + 1
+
+    return {
+        "since": since,
+        "candidates": len(rows),
+        "patched_rows": patched_rows,
+        "skipped_legacy_no_model": skipped_legacy,
+        "fields_patched": {k: v for k, v in field_counts.items() if v},
+        "dry_run": dry_run,
+    }
 
 
 def backfill_bet_history_surface_from_matches() -> Dict[str, int]:

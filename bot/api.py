@@ -799,8 +799,8 @@ def _build_pick_repro(
     docs/LOGGING_SCHEMA.md) — utilisé par tous les points de capture
     (api_value, _value_scanner_loop). Ne touche à aucune décision de pari,
     uniquement à ce qui est ensuite passé à clv.seed_pick pour archivage."""
-    player_rank = rankings.get(picked_player)
-    opponent_rank = rankings.get(opponent_player)
+    player_rank = db.lookup_player_rank(picked_player, rankings)
+    opponent_rank = db.lookup_player_rank(opponent_player, rankings)
     ranking_diff = (opponent_rank - player_rank) if (player_rank is not None and opponent_rank is not None) else None
 
     opening_odds = None
@@ -2468,7 +2468,9 @@ def api_value():
         # Paper-trading : capture uniquement les picks qui passent le filtre is_value.
         if is_value:
             pick_odds = ho if best_side == n1 else ao
-            _surf_log = r.get("surface") or e.get("surface") or config.surface_from_league(_leag_name)
+            _surf_log = db.resolve_pick_surface(
+                n1, n2, _leag_name, r.get("surface") or e.get("surface"), e.get("date", ""),
+            )
             _p_log = pb1 if best_side == n1 else pb2
             _b_log = pick_odds - 1.0
             _kelly_u_log = round(max(0.0, (_p_log * _b_log - (1.0 - _p_log)) / _b_log * 0.25 * 100), 1) if _b_log > 0 else 0.0
@@ -2688,16 +2690,22 @@ def api_logging_health():
     if bucket not in ("week", "day"):
         bucket = "week"
     incomplete_limit = min(int(request.args.get("incomplete_limit", 50)), 500)
-    report = db.clv_logging_completeness_report(bucket=bucket)
-    incomplete = db.find_incomplete_clv_picks(limit=incomplete_limit)
+    since = request.args.get("since", db.CLV_REPRO_EPOCH)
+    report = db.clv_logging_completeness_report(bucket=bucket, since=since)
+    report_all = db.clv_logging_completeness_report(bucket=bucket)
+    incomplete = db.find_incomplete_clv_picks(limit=incomplete_limit, since=since)
     return jsonify({
         "completeness": report,
+        "completeness_all_time": report_all,
         "incomplete_picks": incomplete,
         "n_incomplete_listed": len(incomplete),
         "required_fields": list(db.CLV_REPRO_FIELDS),
+        "repro_epoch": db.CLV_REPRO_EPOCH,
         "note": ("Un pick est 'complet' si tous les champs de reproductibilité "
                  "(hors opening_odds/closing_odds, légitimement absents avant "
-                 "mouvement de marché/fin de match) sont renseignés."),
+                 "mouvement de marché/fin de match) sont renseignés. Les champs "
+                 "ranking absents pour joueurs non classés ne comptent pas "
+                 "comme incomplets. Gate ADR-013 : since=repro_epoch."),
     })
 
 

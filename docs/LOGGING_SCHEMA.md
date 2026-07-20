@@ -101,11 +101,21 @@ sans le fournir.
 `db.clv_logging_completeness_report(bucket="week"|"day", limit_buckets=26)` :
 
 - `n_total` / `n_complete` / `completeness_pct_overall`
+- `since` (optionnel) : limite aux picks post-migration (`CLV_REPRO_EPOCH` =
+  `2026-07-15T00:00:00`) avec `calibration_version IS NOT NULL` — **métrique
+  gate ADR-013** (le all-time inclut ~104 lignes pré-migration sans repro).
 - `by_period` : complétude % par semaine (ou jour), les `limit_buckets`
   périodes les plus récentes
 - `missing_field_counts` : combien de picks manquent CHAQUE champ (identifie
   le champ le moins bien capturé)
 - `most_incomplete_field`
+
+**Complétude ranking-aware :** `validate_clv_pick_row(row, rankings=...)` n'exige
+pas `player_rank`/`opponent_rank`/`ranking_diff` quand le joueur n'a pas de
+classement officiel (NULL légitime, cf. §6).
+
+**Backfill :** `python run.py backfill-clv-repro` — surface/tournoi/rankings
+depuis `value_picks`, `resolve_pick_surface()`, `player_rankings`.
 
 Exposé en lecture seule via **`GET /api/logging/health`**
 (`?bucket=week|day`, `?incomplete_limit=N`) — documenté dans l'OpenAPI

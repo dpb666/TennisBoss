@@ -197,7 +197,9 @@ def run_scanner_cycle(
         league_name = (
             league_obj.get("name", "") if isinstance(league_obj, dict) else str(league_obj or "")
         )
-        surface = event.get("surface") or config.surface_from_league(league_name)
+        surface = db.resolve_pick_surface(
+            n1, n2, league_name, event.get("surface"), event.get("date", ""),
+        )
 
         try:
             f1 = features.feature_vector(features.get_profile(mem, n1))

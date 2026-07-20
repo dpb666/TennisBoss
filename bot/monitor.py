@@ -155,7 +155,9 @@ class SystemMonitor:
     def check_logging_completeness(self, *, hours: int = 24,
                                    threshold_pct: float = 90.0) -> Dict[str, Any]:
         """Alert if CLV repro-field completeness in the last N hours drops below threshold."""
-        report = db.clv_logging_completeness_recent(hours=hours)
+        report = db.clv_logging_completeness_recent(
+            hours=hours, since=db.CLV_REPRO_EPOCH,
+        )
         pct = report.get("completeness_pct")
         n = report.get("n") or 0
         status = "ok"
