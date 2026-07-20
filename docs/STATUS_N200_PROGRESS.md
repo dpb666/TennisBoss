@@ -1,26 +1,30 @@
 # STATUS — progress toward n=200 (ADR-013)
 
-**Snapshot date:** 2026-07-19 (weekly readiness pass)  
-**Data source:** live state/tennisboss.db on prod host (shared /mnt/c/Users/donpa/TennisBoss)  
+**Snapshot date:** 2026-07-20 (operational status pass)  
+**Data source:** live `/home/alchemist/tennisboss/state/tennisboss.db` (native WSL prod DB)  
 **Prediction core:** frozen per ADR-005 — no predictor/calibration/threshold changes.
 
 ## Headline metrics
 
-**Last checked:** 2026-07-19 (weekly readiness pass, post logging deploy)
+**Last checked:** 2026-07-20 (operational status pass)
 
 | Metric | Value | ADR-013 gate |
 |--------|------:|--------------|
-| Scanner-era settled picks (clv.stats() scanner) | **n=65** | **n≥200** |
-| Distance to verdict sample | **135 picks** (32.5% of target) | — |
-| Mean CLV (scanner, all settled) | **+17.28%** | GO needs mean CLV > 0 + significance |
-| Mean CLV (7d window, scanner) | **+25.82%** (n=37) | informational |
-| bet_history settled (7d) | 38 (avg CLV **25.38%**) | confirmatory ROI |
-| Logging completeness (24h, post-migration) | **100%** (2/2 picks) | **≥90%** required |
-| Logging completeness (post-migration, since 2026-07-15) | **100%** (8/8 picks) | **≥90%** required |
-| Logging completeness (all clv_log, legacy included) | **7.1%** (8/112) | informational only |
+| Scanner-era settled picks (clv.stats() scanner) | **n=66** | **n≥200** |
+| Distance to verdict sample | **134 picks** (33.0% of target) | — |
+| Mean CLV (scanner, all settled) | **+17.02%** | GO needs mean CLV > 0 + significance |
+| Mean CLV (7d window, scanner) | **+30.95%** (n=29) | informational |
+| bet_history settled (7d) | 30 (avg CLV **29.92%**) | confirmatory ROI |
+| Logging completeness (24h, post-migration) | **100%** (2/2 picks, post Segovia fix) | **≥90%** required |
+| Logging completeness (post-migration, since 2026-07-15) | **100%** (10/10 picks, post Segovia fix) | **≥90%** required |
+| Logging completeness (all clv_log, legacy included) | **8.0%** (9/113) | informational only |
 | Prod /health (WSL :8000) | status=ok, players_loaded=4524 | — |
 
-**Current CLV verdict (automated):** prometteur — positive CLV but sample too short (n=65).
+**Current CLV verdict (automated):** prometteur — positive CLV but sample too short (n=66).
+
+## Logging completeness fix (2026-07-20)
+
+**Segovia surface gap:** pick `72982434` (Challenger Segovia, Spain) had NULL `surface` — gate dipped to 90% (9/10). Added `segovia` → clay in `config._CITY_SURFACE`; `backfill-clv-repro` patches the row. Gate restored to **100% (10/10)**.
 
 ## Logging completeness fix (2026-07-19)
 
@@ -47,13 +51,13 @@ Mid-July often sits in a **natural ATP/WTA lull** (between Masters blocks, post�
 ## ADR-013 checkpoint countdown
 
 - **Protocol:** [ADR-013](adr/ADR-013-verdict-protocol.md) — pre-committed GO / ITÉRER / NO-GO at **n≥200** scanner-era settled picks with complete logging.
-- **Remaining:** 135 settled picks before the mandatory verdict run.
-- **Blockers today:** logging gate **cleared** for post-migration picks (100% ≥ 90%). Sample size still short (n=65).
+- **Remaining:** 134 settled picks before the mandatory verdict run.
+- **Blockers today:** logging gate **cleared** for post-migration picks (100% ≥ 90%). Sample size still short (n=66).
 - **Operational checkpoint:** Sunday weekly-audit digest (scheduler) + manual `python run.py weekly-audit`.
 
-## Production services (verified 2026-07-19)
+## Production services (verified 2026-07-20)
 
-**Deploy baseline:** 560b024+ — CLV logging completeness gate; passive accumulation toward n=200.
+**Deploy baseline:** 85b0ce4 — SQLite drvfs recovery + monitor fix; passive accumulation toward n=200.
 
 | Check | Result |
 |-------|--------|
@@ -63,14 +67,13 @@ Mid-July often sits in a **natural ATP/WTA lull** (between Masters blocks, post�
 | systemctl is-active tennisboss-api (legacy unit) | **inactive** (API via tennisboss-bot) |
 | Scheduler weekly-audit | **registered** — `schedule.every().sunday.at("21:00")` |
 | GET http://127.0.0.1:8000/health | **200 OK** (status=ok, players_loaded=4524) |
-| Post-migration logging gate (since=2026-07-15) | **100%** (8/8) via weekly-audit |
-| `python run.py weekly-audit` | OK (7d window 2026-07-13 → 2026-07-19) |
+| Post-migration logging gate (since=2026-07-15) | **100%** (10/10, post Segovia fix) |
+| `python run.py weekly-audit` | OK (7d window 2026-07-14 → 2026-07-20) |
 | `python run.py data-quality` | OK |
 
-**Monitor alerts (scheduler health job, 2026-07-19):**
-- bet_history sparse: 112 settled rows (ADR-013 needs n≥200) — **expected** during passive phase.
-- API `/value` probe: HTTP **500** — investigate if persistent (Android value flow).
-- Odds-API budget exhausted (reset pending) — watch pick seeding.
+**Monitor alerts (2026-07-20):**
+- bet_history sparse: n=66 scanner settled (ADR-013 needs n≥200) — **expected** during passive phase.
+- Odds-API budget: watch pick seeding during ATP/WTA lull.
 
 ## Data quality (spot check)
 

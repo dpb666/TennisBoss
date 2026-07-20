@@ -180,6 +180,7 @@ _CITY_SURFACE: dict = {
     "budapest": "clay",    # WTA Budapest clay
     "olomouc": "clay",     # Czech Republic clay
     "pozoblanco": "clay",  # Challenger Spain (Jul 2026)
+    "segovia": "clay",     # Challenger Segovia, Spain
     "bunschoten": "clay",  # Challenger Netherlands
     "tampere": "hard",     # Challenger Finland (outdoor hard)
     "winnipeg": "hard",    # Challenger Canada
