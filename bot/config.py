@@ -10,7 +10,8 @@ LOGS_DIR = os.path.join(ROOT, "logs")
 MEMORY_FILE = os.path.join(STATE_DIR, "memory.json")
 CONFIG_FILE = os.path.join(STATE_DIR, "config.json")
 LOG_FILE = os.path.join(LOGS_DIR, "tennisboss.log")
-DB_FILE = os.path.join(STATE_DIR, "tennisboss.db")  # base SQLite "solide"
+_DB_DEFAULT = os.path.join(STATE_DIR, "tennisboss.db")
+DB_FILE = os.environ.get("TENNISBOSS_DB_FILE", _DB_DEFAULT)  # base SQLite "solide"
 
 # --- Réglages par défaut (écrits dans state/config.json au bootstrap) ------
 DEFAULT_CONFIG = {

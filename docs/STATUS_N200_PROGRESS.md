@@ -95,3 +95,13 @@ python run.py data-quality
 python run.py backfill-clv-repro
 wsl systemctl is-active tennisboss-bot tennisboss-scheduler
 ```
+
+
+
+## 2026-07-19 SQLite drvfs recovery (prod)
+
+- Pre: PRAGMA integrity_check failed on drvfs state/tennisboss.db (btree corrupt).
+- Action: restored state/backups/tennisboss-20260719T204000.db to /home/alchemist/tennisboss/state/tennisboss.db.
+- Config: TENNISBOSS_DB_FILE in .env; bot/config.py honors env override.
+- Post: integrity ok; authenticated /api/value HTTP 200; scanner n_settled=65 unchanged.
+- Monitor: remaining=None no longer alerts as exhausted (bot/monitor.py).

@@ -101,9 +101,17 @@ class SystemMonitor:
     def check_odds_api(self) -> Dict[str, Any]:
         """Monitor Odds-API quota."""
         rate_limit = odds_api.rate_limit_status()
-        remaining = rate_limit.get("remaining") or 0
+        remaining_raw = rate_limit.get("remaining")
         reset_in = rate_limit.get("reset_in_s") or 0
 
+        if remaining_raw is None:
+            return {
+                "status": "unknown",
+                "remaining": None,
+                "reset_in_s": reset_in,
+            }
+
+        remaining = remaining_raw
         status = "ok" if remaining > 10 else "warning" if remaining > 0 else "exhausted"
         if remaining == 0:
             self.alerts.append(f"Odds-API budget exhausted, reset in {reset_in}s")
