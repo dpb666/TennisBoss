@@ -49,14 +49,18 @@ Mid-July often sits in a **natural ATP/WTA lull** (between Masters blocks, post�
 - **Blockers today:** logging gate **cleared** for post-migration picks (100% ≥ 90%). Sample size still short (n=63).
 - **Operational checkpoint:** Sunday weekly-audit digest (scheduler) + manual `python run.py weekly-audit`.
 
-## Production services (verified 2026-07-18)
+## Production services (verified 2026-07-19)
+
+**Deploy:** commit 560b024 — CLV logging completeness gate fix; python3 run.py backfill-clv-repro → 0/8 patched (already complete); systemctl restart bot + scheduler.
 
 | Check | Result |
 |-------|--------|
 | systemctl is-active tennisboss-bot | **active** |
 | systemctl is-active tennisboss-scheduler | **active** |
 | .env TENNISBOSS_AI_TOOLS | **1** |
-| GET https://api.tennisboss.online/health | **200 OK** |
+| GET https://api.tennisboss.online/health | **200 OK** (status=ok, players_loaded=4524) |
+| Post-migration logging gate (since=2026-07-15) | **100%** (8/8) via DB + weekly-audit |
+| GET /api/logging/health?since=... | **401** without X-API-Token (endpoint live; use token for prod curl) |
 
 ## Data quality (spot check)
 
