@@ -10,8 +10,8 @@
 
 | Metric | Value | ADR-013 gate |
 |--------|------:|--------------|
-| Scanner-era settled picks (clv.stats() scanner) | **n=66** | **n≥200** |
-| Distance to verdict sample | **134 picks** (33.0% of target) | — |
+| Scanner-era settled picks (clv.stats() scanner) | **n=69** | **n≥200** |
+| Distance to verdict sample | **131 picks** (34.5% of target) | — |
 | Mean CLV (scanner, all settled) | **+17.02%** | GO needs mean CLV > 0 + significance |
 | Mean CLV (7d window, scanner) | **+30.95%** (n=29) | informational |
 | bet_history settled (7d) | 30 (avg CLV **29.92%**) | confirmatory ROI |
@@ -20,7 +20,7 @@
 | Logging completeness (all clv_log, legacy included) | **8.0%** (9/113) | informational only |
 | Prod /health (WSL :8000) | status=ok, players_loaded=4524 | — |
 
-**Current CLV verdict (automated):** prometteur — positive CLV but sample too short (n=66).
+**Current CLV verdict (automated):** prometteur — positive CLV but sample too short (n=69).
 
 ## Logging completeness fix (2026-07-20)
 
@@ -51,8 +51,8 @@ Mid-July often sits in a **natural ATP/WTA lull** (between Masters blocks, post�
 ## ADR-013 checkpoint countdown
 
 - **Protocol:** [ADR-013](adr/ADR-013-verdict-protocol.md) — pre-committed GO / ITÉRER / NO-GO at **n≥200** scanner-era settled picks with complete logging.
-- **Remaining:** 134 settled picks before the mandatory verdict run.
-- **Blockers today:** logging gate **cleared** for post-migration picks (100% ≥ 90%). Sample size still short (n=66).
+- **Remaining:** 131 settled picks before the mandatory verdict run.
+- **Blockers today:** logging gate **cleared** for post-migration picks (100% ≥ 90%). Sample size still short (n=69).
 - **Operational checkpoint:** Sunday weekly-audit digest (scheduler) + manual `python run.py weekly-audit`.
 
 ## Production services (verified 2026-07-20)
@@ -72,7 +72,7 @@ Mid-July often sits in a **natural ATP/WTA lull** (between Masters blocks, post�
 | `python run.py data-quality` | OK |
 
 **Monitor alerts (2026-07-20):**
-- bet_history sparse: n=66 scanner settled (ADR-013 needs n≥200) — **expected** during passive phase.
+- bet_history sparse: n=69 scanner settled (ADR-013 needs n≥200) — **expected** during passive phase.
 - Odds-API budget: watch pick seeding during ATP/WTA lull.
 
 ## Data quality (spot check)
