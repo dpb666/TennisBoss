@@ -17,6 +17,7 @@
 | Telegram digest | `_digest_loop` | `bot/workers/telegram_worker.py` | **Done** (2026-07-16) | ~43 |
 | Telegram poll | `_tg_poll_loop` | `bot/workers/telegram_worker.py` | **Done** (2026-07-16) | ~103 |
 | Data refresh | `_data_refresh_loop` | `bot/workers/data_refresh_worker.py` | **Done** (2026-07-20) | ~31 |
+| Flask blueprints (phase 2a) | `/health`, `/api/logging/health`, `/api/track-record/*` | `bot/blueprints/{core,performance}.py` | **Done** (2026-07-20) | ~75 |
 
 **Still in api.py (not daemons):** HTTP routes, `_SCANNER_STATE` + `/api/scanner/status`, caches, `_MEM`, calibration refit hooks used by settlement.
 
@@ -218,9 +219,24 @@ from bot.workers.data_refresh_worker import (
 
 ---
 
+## Phase 8 — Flask blueprints, slice 1 (2026-07-20)
+
+### Notes
+
+- Read-only routes first (no predictor/value decision logic).
+- ``bot/blueprints/core.py`` : ``GET /health``
+- ``bot/blueprints/performance.py`` : ``GET /api/logging/health``, ``GET /api/track-record`` (+ summary/monthly/surfaces)
+- ``register_blueprints(app)`` called from ``bot/api.py`` after Swagger UI blueprint.
+
+### Tests
+
+Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tests/test_track_record.py``, ``tests/test_api_endpoints_db.py`` (logging/health).
+
+---
+
 ## Remaining decomposition plan
 
-1. **Flask blueprints** — Phase 2 (roadmap #7).
+1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record **done**; next tags: matches, value, intelligence, chat, admin.
 
 ---
 
@@ -237,4 +253,4 @@ from bot.workers.data_refresh_worker import (
 
 ## Next recommended task
 
-Extract HTTP routes into Flask blueprints (roadmap #7).
+Continue Flask blueprints phase 2: extract matches/value routes (byte-identical paths).
