@@ -181,20 +181,22 @@ def test_upcoming_merges_oddspapi_fixtures_without_duplicates():
     dupliquer ceux déjà renvoyés par ESPN — même dédup par (player1, player2)
     que pour ESPN. is_enabled=True doit déclencher fetch+parse, jamais un
     vrai appel réseau ici (tout est mocké)."""
+    import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     espn_fixtures = [{
         "player1": "Alice", "player2": "Bob", "tournament": "ATP X",
-        "round": "", "date": "2026-07-17", "time": "10:00", "live": False,
+        "round": "", "date": today, "time": "10:00", "live": False,
         "event_key": "espn1", "is_doubles": False, "tour": "atp",
     }]
     oddspapi_parsed = [
         {  # doublon (mêmes joueurs qu'ESPN) -> ne doit PAS être ajouté deux fois
             "player1": "Alice", "player2": "Bob", "tournament": "ATP X",
-            "round": "", "date": "2026-07-17", "time": "10:00", "live": False,
+            "round": "", "date": today, "time": "10:00", "live": False,
             "event_key": "oddspapi_dup", "is_doubles": False, "tour": "atp",
         },
         {  # nouveau match -> doit être ajouté
             "player1": "Carla", "player2": "Dana", "tournament": "WTA Y",
-            "round": "", "date": "2026-07-17", "time": "12:00", "live": False,
+            "round": "", "date": today, "time": "12:00", "live": False,
             "event_key": "oddspapi_new", "is_doubles": False, "tour": "wta",
         },
     ]
@@ -237,10 +239,13 @@ def test_upcoming_prioritizes_atp_wta_over_challenger_when_truncated():
     """Le cap `limit` doit couper en dernier les matchs Challenger/ITF/UTR
     (tour="") : les ATP/WTA doivent survivre à la troncature même s'ils
     arrivent après dans la liste des sources fusionnées."""
+    import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+
     def _fixture(p1, p2, tour):
         return {
             "player1": p1, "player2": p2, "tournament": "X", "round": "",
-            "date": "2026-07-17", "time": "10:00", "live": False,
+            "date": today, "time": "10:00", "live": False,
             "event_key": f"{p1}-{p2}", "is_doubles": False, "tour": tour,
         }
     # Challenger d'abord dans la liste (comme en réalité : bien plus nombreux),

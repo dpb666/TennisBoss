@@ -20,6 +20,7 @@
 | Flask blueprints (phase 2a) | `/health`, `/api/logging/health`, `/api/track-record/*` | `bot/blueprints/{core,performance}.py` | **Done** (2026-07-20) | ~75 |
 | Flask blueprints (phase 2b) | `/api/player/*` follow, `/api/match/*` follow | `bot/blueprints/personalization.py` | **Done** (2026-07-20) | ~105 |
 | Flask blueprints (phase 2c) | `/api/status`, `/privacy`, `/api/bet-history/*` | `bot/blueprints/{core,performance}.py` | **Done** (2026-07-20) | ~155 |
+| Flask blueprints (phase 2d) | `/api/upcoming`, `/api/live` | `bot/blueprints/matches.py` | **Done** (2026-07-21) | ~450 |
 
 **Still in api.py (not daemons):** HTTP routes, `_SCANNER_STATE` + `/api/scanner/status`, caches, `_MEM`, calibration refit hooks used by settlement.
 
@@ -263,9 +264,24 @@ Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tes
 
 ---
 
+## Phase 11 — Flask blueprints, slice 4 (2026-07-21)
+
+### Notes
+
+- Match feed routes — predictor calls unchanged (frozen math); deps injected via ``api._resolve``, ``api._MEM``, etc.
+- ``bot/blueprints/matches.py`` : ``GET /api/upcoming``, ``GET /api/live``
+- ``api_upcoming`` re-exported from ``bot/api.py`` for ``/api/recommendations`` shim + tests
+- Rate limits (20/min) applied via ``apply_blueprint_rate_limits(limiter)`` after Limiter init
+
+### Tests
+
+``tests/test_api_endpoints2.py`` (upcoming), ``tests/test_api_endpoints.py`` (live), ``tests/test_api_endpoints_db.py`` (recommendations).
+
+---
+
 ## Remaining decomposition plan
 
-1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record + personalization + status/privacy/bet-history **done**; next tags: matches, value, intelligence, chat, admin.
+1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record + personalization + status/privacy/bet-history + matches **done**; next tags: value, intelligence, chat, admin.
 
 ---
 
@@ -282,4 +298,4 @@ Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tes
 
 ## Next recommended task
 
-Continue Flask blueprints phase 2: extract matches routes (`/api/upcoming`, `/api/live`) — byte-identical paths; keep `api_upcoming` shim for `/api/recommendations`.
+Continue Flask blueprints phase 2: extract value routes (`/api/value`, `/api/value/open`, `/api/value/history`) — keep scanner state + settlement hooks frozen in api.py.
