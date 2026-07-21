@@ -87,3 +87,52 @@ def api_track_record_surfaces():
     """
     days = min(3650, max(1, int(request.args.get("days", 365))))
     return jsonify(track_record.surface_breakdown(days=days))
+
+
+@bp.get("/api/bet-history/stats")
+def api_bet_history_stats():
+    """Performance agrégée des paris réglés (ROI, calibration, surface).
+
+    Query : ?days=30 (défaut), max 365.
+    """
+    days = min(365, max(1, int(request.args.get("days", 30))))
+    return jsonify(db.bet_history_stats(days=days))
+
+
+@bp.get("/api/bet-history/recent")
+def api_bet_history_recent():
+    """Derniers paris réglés enregistrés dans bet_history.
+
+    Query : ?limit=50 (défaut), max 500.
+    """
+    from .. import api
+
+    limit = min(500, max(1, int(request.args.get("limit", 50))))
+    rows = db.list_bet_history(limit=limit)
+    bets = [{
+        "event_key": r["event_key"],
+        "date": api._fmt_date(r["date"]),
+        "player1": r["player1"],
+        "player2": r["player2"],
+        "prediction": r["prediction"],
+        "pick_side": r["pick_side"],
+        "odds": r["odds"],
+        "confidence": r["confidence"],
+        "result": r["result"],
+        "profit_loss": r["profit_loss"],
+        "clv_pct": r["clv_pct"],
+        "surface": r["surface"],
+        "model_version": r["model_version"],
+        "ts": r["ts"],
+    } for r in rows]
+    return jsonify({"count": len(bets), "bets": bets})
+
+
+@bp.get("/api/bet-history/calibration")
+def api_bet_history_calibration():
+    """Calibration modèle : bins 50-55% … 75%+ (prédit vs observé).
+
+    Query : ?days=90 (défaut), max 365.
+    """
+    days = min(365, max(1, int(request.args.get("days", 90))))
+    return jsonify(db.bet_history_calibration(days=days))

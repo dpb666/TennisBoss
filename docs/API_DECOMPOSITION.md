@@ -19,6 +19,7 @@
 | Data refresh | `_data_refresh_loop` | `bot/workers/data_refresh_worker.py` | **Done** (2026-07-20) | ~31 |
 | Flask blueprints (phase 2a) | `/health`, `/api/logging/health`, `/api/track-record/*` | `bot/blueprints/{core,performance}.py` | **Done** (2026-07-20) | ~75 |
 | Flask blueprints (phase 2b) | `/api/player/*` follow, `/api/match/*` follow | `bot/blueprints/personalization.py` | **Done** (2026-07-20) | ~105 |
+| Flask blueprints (phase 2c) | `/api/status`, `/privacy`, `/api/bet-history/*` | `bot/blueprints/{core,performance}.py` | **Done** (2026-07-20) | ~155 |
 
 **Still in api.py (not daemons):** HTTP routes, `_SCANNER_STATE` + `/api/scanner/status`, caches, `_MEM`, calibration refit hooks used by settlement.
 
@@ -248,9 +249,23 @@ Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tes
 
 ---
 
+## Phase 10 — Flask blueprints, slice 3 (2026-07-20)
+
+### Notes
+
+- Read-only status + privacy + bet-history — no predictor/value logic.
+- ``bot/blueprints/core.py`` : ``GET /api/status``, ``GET /privacy`` (added to phase 2a health)
+- ``bot/blueprints/performance.py`` : ``GET /api/bet-history/stats``, ``/recent``, ``/calibration``
+
+### Tests
+
+``tests/test_api_endpoints2.py`` (privacy), ``tests/test_bet_history.py`` (bet-history API) — 12 tests.
+
+---
+
 ## Remaining decomposition plan
 
-1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record + personalization **done**; next tags: matches, value, intelligence, chat, admin.
+1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record + personalization + status/privacy/bet-history **done**; next tags: matches, value, intelligence, chat, admin.
 
 ---
 
@@ -267,4 +282,4 @@ Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tes
 
 ## Next recommended task
 
-Continue Flask blueprints phase 2: extract matches routes (`/api/upcoming`, `/api/live`) — byte-identical paths.
+Continue Flask blueprints phase 2: extract matches routes (`/api/upcoming`, `/api/live`) — byte-identical paths; keep `api_upcoming` shim for `/api/recommendations`.

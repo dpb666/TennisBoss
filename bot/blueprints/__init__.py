@@ -1,6 +1,7 @@
 """Flask blueprints — strangler-fig extraction from bot/api.py.
 
-Phase 2 (read-only routes first): core + performance + personalization.
+Phase 2 (read-only routes first): core + performance + personalization;
+phase 2c adds /api/status, /privacy, /api/bet-history/*.
 """
 from __future__ import annotations
 
