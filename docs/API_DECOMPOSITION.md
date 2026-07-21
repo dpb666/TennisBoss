@@ -18,6 +18,7 @@
 | Telegram poll | `_tg_poll_loop` | `bot/workers/telegram_worker.py` | **Done** (2026-07-16) | ~103 |
 | Data refresh | `_data_refresh_loop` | `bot/workers/data_refresh_worker.py` | **Done** (2026-07-20) | ~31 |
 | Flask blueprints (phase 2a) | `/health`, `/api/logging/health`, `/api/track-record/*` | `bot/blueprints/{core,performance}.py` | **Done** (2026-07-20) | ~75 |
+| Flask blueprints (phase 2b) | `/api/player/*` follow, `/api/match/*` follow | `bot/blueprints/personalization.py` | **Done** (2026-07-20) | ~105 |
 
 **Still in api.py (not daemons):** HTTP routes, `_SCANNER_STATE` + `/api/scanner/status`, caches, `_MEM`, calibration refit hooks used by settlement.
 
@@ -234,9 +235,22 @@ Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tes
 
 ---
 
+## Phase 9 — Flask blueprints, slice 2 (2026-07-20)
+
+### Notes
+
+- Personalization / watchlist routes — no predictor or value logic.
+- ``bot/blueprints/personalization.py`` : player/match follow + followed lists.
+
+### Tests
+
+``tests/test_api_endpoints_db.py`` (follow routes) — 6 tests.
+
+---
+
 ## Remaining decomposition plan
 
-1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record **done**; next tags: matches, value, intelligence, chat, admin.
+1. **Flask blueprints** — Phase 2 continuation (roadmap #7): core + track-record + personalization **done**; next tags: matches, value, intelligence, chat, admin.
 
 ---
 
@@ -253,4 +267,4 @@ Existing regression harness — ``tests/test_api_endpoints2.py`` (health), ``tes
 
 ## Next recommended task
 
-Continue Flask blueprints phase 2: extract matches/value routes (byte-identical paths).
+Continue Flask blueprints phase 2: extract matches routes (`/api/upcoming`, `/api/live`) — byte-identical paths.
