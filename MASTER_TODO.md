@@ -468,3 +468,20 @@ Blueprint: `docs/ARCHITECTURE_BLUEPRINT.md` §5.3. Log: `docs/API_DECOMPOSITION.
 - **Arbre committé — 6 commits logiques**, tree propre : `0c1a124` (blueprint+ADRs+audit), `f540617` (track record), `645f8dd` (workers phase 1), `428a330` (ops Q3 : janitor/rotation/deploy), `8116a4c` (suite verte 648 + auth planes ; fix : picks inplay restent côté client — l'app Android les écrit avec le seul token client, les classer admin aurait cassé le Live), `de7e08d` (chore android + statut/ledger). Non poussés (pas de remote demandé).
 - **`.env` prod : `TENNISBOSS_ENV=prod` + `TENNISBOSS_AI_TOOLS=1` ajoutés** (token client déjà présent → pas de risque de refus au démarrage). `TENNISBOSS_ADMIN_TOKEN` laissé à générer par l'opérateur (un secret minté par agent finirait dans le transcript) : `python -c "import secrets; print(secrets.token_hex(24))"` puis décommenter la ligne dans .env.
 - **Redéploiement : action humaine requise** (restart systemd bloqué pour l'agent, conforme matrice §13) : `wsl bash -c "cd /mnt/c/Users/donpa/TennisBoss && bash scripts/deploy.sh --no-pull"` — restart + health check + rollback auto + journal deployment_history. Jusqu'au restart, la prod tourne sur l'ancien code (et continue de produire les tmp*.json.corrupt).
+
+### CI rouge depuis ≥7 jours — root-caused et corrigé (2026-07-22, audit CTO)
+
+**Découverte pendant l'audit complet du workspace** (pas dans les rapports internes) : `gh run list` montrait **20/20 runs en échec** remontant au 15/07 sur les deux jobs — invisible car tous les chiffres de tests cités dans `PROJECT_STATUS.md`/le ledger venaient de runs locaux Windows, jamais de CI.
+
+| Casse | Cause racine (reproduite sur clone Linux propre, pas un flake) | Fix | Vérifié |
+|---|---|---|---|
+| Android : `compileDebugKotlin` échoue | `ChatScreen.kt:190` utilise `CircularProgressIndicator` sans import (introduit `3dc6242`, 18/07) | Import ajouté | 75/75 tests, JUnit XML vérifié |
+| Backend : 7 tests échouent uniquement sur checkout neuf | 5 tests appellent des fonctions `db.*` réelles non mockées (`db.get_all_player_rankings`, `_record_endpoint_timing`→`db.get_meta/set_meta`, `db.historical_odds_index`, `db.connect` dans le bloc all-settled de `run_digest_once`) et dépendent implicitement d'un `state/tennisboss.db` déjà peuplé — présent sur les machines dev de longue date, absent d'un clone neuf | DB temporaire + `db.init()` (convention déjà utilisée dans ~30 fichiers) pour 4 fichiers ; mock `db.connect` manquant ajouté pour le 5e (`test_telegram_worker.py`, pattern déjà présent 1 fonction plus bas) | 674/674 sur clone WSL propre |
+
+**Commits** : `f4ad104` (fix Android), `9bc2a7e` (fix 5 tests). **Poussés et vérifiés sur CI réel** : run [29942410519](https://github.com/dpb666/TennisBoss/actions/runs/29942410519) — les deux jobs ✓ pour la première fois depuis ≥7 jours.
+
+**Bonus découvert en cours de route** : les « 4 échecs pré-existants OddsPapi » documentés dans `PROJECT_STATUS.md` n'existent plus (674/674 sur clone propre, `test_api_endpoints2.py` inclus) — doc simplement périmée, à corriger au prochain refresh.
+
+**Autre correctif** : redémarrage prod du 21/07 (00:07 EDT, jamais journalisé au moment) enregistré rétroactivement dans `deployment_history` (#2, `git_hash=5779ef5`).
+
+**Frozen core :** untouché.
