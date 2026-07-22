@@ -20,9 +20,14 @@ class TestRunDigestOnce:
         state = DigestCycleState()
         now = dt.datetime(2026, 7, 16, 21, 0, 0)
 
+        # hour=21 >= all_settled_min_hour : run_digest_once() touche AUSSI
+        # inconditionnellement db.connect() pour le bloc all-settled (même si
+        # ce test ne vérifie que le digest quotidien) — non mocké auparavant,
+        # d'où un échec CI-only (state/ absent sur un checkout neuf).
         with patch("bot.digest.send_daily_digest") as send_daily, patch(
             "bot.digest.send_weekly_clv_digest",
-        ) as send_weekly:
+        ) as send_weekly, patch("bot.db.connect") as connect:
+            connect.return_value.__enter__.return_value = _conn_mock(pending=0, total=0)
             out = worker.run_digest_once(now=now, state=state)
 
         send_daily.assert_called_once_with("2026-07-16")
@@ -34,7 +39,9 @@ class TestRunDigestOnce:
         state = DigestCycleState(sent_date="2026-07-16")
         now = dt.datetime(2026, 7, 16, 21, 30, 0)
 
-        with patch("bot.digest.send_daily_digest") as send_daily:
+        with patch("bot.digest.send_daily_digest") as send_daily, \
+             patch("bot.db.connect") as connect:
+            connect.return_value.__enter__.return_value = _conn_mock(pending=0, total=0)
             out = worker.run_digest_once(now=now, state=state)
 
         send_daily.assert_not_called()
@@ -47,7 +54,8 @@ class TestRunDigestOnce:
 
         with patch("bot.digest.send_daily_digest"), patch(
             "bot.digest.send_weekly_clv_digest",
-        ) as send_weekly:
+        ) as send_weekly, patch("bot.db.connect") as connect:
+            connect.return_value.__enter__.return_value = _conn_mock(pending=0, total=0)
             out = worker.run_digest_once(now=now, state=state)
 
         send_weekly.assert_called_once()

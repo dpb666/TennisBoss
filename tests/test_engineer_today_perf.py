@@ -1,9 +1,11 @@
 """Tests perf path engineer/today — heuristique Elo + cap compute_tis."""
 from __future__ import annotations
 
+import os
+import tempfile
 from unittest.mock import patch
 
-from bot import api
+from bot import api, config, db
 
 
 def _fake_mem():
@@ -42,6 +44,23 @@ class TestEngineerQuickScore:
 
 
 class TestEngineerTisCap:
+    def setup_method(self):
+        # /api/engineer/today appelle _record_endpoint_timing() -> real
+        # db.get_meta/set_meta("endpoint_timings") — non mocké ; il faut une
+        # DB temporaire avec schéma (sinon "unable to open database file" /
+        # "no such table: meta" sur un checkout CI neuf sans state/ existant).
+        fd, self._path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self._save_db_file = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+
+    def teardown_method(self):
+        config.DB_FILE = self._save_db_file
+        for p in (self._path, self._path + "-wal", self._path + "-shm"):
+            if os.path.exists(p):
+                os.remove(p)
+
     def test_compute_tis_capped_at_limit(self):
         api._MEM = _fake_mem()
         api._engineer_today_cache.clear()

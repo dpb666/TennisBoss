@@ -1,9 +1,11 @@
 """Tests Phase 12d/12e — engineer API et ml_experiments stub."""
 from __future__ import annotations
 
+import os
+import tempfile
 from unittest.mock import patch
 
-from bot import api, ml_experiments
+from bot import api, config, db, ml_experiments
 
 
 def _fake_mem():
@@ -29,6 +31,23 @@ def _fake_mem():
 
 
 class TestEngineerToday:
+    def setup_method(self):
+        # Même besoin que TestEngineerTisCap (test_engineer_today_perf.py) :
+        # /api/engineer/today écrit endpoint_timings via db.get_meta/set_meta,
+        # non mocké — DB temporaire avec schéma requise (CI Linux échouait
+        # sur un checkout neuf, invisible en local avec un state/ dev préexistant).
+        fd, self._path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self._save_db_file = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+
+    def teardown_method(self):
+        config.DB_FILE = self._save_db_file
+        for p in (self._path, self._path + "-wal", self._path + "-shm"):
+            if os.path.exists(p):
+                os.remove(p)
+
     def test_returns_ranked_matches(self):
         api._MEM = _fake_mem()
         api.app.testing = True

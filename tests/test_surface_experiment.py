@@ -1,8 +1,11 @@
 """Tests for bot.surface_experiment walk-forward benchmark."""
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 
+from bot import config, db
 from bot.surface_experiment import (
     _brier,
     _ece,
@@ -51,6 +54,23 @@ class TestMetrics(unittest.TestCase):
 
 
 class TestRunBenchmark(unittest.TestCase):
+    def setUp(self):
+        # run_benchmark() appelle inconditionnellement db.historical_odds_index()
+        # même quand `matches` est fourni directement (skip du chemin
+        # db.matches_for_backtest()) — DB temporaire avec schéma requise
+        # (sinon "no such table: historical_odds" sur un checkout CI neuf).
+        fd, self._path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self._save_db_file = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+
+    def tearDown(self):
+        config.DB_FILE = self._save_db_file
+        for p in (self._path, self._path + "-wal", self._path + "-shm"):
+            if os.path.exists(p):
+                os.remove(p)
+
     def test_runs_on_synthetic_data(self):
         matches = _synth_matches(800)
         report = run_benchmark(matches, min_test=100, write_report=False)

@@ -8,9 +8,11 @@ tests/test_api_insight.py (fixture _MEM, pas de _load_state()).
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from unittest.mock import patch
 
-from bot import api
+from bot import api, config, db
 
 
 def _fake_mem():
@@ -56,15 +58,32 @@ def test_value_reports_rate_limited_when_key_pool_exhausted():
 
 
 def test_value_falls_back_to_db_picks_when_no_live_events():
-    with patch.object(api.odds_api, "is_enabled", return_value=True), \
-         patch.object(api.odds_api, "_current_key", return_value="k"), \
-         patch.object(api.odds_api, "fetch_tennis_events", return_value=[]), \
-         patch.object(api.db, "list_value_picks", return_value=[]):
-        resp = _client().get("/api/value")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["count"] == 0
-    assert data["comparisons"] == []
+    # /api/value touche réellement db.get_all_player_rankings() et (via
+    # _record_endpoint_timing) db.get_meta/set_meta — non mockés ici, donc
+    # une DB temporaire avec schéma est nécessaire (sinon "unable to open
+    # database file" / "no such table" sur un checkout neuf sans state/
+    # préexistant — CI Linux échouait, invisible en local avec un state/
+    # dev déjà peuplé).
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    save_db_file = config.DB_FILE
+    config.DB_FILE = path
+    db.init()
+    try:
+        with patch.object(api.odds_api, "is_enabled", return_value=True), \
+             patch.object(api.odds_api, "_current_key", return_value="k"), \
+             patch.object(api.odds_api, "fetch_tennis_events", return_value=[]), \
+             patch.object(api.db, "list_value_picks", return_value=[]):
+            resp = _client().get("/api/value")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["count"] == 0
+        assert data["comparisons"] == []
+    finally:
+        config.DB_FILE = save_db_file
+        for p in (path, path + "-wal", path + "-shm"):
+            if os.path.exists(p):
+                os.remove(p)
 
 
 # ─── /api/live ───────────────────────────────────────────────────────────────
