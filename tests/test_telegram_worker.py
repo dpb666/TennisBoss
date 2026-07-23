@@ -168,6 +168,112 @@ class TestHandleTelegramMessage:
         assert "TennisBoss" in sent[0][1]
 
 
+class TestFreeTextChatForward:
+    """Chat texte libre (2026-07-23) : bascule sur bot.chat.answer() en process,
+    mode=analyst. Remplace un ancien forward HTTP vers 127.0.0.1:8001 (port de
+    l'ex-service FastAPI app/, retiré le 2026-07-13) — chaque message texte
+    échouait silencieusement depuis, avant ce fix."""
+
+    def setup_method(self):
+        worker._chat_history.clear()
+
+    def teardown_method(self):
+        worker._chat_history.clear()
+
+    def test_calls_answer_in_process_with_analyst_mode(self):
+        sent: list[tuple[int, str]] = []
+        with patch("bot.memory.load", return_value={"players": {}}), \
+             patch("bot.chat.answer", return_value={
+                 "reply": "Sinner est favori.", "context_used": True,
+                 "agent": None, "mode": "analyst", "tools_called": [], "sources": [],
+             }) as answer_mock:
+            action = worker.handle_telegram_message(
+                "Qui va gagner ce soir ?", 123, admin_id=123,
+                send_message=lambda c, t: sent.append((c, t)),
+            )
+        assert action == "chat"
+        assert sent == [(123, "Sinner est favori.")]
+        assert answer_mock.call_args.kwargs.get("mode") == "analyst"
+        assert answer_mock.call_args.args[0] == "Qui va gagner ce soir ?"
+
+    def test_no_longer_calls_the_dead_fastapi_port(self):
+        with patch("bot.memory.load", return_value={"players": {}}), \
+             patch("bot.chat.answer", return_value={
+                 "reply": "ok", "context_used": False, "agent": None,
+                 "mode": "analyst", "tools_called": [], "sources": [],
+             }), patch("requests.post") as post_mock:
+            worker.handle_telegram_message(
+                "Bonjour", 123, admin_id=123, send_message=lambda c, t: None,
+            )
+        post_mock.assert_not_called()
+
+    def test_sources_are_appended_as_footer(self):
+        sent: list[tuple[int, str]] = []
+        with patch("bot.memory.load", return_value={"players": {}}), \
+             patch("bot.chat.answer", return_value={
+                 "reply": "Le ROI 30j est de +5%.", "context_used": False,
+                 "agent": None, "mode": "analyst",
+                 "tools_called": ["query_bet_history"], "sources": ["bet_history"],
+             }):
+            worker.handle_telegram_message(
+                "Quel est notre ROI ?", 123, admin_id=123,
+                send_message=lambda c, t: sent.append((c, t)),
+            )
+        assert "bet_history" in sent[0][1]
+        assert sent[0][1].startswith("Le ROI 30j est de +5%.")
+
+    def test_history_accumulates_across_messages(self):
+        with patch("bot.memory.load", return_value={"players": {}}), \
+             patch("bot.chat.answer", return_value={
+                 "reply": "reponse", "context_used": False, "agent": None,
+                 "mode": "analyst", "tools_called": [], "sources": [],
+             }) as answer_mock:
+            worker.handle_telegram_message(
+                "premier message", 123, admin_id=123, send_message=lambda c, t: None,
+            )
+            worker.handle_telegram_message(
+                "deuxieme message", 123, admin_id=123, send_message=lambda c, t: None,
+            )
+        second_call_history = answer_mock.call_args_list[1].args[1]
+        assert {"role": "user", "content": "premier message"} in second_call_history
+        assert {"role": "assistant", "content": "reponse"} in second_call_history
+
+    def test_history_is_bounded(self):
+        with patch("bot.memory.load", return_value={"players": {}}), \
+             patch("bot.chat.answer", return_value={
+                 "reply": "r", "context_used": False, "agent": None,
+                 "mode": "analyst", "tools_called": [], "sources": [],
+             }):
+            for i in range(20):
+                worker.handle_telegram_message(
+                    f"message {i}", 123, admin_id=123, send_message=lambda c, t: None,
+                )
+        assert len(worker._chat_history[123]) <= worker._CHAT_HISTORY_MAX_MESSAGES
+
+    def test_clear_empties_history_without_network_call(self):
+        worker._chat_history[123] = [{"role": "user", "content": "ancien"}]
+        sent: list[tuple[int, str]] = []
+        with patch("requests.post") as post_mock:
+            action = worker.handle_telegram_message(
+                "/clear", 123, admin_id=123,
+                send_message=lambda c, t: sent.append((c, t)),
+            )
+        assert action == "clear"
+        assert 123 not in worker._chat_history
+        assert sent == [(123, "Historique effacé.")]
+        post_mock.assert_not_called()
+
+    def test_llm_failure_still_reports_error_message(self):
+        sent: list[tuple[int, str]] = []
+        with patch("bot.memory.load", return_value={"players": {}}), \
+             patch("bot.chat.answer", side_effect=RuntimeError("timeout")):
+            worker.handle_telegram_message(
+                "Bonjour", 123, admin_id=123,
+                send_message=lambda c, t: sent.append((c, t)),
+            )
+        assert "Erreur chat" in sent[0][1]
+
+
 class TestPollOnce:
     def test_processes_updates_and_advances_offset(self):
         updates = [

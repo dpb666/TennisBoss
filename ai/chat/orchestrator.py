@@ -28,11 +28,15 @@ _INTENT_PATTERNS: Dict[str, Pattern] = {
     "api_endpoints": re.compile(r"endpoint|\bapi\b|route\b", re.I),
     "architecture": re.compile(
         r"architecture|comment (ça|ca) marche|structure du projet|comment (le|ce) syst[èe]me", re.I),
+    "learning_report": re.compile(
+        r"suggestion|pattern|apprentissage|learning|quoi de neuf|"
+        r"qu.est.ce qu.on (a )?appris|insight", re.I),
 }
 
 # Ordre d'exécution stable — utilisé pour construire le bloc de contexte
 # dans un ordre déterministe (important pour les tests et la lisibilité).
-_INTENT_ORDER = ("bet_history", "calibration", "logging_health", "api_endpoints", "architecture")
+_INTENT_ORDER = ("bet_history", "calibration", "logging_health", "api_endpoints",
+                "architecture", "learning_report")
 
 
 def classify_intents(message: str) -> List[str]:
@@ -72,5 +76,7 @@ def run_tools_for_message(message: str, days: int = 30) -> Tuple[str, List[str],
         _emit(registry.list_api_endpoints())
     if "architecture" in intents:
         _emit(registry.read_doc("ai_architecture"))
+    if "learning_report" in intents:
+        _emit(registry.get_learning_report())
 
     return "\n".join(blocks), tools_called, sources

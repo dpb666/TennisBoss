@@ -125,12 +125,34 @@ class TestGetLoggingHealth(AiToolsTestCase):
         self.assertEqual(result.data["n_total"], 0)
 
 
+class TestGetLearningReport(AiToolsTestCase):
+    """Phase 3 (ai/learning/analyzer.py), exposé au chat en lecture seule."""
+
+    def test_empty_db_reports_no_suggestions(self):
+        result = registry.get_learning_report()
+        self.assertEqual(result.data["suggestions"], [])
+        self.assertIn("Aucune suggestion", result.summary)
+
+    def test_does_not_write_report_files(self):
+        # write_files=False côté outil — jamais d'écriture disque déclenchée
+        # par une simple question de chat.
+        from ai.learning import analyzer
+        with patch.object(analyzer, "generate_weekly_report",
+                          wraps=analyzer.generate_weekly_report) as spy:
+            registry.get_learning_report()
+        self.assertFalse(spy.call_args.kwargs.get("write_files", True))
+
+
 class TestClassifyIntents(unittest.TestCase):
     def test_bet_history_intent(self):
         self.assertIn("bet_history", orchestrator.classify_intents("Quel est notre ROI ce mois-ci ?"))
 
     def test_calibration_intent(self):
         self.assertIn("calibration", orchestrator.classify_intents("Sommes-nous bien calibrés à 70% ?"))
+
+    def test_learning_report_intent(self):
+        self.assertIn("learning_report",
+                      orchestrator.classify_intents("Quelles suggestions avez-vous cette semaine ?"))
 
     def test_no_intent_for_generic_message(self):
         self.assertEqual(orchestrator.classify_intents("Bonjour, comment vas-tu ?"), [])

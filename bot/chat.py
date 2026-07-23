@@ -434,6 +434,68 @@ def chat(
             return _chat_via_generate(ollama_model, messages, max_tokens, temperature)
 
 
+def answer(
+    message: str,
+    history: List[Dict[str, str]],
+    mem: Dict[str, Any],
+    *,
+    mode: str = "chat",
+    max_tokens: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Point d'entrée unique pour un tour de chat complet : préfixe d'agent,
+    contexte joueur (build_match_context), outils IA Phase 1 (si
+    TENNISBOSS_AI_TOOLS=1 et aucun contexte joueur détecté), puis appel LLM.
+
+    Utilisé par bot/api.py::api_chat() (HTTP) et
+    bot/workers/telegram_worker.py (chat texte libre Telegram) — évite deux
+    implémentations divergentes du même tour de conversation (P10, "one
+    source of truth per fact"). Ne capture pas les exceptions : à l'appelant
+    de décider de la présentation de l'échec (503 JSON côté HTTP, message
+    Telegram côté bot).
+    """
+    from . import config
+
+    agent, clean_message = strip_agent_prefix(message)
+    agent_prompt = AGENT_PROMPTS.get(agent, "") if agent else ""
+    extra = build_match_context(clean_message, mem, agent=agent)
+
+    # AI Assistant Phase 1 (read-only tools, docs/AI_ASSISTANT_ARCHITECTURE.md
+    # §3) : ne s'exécute QUE si aucun joueur n'a été détecté (build_match_context
+    # vide) et seulement derrière un flag désactivé par défaut — comportement
+    # strictement identique à avant quand TENNISBOSS_AI_TOOLS n'est pas activé.
+    tools_called: List[str] = []
+    sources: List[str] = []
+    if config.AI_TOOLS_ENABLED and not extra:
+        try:
+            from ai.chat import orchestrator as ai_orchestrator
+            tool_context, tools_called, sources = ai_orchestrator.run_tools_for_message(clean_message)
+            if tool_context:
+                extra = tool_context
+        except Exception as exc:  # noqa: BLE001
+            log(f"AI tools orchestrator échoué ({exc}) — chat inchangé.", "WARN")
+
+    if mode == "analyst":
+        chat_max_tokens = max_tokens if max_tokens is not None else ANALYST_MAX_TOKENS
+        chat_temperature = ANALYST_TEMPERATURE
+    else:
+        chat_max_tokens = max_tokens
+        chat_temperature = None
+
+    primary_url = os.environ.get("GROQ_API_URL", config.GROQ_API_URL)
+    primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
+    reply = chat(clean_message, history, mem, primary_url, model=primary_model,
+                extra_context=extra, agent_prompt=agent_prompt,
+                max_tokens=chat_max_tokens, temperature=chat_temperature)
+    return {
+        "reply": reply,
+        "context_used": bool(extra),
+        "agent": agent,
+        "mode": mode,
+        "tools_called": tools_called,
+        "sources": sources,
+    }
+
+
 def _chat_via_openai(lm_url: str, model: str, messages: list,
                      max_tokens: int = MAX_TOKENS, temperature: float = TEMPERATURE) -> str:
     """Endpoint OpenAI-compatible (/v1/chat/completions) — LLM / Groq / OpenAI."""

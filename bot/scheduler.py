@@ -220,6 +220,29 @@ class TennisBossScheduler:
         except Exception as e:  # noqa: BLE001
             log(f"Calibration report job failed: {e}", "ERROR")
 
+    def job_learning_report(self):
+        """Rapport hebdo Phase 3 (suggestion-only) → reports/learning/YYYY-MM-DD.md.
+
+        Synthèse calibration/surface/tournoi/désaccord marché — jamais de
+        changement automatique (docs/ARCHITECTURE_BLUEPRINT.md §6.5, ADR-005).
+        Garde-fou last_learning_report_week : idempotent par semaine ISO.
+        """
+        log("=== SCHEDULER: Learning report (weekly, suggestion-only) ===", "INFO")
+        iso_week = datetime.now().strftime("%G-W%V")
+        if db.get_meta("last_learning_report_week") == iso_week:
+            return
+        try:
+            from ai.learning import analyzer
+
+            report = analyzer.generate_weekly_report(write_files=True)
+            n_sugg = len(report.get("suggestions", []))
+            log(f"Learning report: {n_sugg} suggestion(s), "
+                f"path={report.get('report_path')}", "INFO")
+            db.set_meta("last_learning_report_week", iso_week)
+            self.jobs_run += 1
+        except Exception as e:  # noqa: BLE001
+            log(f"Learning report job failed: {e}", "ERROR")
+
     def job_weekly_audit(self):
         """Audit opérationnel hebdo → Telegram (Sunday digest)."""
         log("=== SCHEDULER: Weekly audit ===", "INFO")
@@ -251,11 +274,12 @@ class TennisBossScheduler:
         # Quotidien 03:00 avec garde-fou ISO week : retry auto si échec lundi.
         schedule.every().day.at("03:00").do(self.job_rankings)
         schedule.every().sunday.at("22:00").do(self.job_calibration_report)
+        schedule.every().sunday.at("22:30").do(self.job_learning_report)
         schedule.every().sunday.at("21:00").do(self.job_weekly_audit)
-        log("Scheduler: 12 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
+        log("Scheduler: 13 jobs configured (learn 1h, ingest 6h, mtd_ingest 6h, "
             "mcp_backfill 12h, monitor 5m, espn_warm 2m, backup 6h, digest 9h/j, "
             "bet_history 4h30/j, rankings Mon 3h, weekly_audit Sun 21h, "
-            "calibration Sun 22h)", "INFO")
+            "calibration Sun 22h, learning_report Sun 22h30)", "INFO")
         # Backup immédiat au démarrage : ne pas attendre 6h après un redémarrage
         # du service pour avoir une première sauvegarde fraîche.
         self.job_backup()

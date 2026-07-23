@@ -2494,48 +2494,25 @@ def api_chat():
     history = data.get("history") or []
     if not message:
         return jsonify({"error": "message requis"}), 400
-    primary_url = os.environ.get("GROQ_API_URL", config.GROQ_API_URL)
-    primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
     # mode=analyst (docs/AI_ASSISTANT_ARCHITECTURE.md §3.5) : réponses plus
     # longues/factuelles pour les questions techniques (ROI, calibration,
     # architecture...) ; mode=chat (défaut) garde le comportement mobile
-    # actuel inchangé (MAX_TOKENS/TEMPERATURE d'origine).
+    # actuel inchangé (MAX_TOKENS/TEMPERATURE d'origine). Orchestration
+    # partagée avec le forward Telegram : voir bot/chat.py::answer().
     mode = (data.get("mode") or "chat").strip().lower()
-    if mode == "analyst":
-        req_max_tokens = data.get("max_tokens")
-        chat_max_tokens = int(req_max_tokens) if req_max_tokens else chat_mod.ANALYST_MAX_TOKENS
-        chat_temperature = chat_mod.ANALYST_TEMPERATURE
-    else:
-        chat_max_tokens = None
-        chat_temperature = None
+    req_max_tokens = data.get("max_tokens")
+    max_tokens = int(req_max_tokens) if req_max_tokens else None
     try:
-        agent, clean_message = chat_mod.strip_agent_prefix(message)
-        agent_prompt = chat_mod.AGENT_PROMPTS.get(agent, "") if agent else ""
-        extra = chat_mod.build_match_context(clean_message, _MEM, agent=agent)
-        # AI Assistant Phase 1 (read-only tools, docs/AI_ASSISTANT_ARCHITECTURE.md
-        # §3) : ne s'exécute QUE si aucun joueur n'a été détecté (build_match_context
-        # vide) et seulement derrière un flag désactivé par défaut — comportement
-        # strictement identique à avant quand TENNISBOSS_AI_TOOLS n'est pas activé.
-        tools_called: list = []
-        sources: list = []
-        if config.AI_TOOLS_ENABLED and not extra:
-            try:
-                from ai.chat import orchestrator as ai_orchestrator
-                tool_context, tools_called, sources = ai_orchestrator.run_tools_for_message(clean_message)
-                if tool_context:
-                    extra = tool_context
-            except Exception as exc:  # noqa: BLE001
-                log(f"AI tools orchestrator échoué ({exc}) — chat inchangé.", "WARN")
-        reply = chat_mod.chat(clean_message, history, _MEM, primary_url, model=primary_model,
-                              extra_context=extra, agent_prompt=agent_prompt,
-                              max_tokens=chat_max_tokens, temperature=chat_temperature)
-        resp = {"reply": reply, "context_used": bool(extra), "agent": agent, "mode": mode}
-        if tools_called:
-            resp["tools_called"] = tools_called
-            resp["sources"] = sources
+        result = chat_mod.answer(message, history, _MEM, mode=mode, max_tokens=max_tokens)
+        resp = {"reply": result["reply"], "context_used": result["context_used"],
+                "agent": result["agent"], "mode": result["mode"]}
+        if result["tools_called"]:
+            resp["tools_called"] = result["tools_called"]
+            resp["sources"] = result["sources"]
         return jsonify(resp)
     except Exception as exc:  # noqa: BLE001
         log(f"Chat LLM en échec : {exc}", "WARN")
+        primary_model = os.environ.get("GROQ_MODEL", config.GROQ_MODEL)
         return jsonify({"error": f"LLM inaccessible (modèle: {primary_model}) : {exc}"}), 503
 
 

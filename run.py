@@ -483,6 +483,19 @@ def cmd_calibration_report(args) -> None:
         print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
 
 
+def cmd_learning_report(args) -> None:
+    """Rapport hebdomadaire d'apprentissage (Phase 3, suggestion-only —
+    docs/ARCHITECTURE_BLUEPRINT.md §6.5). N'écrit jamais predictor/calibrate/
+    memory.json ; voir reports/learning/YYYY-MM-DD.md."""
+    from ai.learning import analyzer
+    report = analyzer.generate_weekly_report(write_files=not args.no_write)
+    if report.get("report_path"):
+        print(f"Rapport écrit : {report['report_path']}")
+    print(f"Suggestions : {len(report['suggestions'])} "
+          f"(observations à échantillon insuffisant : {report['n_insufficient']})")
+    print(json.dumps(report, indent=2, ensure_ascii=True, default=str))
+
+
 def cmd_data_quality(args) -> None:
     from bot import data_quality
     data_quality.print_report(active_days=args.days)
@@ -736,6 +749,12 @@ def main() -> None:
     p_cal = sub.add_parser("calibration-report", help="Rapport calibration modèle")
     p_cal.add_argument("--days", type=int, default=90, help="Fenêtre en jours")
     p_cal.set_defaults(func=cmd_calibration_report)
+
+    p_learn = sub.add_parser("learning-report",
+                             help="Rapport hebdo Phase 3 (suggestions, jamais de changement auto)")
+    p_learn.add_argument("--no-write", action="store_true",
+                         help="N'écrit pas reports/learning/ (affiche seulement)")
+    p_learn.set_defaults(func=cmd_learning_report)
 
     p_dq = sub.add_parser("data-quality", help="Couverture WTA serve + rankings")
     p_dq.add_argument("--days", type=int, default=365, help="Fenêtre joueurs actifs")

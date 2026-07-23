@@ -134,6 +134,24 @@ def get_logging_health(bucket: str = "week") -> ToolResult:
     return ToolResult("get_logging_health", report, summary, "clv_logging_completeness_report")
 
 
+def get_learning_report() -> ToolResult:
+    """Dernier rapport Phase 3 (ai/learning/analyzer.py) — suggestions
+    d'apprentissage, jamais de changement automatique. Génère à la volée si
+    aucun rapport n'a encore été écrit cette semaine (idempotent, lecture seule)."""
+    from ai.learning import analyzer
+    report = analyzer.generate_weekly_report(write_files=False)
+    n_sugg = len(report.get("suggestions", []))
+    if n_sugg:
+        preview = "; ".join(
+            f"[{s['dimension']}] {s['segment']} (n={s['n']})" for s in report["suggestions"][:5]
+        )
+        summary = f"{n_sugg} suggestion(s) Phase 3 : {preview}"
+    else:
+        summary = (f"Aucune suggestion actionnable actuellement "
+                   f"({report.get('n_insufficient', 0)} observation(s) à échantillon insuffisant).")
+    return ToolResult("get_learning_report", report, summary, "ai/learning/analyzer")
+
+
 # Registre nommé — utilisé par l'orchestrateur et par les tests pour vérifier
 # qu'aucun outil "à risque" (write) n'est jamais enregistré ici.
 ALL_TOOLS = {
@@ -143,4 +161,5 @@ ALL_TOOLS = {
     "explain_pick": explain_pick,
     "list_api_endpoints": list_api_endpoints,
     "get_logging_health": get_logging_health,
+    "get_learning_report": get_learning_report,
 }

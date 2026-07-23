@@ -29,6 +29,14 @@ DEFAULT_POLL_SLEEP_S = 1
 POLL_GET_UPDATES_TIMEOUT = 16
 POLL_LONG_POLL_TIMEOUT = 10
 
+# Historique de conversation par chat_id, en mémoire (perdu au redémarrage —
+# même compromis que l'historique côté Android, voir docs/ARCHITECTURE_BLUEPRINT.md
+# §6.8). Accès restreint à admin_id (voir handle_telegram_message), donc en
+# pratique un seul chat_id réel — la taille reste bornée par sécurité.
+_CHAT_HISTORY_MAX_MESSAGES = 20  # ~10 échanges user/assistant
+_chat_history_lock = threading.Lock()
+_chat_history: Dict[int, List[Dict[str, str]]] = {}
+
 
 @dataclass
 class DigestCycleState:
@@ -211,20 +219,31 @@ def handle_telegram_message(
         )
         return "start"
     if text.startswith("/clear"):
-        try:
-            requests.post(f"http://127.0.0.1:8001/tg-sessions/{chat_id}/clear", timeout=5)
-        except Exception:  # noqa: BLE001 — FastAPI service may be offline
-            pass
+        with _chat_history_lock:
+            _chat_history.pop(chat_id, None)
         send_message(chat_id, "Historique effacé.")
         return "clear"
 
+    # Chat texte libre : assistant analyste complet (mode=analyst — outils IA
+    # Phase 1 si TENNISBOSS_AI_TOOLS=1, réponses détaillées), en process via
+    # bot/chat.py::answer() — même logique que POST /api/chat (une seule
+    # implémentation, voir bot/chat.py). Remplace un ancien forward HTTP vers
+    # 127.0.0.1:8001, le port de l'ex-service FastAPI app/ retiré le 2026-07-13
+    # (mort depuis : chaque message texte échouait silencieusement).
     try:
-        resp = requests.post(
-            "http://127.0.0.1:8001/api/chat",
-            json={"user_id": chat_id, "username": "tg", "message": text},
-            timeout=60,
-        )
-        reply = resp.json().get("reply") or resp.json().get("response") or "..."
+        from .. import chat as chat_mod, memory
+        with _chat_history_lock:
+            history = list(_chat_history.get(chat_id, []))
+        mem = memory.load()
+        result = chat_mod.answer(text, history, mem, mode="analyst")
+        reply = result["reply"]
+        if result.get("sources"):
+            reply += "\n\n📁 Sources : " + ", ".join(result["sources"])
+        with _chat_history_lock:
+            hist = _chat_history.setdefault(chat_id, [])
+            hist.append({"role": "user", "content": text})
+            hist.append({"role": "assistant", "content": reply})
+            del hist[:-_CHAT_HISTORY_MAX_MESSAGES]
     except Exception as exc:  # noqa: BLE001
         reply = f"Erreur chat: {exc}"
     send_message(chat_id, reply)

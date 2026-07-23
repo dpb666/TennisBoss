@@ -584,13 +584,23 @@ by physically separate stores.
 
 ### 6.5 Self-learning (suggestion-only)
 
-- Weekly analyzer (`ai/learning/`) consumes settled `clv_log` rows → error
-  patterns by calibration bin, surface, tournament level, market disagreement →
-  writes `reports/learning/YYYY-MM-DD.md` + machine-readable JSON → ingests into
-  the knowledge base → optionally digests via Telegram.
-- **Never writes:** model params, thresholds, `memory.json`. Suggestions carry
-  the required n and a "do not act until human approval" footer (the §5.4
-  template of the AI plan).
+**MVP shipped 2026-07-23** (`ai/learning/analyzer.py`) — a thin orchestrator
+over already-existing, already-tested analysis modules (`bot/calibration_report.py`,
+`bot/track_record.py::surface_breakdown/tournament_breakdown`,
+`bot/market_efficiency_audit.py::market_disagreement_analysis`), not a
+reimplementation. Consumes settled `bet_history`/`clv_log` rows → findings by
+calibration bin, surface, tournament, market disagreement, each tagged `ok` /
+`insuffisant` (n below `MIN_N_SUGGESTION=15` — observation noted, no
+conclusion drawn) / `à investiguer` (suggestion, never a directive) → writes
+`reports/learning/YYYY-MM-DD.md` + JSON. Wired to `run.py learning-report`,
+a weekly scheduler job (Sun 22:30, idempotent per ISO week), and a new
+read-only chat tool (`get_learning_report`) so the question "quelles
+suggestions cette semaine ?" works from the app, `/api/chat`, or Telegram.
+**Not yet done:** knowledge-base ingestion (blocked on Phase 2, not built).
+- **Never writes:** model params, thresholds, `memory.json` — verified by a
+  guard test (source-text scan for `predictor`/`calibrate`/`learner` imports,
+  same convention as `tests/test_ai_tools.py`). Suggestions carry `n` and a
+  fixed footer citing ADR-005 ("no change applied, human approval required").
 - The pre-freeze `auto_learner` hourly job is an anomaly under this architecture:
   it must be either (a) formally exempted by ADR with its write-surface
   documented, or (b) demoted to suggestion-only. Tracked as debt D-11 —

@@ -522,3 +522,29 @@ Investigated first (liveness audit, per D-16's own recommendation): `SOUL.md`, `
 **Left untouched (out of scope of this pass):** `ksearch.py`/`watchdog.py` — confirmed real, functional tools (ELO grid search, external crash-recovery monitor), just misplaced at root instead of `scripts/`; low-priority cosmetic move, not dead code. `.openclaw/`, `.openclaw-cli-images/` — not investigated this pass.
 
 **Frozen core:** untouched. **Also this cycle:** D-10 debt entry corrected (surface-detection duplication claim was false — verified before acting, see blueprint §16).
+
+### Vision produit : chat Telegram complet + Phase 3 self-learning MVP (2026-07-23)
+
+Suite à cadrage explicite avec l'opérateur (3 questions ciblées avant de coder — Telegram = chat IA complet ; self-learning = accélérer Phase 3 planifiée ; serveur 24/7 = hors scope pour l'instant).
+
+**Bug réel trouvé et corrigé — chat Telegram texte libre était cassé en production :**
+
+Le transfert vers `/api/chat` pour les messages texte libre appelait `http://127.0.0.1:8001/api/chat` — le port de l'ex-service FastAPI `app/`, **retiré le 2026-07-13**. Chaque message texte échouait silencieusement depuis (`/clear` avait le même bug). Personne ne l'avait remarqué car les commandes `/xxx` (picks, value, clv...) fonctionnaient toutes normalement (elles n'utilisaient pas ce chemin).
+
+| Item | Fix | Tests |
+|---|---|---|
+| Logique de chat dupliquée entre `/api/chat` et Telegram | Nouvelle fonction partagée `bot/chat.py::answer()` — agent prefix, contexte joueur, outils IA Phase 1, appel LLM. `api_chat()` et Telegram appellent la même implémentation (P10) | Suite `test_chat.py`/`test_api_endpoints2.py` inchangée et verte (33 tests) — confirme le refactor sans régression |
+| Chat texte libre Telegram cassé (port mort) | Appel en process via `chat_mod.answer(text, history, mem, mode="analyst")`, plus de requête HTTP loopback. Historique de conversation léger en mémoire par chat_id (bornée, 20 messages) | 7 nouveaux (`TestFreeTextChatForward`) |
+| `/clear` cassé (même port mort) | Vide l'historique en mémoire, plus d'appel réseau | 1 nouveau (`test_clear_empties_history_without_network_call`) |
+
+**Phase 3 self-learning — MVP livré (`ai/learning/analyzer.py`) :**
+
+Orchestrateur mince sur des modules d'analyse **déjà existants** (`calibration_report.py`, `track_record.py`, `market_efficiency_audit.py`) — aucune réimplémentation. Chaque finding porte son n, classé `ok`/`insuffisant`/`à investiguer` (jamais une directive). Écrit `reports/learning/YYYY-MM-DD.md` + JSON. Câblé : `run.py learning-report`, job scheduler hebdo (Dim 22h30, idempotent), nouvel outil chat `get_learning_report` (accessible depuis Telegram maintenant que le chat texte marche).
+
+**Bug réel trouvé par smoke-test manuel contre la vraie prod (pas par les tests unitaires initiaux)** : mauvais noms de clés (`bins`/`n` au lieu de `calibration_bins`/`n_settled`, le vrai contrat de `calibration_report.build_calibration_report()`) — `n_calibration` restait à 0 silencieusement. Corrigé + test d'intégration renforcé pour vérifier que les findings de calibration apparaissent réellement (`test_seeded_picks_produce_calibration_and_surface_findings` asserte maintenant `"calibration" in dims`, pas seulement `"surface"`). Leçon : les tests unitaires testaient la logique interne contre leurs propres suppositions de clés — seul le test d'intégration + le smoke-test contre la vraie base de prod (n=120 picks réglés) a révélé l'écart.
+
+**Vérification :** 716/716 en local, 716/716 sur clone WSL propre (2 passes, avant et après le fix de clés). Guard test confirmé : `ai/learning/` n'importe jamais predictor/calibrate/learner (contact transitif via `market_efficiency_audit.calibrate` accepté — lecture seule, déjà audité, même précédent que le reste du registre d'outils IA). `QUICK_START_CHAT.md` réécrit (les sections `/tg-chat`/port 8001 étaient mortes depuis le retrait de `app/`).
+
+**Frozen core :** untouché — vérifié `git diff` propre sur predictor.py/calibrate.py.
+
+**Non fait (hors scope de ce cycle, par choix explicite de l'opérateur) :** serveur 24/7 (déjà planifié dans le blueprint, roadmap Q2 2027) ; ingestion Phase 3 → base de connaissances (bloqué sur Phase 2, non construite).

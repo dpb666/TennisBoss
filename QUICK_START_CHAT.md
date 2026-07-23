@@ -1,105 +1,80 @@
 # 🎾 TennisBoss AI Chat — Quick Start
 
-## Test Locally (No Bot Needed)
+_Rafraîchi 2026-07-23 : les sections `/tg-chat`, `/tg-webhook`, port 8001
+référençaient l'ancien service FastAPI `app/`, retiré le 2026-07-13 — elles
+ont été retirées de ce document (le canal réel est décrit ci-dessous)._
+
+## Tester en local (API directe)
 
 ```bash
-# 1. Start server (Terminal 1)
 cd /mnt/c/Users/donpa/TennisBoss
-./run_ai_chat.sh
+python run.py serve --host 127.0.0.1 --port 8000
 
-# 2. Test in another terminal (Terminal 2)
-./test_telegram.sh http://localhost:8001 999 "Is Djokovic favored on clay?"
+curl -s -X POST http://127.0.0.1:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Qui est favori sur terre battue entre Sinner et Alcaraz ?"}'
 ```
 
-Expected output:
+Réponse attendue :
+
 ```json
-{
-  "user_id": 999,
-  "reply": "Based on ELO data... [AI response]",
-  "agent": null,
-  "confidence": null
-}
+{"reply": "...", "context_used": true, "agent": null, "mode": "chat"}
 ```
 
-## With Real Telegram Bot
+## Bot Telegram (canal réel de production)
+
+Le bot Telegram tourne en **long-polling** (`bot/workers/telegram_worker.py`,
+pas de webhook), démarré automatiquement par `bot/api.py::serve()` quand
+`TELEGRAM_BOT_TOKEN` est défini dans `.env`. Accès restreint à
+`TELEGRAM_ADMIN_ID` (ou `TELEGRAM_OWNER_CHAT_ID`) — un seul utilisateur.
 
 ```bash
-# 1. Create bot with @BotFather on Telegram
-# Copy token: 123456:ABC-DEF...
-
-# 2. Export token
-export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
-
-# 3. Start server
-./run_ai_chat.sh
-
-# 4. Register webhook (from separate terminal)
-curl -X POST "https://api.telegram.org/bot{TOKEN}/setWebhook" \
-  -d "url=https://your-domain.com/tg-webhook"
-
-# 5. Message the bot on Telegram → instant AI replies
+# .env
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_ADMIN_ID=<votre chat_id Telegram>
 ```
 
-## Endpoints Reference
+### Commandes
 
-| Method | Endpoint | Use |
-|--------|----------|-----|
-| POST | `/tg-chat` | Direct API (test locally) |
-| POST | `/tg-webhook` | Telegram bot webhook |
-| GET | `/tg-sessions/{id}` | View conversation history |
-
-## Commands in Telegram
-
-```
-/help              → Show commands
-/clear             → Reset conversation
-@stats_agent: ... → Send to stats agent
-@odds_agent: ...  → Send to odds agent
-<any text>         → Direct AI chat
-```
-
-## Debugging
-
-```bash
-# View session history
-curl http://localhost:8001/tg-sessions/999 | jq
-
-# Check DB directly
-sqlite3 /tmp/tg_sessions.db "SELECT * FROM tg_history LIMIT 5;"
-
-# View logs
-tail -f app.log
+```text
+/start        → liste des commandes
+/picks        → picks du jour
+/value        → picks ouverts (value bets)
+/clv          → Closing Line Value
+/clv-weekly   → CLV des 7 derniers jours
+/roi          → ROI par tranche EV
+/intel        → cerveau IA (blacklist, zones)
+/scanner      → état du scanner 90s
+/stats        → bilan global
+/digest       → rapport complet
+/clear        → efface l'historique de conversation
+<texte libre> → assistant analyste complet (voir ci-dessous)
 ```
 
-## Architecture
+### Chat texte libre = assistant analyste complet (corrigé 2026-07-23)
 
-```
-User Message
-    ↓
-/tg-webhook (Telegram)  OR  /tg-chat (API)
-    ↓
-parse + route
-    ↓
-Local LLM (Ollama)
-    ↓
-SQLite storage
-    ↓
-Response
-```
+Tout message qui n'est pas une commande `/xxx` est traité **en process** par
+`bot/chat.py::answer()` — la même fonction que `POST /api/chat`, en
+`mode="analyst"` (réponses détaillées, outils IA Phase 1 actifs si
+`TENNISBOSS_AI_TOOLS=1`, sources citées en pied de message). L'historique de
+conversation est conservé en mémoire par chat_id (perdu au redémarrage,
+`/clear` l'efface).
 
----
+**Avant ce correctif**, ce chemin appelait `http://127.0.0.1:8001/api/chat` —
+le port de l'ex-service FastAPI `app/`, retiré le 2026-07-13 : chaque message
+texte échouait silencieusement depuis (`"Erreur chat: ..."`). C'est réparé.
 
 ## AI Analyst Tools (Phase 1, 2026-07-16)
 
-`POST /api/chat` can now answer read-only analytical questions using
-structured tool output instead of only free-form LLM guessing — see
-`docs/AI_ASSISTANT_ARCHITECTURE.md` and `ai/chat/`. Disabled by default;
-enable with `TENNISBOSS_API_TOKEN`-style env var `TENNISBOSS_AI_TOOLS=1`.
-Purely additive: player-specific questions still use the existing
-`build_match_context()` grounding unchanged; tools only run as a fallback
-when no player is detected in the message.
+`POST /api/chat` (et donc aussi le chat Telegram) peut répondre à des
+questions analytiques en s'appuyant sur des outils de lecture seule plutôt
+que sur le seul LLM — voir `docs/AI_ASSISTANT_ARCHITECTURE.md` et
+`ai/chat/`. Désactivé par défaut ; activer avec `TENNISBOSS_AI_TOOLS=1`.
+Purement additif : les questions sur un joueur précis gardent le grounding
+`build_match_context()` existant ; les outils ne s'exécutent qu'en repli
+quand aucun joueur n'est détecté dans le message.
 
-Example questions this unlocks:
+Exemples de questions débloquées :
 
 ```
 "Quel est notre ROI sur les 30 derniers jours ?"        -> query_bet_history
@@ -107,9 +82,10 @@ Example questions this unlocks:
 "Le logging est-il complet cette semaine ?"              -> get_logging_health
 "Quels endpoints exposent le bet_history ?"              -> list_api_endpoints
 "Comment fonctionne l'architecture du projet ?"          -> read_doc(ai_architecture)
+"Quelles suggestions avez-vous cette semaine ?"          -> get_learning_report (Phase 3, 2026-07-23)
 ```
 
-Response now includes (when tools fired):
+Réponse (quand des outils se sont déclenchés) :
 
 ```json
 {
@@ -120,25 +96,43 @@ Response now includes (when tools fired):
 }
 ```
 
-**Never** does this layer place bets, change predictions, or modify
-`predictor.py`/`calibrate.py`/production logic — it only reads. See
-`ai/chat/tools/registry.py` for the exact read-only tool list and
-`tests/test_ai_tools.py` for the frozen-boundary guard tests.
+**Ne fait jamais** : placer un pari, changer une prédiction, modifier
+`predictor.py`/`calibrate.py`/la logique de production — lecture seule
+uniquement. Voir `ai/chat/tools/registry.py` pour la liste exacte des outils
+et `tests/test_ai_tools.py` pour les tests de garde-fou (frontière figée).
 
 ### mode=analyst (2026-07-16)
 
-Pass `"mode": "analyst"` in the `/api/chat` request body for longer, more
-detailed factual answers (higher token budget, lower temperature) instead
-of the default mobile-friendly 3-sentence replies:
+Passer `"mode": "analyst"` dans le corps de `POST /api/chat` pour des
+réponses plus longues et factuelles (budget de tokens plus élevé,
+température plus basse) au lieu des 3 phrases mobiles par défaut :
 
 ```json
 {"message": "Quel est notre ROI ?", "mode": "analyst"}
 ```
 
-Optional `"max_tokens"` overrides the analyst default (512). Response
-includes `"mode"` echoing back what was used. `mode=chat` (default, or
-omitted) is byte-identical to prior behavior — nothing changes unless a
-client opts in.
+`"max_tokens"` (optionnel) surcharge le défaut analyste (512). La réponse
+inclut `"mode"` en écho. `mode=chat` (défaut, ou omis) est identique au
+comportement précédent — rien ne change sans opt-in explicite du client.
 
-**Full docs:** See `TELEGRAM_SETUP.md`, `AI_CHAT_AUDIT.md` (stale — predates
-the `app/` removal), and `docs/AI_ASSISTANT_ARCHITECTURE.md` (current).
+## Phase 3 — Rapport d'apprentissage hebdomadaire (2026-07-23)
+
+`ai/learning/analyzer.py` synthétise chaque semaine (job scheduler, dimanche
+22h30) les patterns de calibration/surface/tournoi/désaccord marché en
+**suggestions** — jamais un changement automatique du prédicteur/de la
+calibration (ADR-005). Consultable via :
+
+```bash
+python run.py learning-report              # génère + affiche
+python run.py learning-report --no-write   # affiche seulement
+```
+
+Ou en posant une question au chat (Telegram ou `/api/chat`, voir ci-dessus).
+Voir `docs/ARCHITECTURE_BLUEPRINT.md` §6.5.
+
+---
+
+**Docs liées :** `docs/AI_ASSISTANT_ARCHITECTURE.md` (plan détaillé),
+`docs/ARCHITECTURE_BLUEPRINT.md` (référence permanente), `TELEGRAM_SETUP.md`
+(config bot). `AI_CHAT_AUDIT.md` reste stale (prédate le retrait de `app/`) —
+ne pas s'y fier.

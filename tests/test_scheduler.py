@@ -183,5 +183,38 @@ class TestJobCalibrationReport(unittest.TestCase):
         self.assertIsNotNone(db.get_meta("last_calibration_report_week"))
 
 
+class TestJobLearningReport(unittest.TestCase):
+    """Phase 3 (suggestion-only) — même garde-fou idempotent que calibration."""
+
+    def setUp(self):
+        self._fd, self._path = tempfile.mkstemp(suffix=".db")
+        self._save = config.DB_FILE
+        config.DB_FILE = self._path
+        db.init()
+        self.scheduler = sched_mod.TennisBossScheduler()
+
+    def tearDown(self):
+        config.DB_FILE = self._save
+        os.close(self._fd)
+        os.remove(self._path)
+
+    def test_learning_report_once_per_week(self):
+        fake_report = {"suggestions": [], "n_insufficient": 4,
+                       "report_path": "reports/learning/2026-07-23.md"}
+        with patch("ai.learning.analyzer.generate_weekly_report",
+                   return_value=fake_report):
+            self.scheduler.job_learning_report()
+            self.scheduler.job_learning_report()
+        self.assertEqual(self.scheduler.jobs_run, 1)
+        self.assertIsNotNone(db.get_meta("last_learning_report_week"))
+
+    def test_learning_report_failure_does_not_crash_scheduler(self):
+        with patch("ai.learning.analyzer.generate_weekly_report",
+                   side_effect=RuntimeError("boom")):
+            self.scheduler.job_learning_report()  # ne doit pas lever
+        self.assertEqual(self.scheduler.jobs_run, 0)
+        self.assertIsNone(db.get_meta("last_learning_report_week"))
+
+
 if __name__ == "__main__":
     unittest.main()
