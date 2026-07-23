@@ -512,3 +512,13 @@ Picked from the blueprint's open debt register (D-1..D-18) after the CI fix — 
 Verified 685/685 both locally and in a genuinely fresh clone (no `secrets/`/`state/` at all → confirms graceful disabled state). No restart needed — `_key_path()` resolves fresh on every call, picks up the moved file immediately. Commit `853698c`, CI green (run 29980528132).
 
 **Frozen core:** untouched. **Remaining open debt (register still needs a full refresh pass):** D-2, D-4, D-10, D-11 (human decision), D-12/D-13 (Android, Cursor's lane), D-16.
+
+### Debt D-16 partially closed: openclaw-era vision docs removed (2026-07-23, user sign-off)
+
+Investigated first (liveness audit, per D-16's own recommendation): `SOUL.md`, `IDENTITY.md`, `MEMORY.md`, `TOOLS.md`, `HEARTBEAT.md` were unreferenced by any code (only `bot/agent_router.py` had an already-documented, unrelated commented-out `openclaw` stub). Confirmed they describe a multi-agent "Gateway" architecture that was never actually built — `HEARTBEAT.md` in particular was actively misleading (claimed live agent orchestration status that doesn't exist). Superseded by the real architecture now documented in this blueprint, `AGENTS.md`, and `docs/AI_ASSISTANT_ARCHITECTURE.md`.
+
+**User's call, explicit sign-off given** ("si ça vaut pas la peine on supprime") after weighing it against their actual future direction (24/7 server, Telegram-first, self-learning on open-source skills — none of which these static docs served). Deleted via `git rm`.
+
+**Left untouched (out of scope of this pass):** `ksearch.py`/`watchdog.py` — confirmed real, functional tools (ELO grid search, external crash-recovery monitor), just misplaced at root instead of `scripts/`; low-priority cosmetic move, not dead code. `.openclaw/`, `.openclaw-cli-images/` — not investigated this pass.
+
+**Frozen core:** untouched. **Also this cycle:** D-10 debt entry corrected (surface-detection duplication claim was false — verified before acting, see blueprint §16).
