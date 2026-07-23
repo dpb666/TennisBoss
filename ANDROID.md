@@ -4,6 +4,15 @@ Le « cerveau » TennisBoss tourne côté serveur ; l'app Android n'est qu'un cl
 HTTP qui appelle l'API JSON. Aucune logique de prédiction n'est dupliquée dans
 l'app — elle affiche ce que renvoie l'API.
 
+## 0. Config Firebase (notifications push)
+
+`android/app/google-services.json` (clé API du projet Firebase) n'est **pas**
+versionné. Pour compiler l'app :
+1. Créer un projet sur [console.firebase.google.com](https://console.firebase.google.com/)
+   (package Android : `com.tennisboss.app`).
+2. Télécharger le `google-services.json` généré et le placer dans `android/app/`
+   (voir `android/app/google-services.json.example` pour le format attendu).
+
 ## 1. Lancer le backend
 
 ```bash
