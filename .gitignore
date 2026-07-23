@@ -3,6 +3,10 @@ state/
 logs/
 reports/
 
+# Secrets (clés de service, etc.) — séparés de state/ (debt D-6, voir
+# docs/ARCHITECTURE_BLUEPRINT.md §11.3)
+secrets/
+
 # Android Kotlin incremental build errors
 android/.kotlin/
 

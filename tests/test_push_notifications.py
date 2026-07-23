@@ -11,7 +11,69 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-from bot import push_notifications as push
+from bot import config, push_notifications as push
+
+
+class TestKeyPathResolution:
+    """Priorité de résolution (debt D-6, docs/ARCHITECTURE_BLUEPRINT.md §11.3) :
+    FIREBASE_ADMIN_KEY_PATH (env) > secrets/ (nouveau) > state/ (legacy, repli)."""
+
+    def setup_method(self):
+        self._save_secrets_dir = config.SECRETS_DIR
+        self._save_state_dir = config.STATE_DIR
+        push._warned_legacy_path = False
+
+    def teardown_method(self):
+        config.SECRETS_DIR = self._save_secrets_dir
+        config.STATE_DIR = self._save_state_dir
+        push._warned_legacy_path = False
+
+    def test_env_override_wins_even_if_files_exist_elsewhere(self, tmp_path):
+        config.SECRETS_DIR = str(tmp_path / "secrets")
+        os.makedirs(config.SECRETS_DIR)
+        (tmp_path / "secrets" / "firebase-adminsdk.json").write_text("{}")
+        with patch.dict(os.environ, {"FIREBASE_ADMIN_KEY_PATH": "/explicit/path.json"}):
+            assert push._key_path() == "/explicit/path.json"
+
+    def test_prefers_new_secrets_location_when_present(self, tmp_path):
+        config.SECRETS_DIR = str(tmp_path / "secrets")
+        config.STATE_DIR = str(tmp_path / "state")
+        os.makedirs(config.SECRETS_DIR)
+        os.makedirs(config.STATE_DIR)
+        (tmp_path / "secrets" / "firebase-adminsdk.json").write_text("{}")
+        (tmp_path / "state" / "firebase-adminsdk.json").write_text("{}")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FIREBASE_ADMIN_KEY_PATH", None)
+            assert push._key_path() == os.path.join(config.SECRETS_DIR, "firebase-adminsdk.json")
+
+    def test_falls_back_to_legacy_state_location_with_warning(self, tmp_path):
+        config.SECRETS_DIR = str(tmp_path / "secrets")
+        config.STATE_DIR = str(tmp_path / "state")
+        os.makedirs(config.STATE_DIR)
+        (tmp_path / "state" / "firebase-adminsdk.json").write_text("{}")
+        with patch.dict(os.environ, {}, clear=False), patch.object(push, "log") as log_mock:
+            os.environ.pop("FIREBASE_ADMIN_KEY_PATH", None)
+            path = push._key_path()
+        assert path == os.path.join(config.STATE_DIR, "firebase-adminsdk.json")
+        assert log_mock.called
+
+    def test_legacy_warning_logs_only_once(self, tmp_path):
+        config.SECRETS_DIR = str(tmp_path / "secrets")
+        config.STATE_DIR = str(tmp_path / "state")
+        os.makedirs(config.STATE_DIR)
+        (tmp_path / "state" / "firebase-adminsdk.json").write_text("{}")
+        with patch.dict(os.environ, {}, clear=False), patch.object(push, "log") as log_mock:
+            os.environ.pop("FIREBASE_ADMIN_KEY_PATH", None)
+            push._key_path()
+            push._key_path()
+        assert log_mock.call_count == 1
+
+    def test_defaults_to_new_location_when_neither_exists(self, tmp_path):
+        config.SECRETS_DIR = str(tmp_path / "secrets")
+        config.STATE_DIR = str(tmp_path / "state")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FIREBASE_ADMIN_KEY_PATH", None)
+            assert push._key_path() == os.path.join(config.SECRETS_DIR, "firebase-adminsdk.json")
 
 
 class TestIsEnabled:

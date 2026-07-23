@@ -10,8 +10,10 @@ machine (tensorflow>=6.31, streamlit<7) partageant le même environnement.
 Doc FCM HTTP v1 : https://firebase.google.com/docs/cloud-messaging/migrate-v1
   POST https://fcm.googleapis.com/v1/projects/{project_id}/messages:send
 
-Clé de compte de service : state/firebase-adminsdk.json (hors git, comme
-state/tennisboss.db). Chemin configurable via FIREBASE_ADMIN_KEY_PATH.
+Clé de compte de service : secrets/firebase-adminsdk.json (hors git). Chemin
+configurable via FIREBASE_ADMIN_KEY_PATH. L'ancien emplacement
+(state/firebase-adminsdk.json) reste lu en repli, avec un avertissement, pour
+les déploiements pas encore migrés (debt D-6).
 """
 from __future__ import annotations
 
@@ -35,11 +37,31 @@ _cached_token_expiry: float = 0.0
 _project_id: Optional[str] = None
 
 
+_warned_legacy_path = False
+
+
 def _key_path() -> str:
-    return os.environ.get(
-        "FIREBASE_ADMIN_KEY_PATH",
-        os.path.join(config.STATE_DIR, "firebase-adminsdk.json"),
-    )
+    """Résout le chemin de la clé FCM.
+
+    Priorité : FIREBASE_ADMIN_KEY_PATH (env) > secrets/firebase-adminsdk.json
+    (nouvel emplacement) > state/firebase-adminsdk.json (ancien emplacement,
+    repli avec avertissement — debt D-6, à migrer sans casser un déploiement
+    existant)."""
+    global _warned_legacy_path
+    override = os.environ.get("FIREBASE_ADMIN_KEY_PATH", "").strip()
+    if override:
+        return override
+    new_path = os.path.join(config.SECRETS_DIR, "firebase-adminsdk.json")
+    if os.path.exists(new_path):
+        return new_path
+    legacy_path = os.path.join(config.STATE_DIR, "firebase-adminsdk.json")
+    if os.path.exists(legacy_path):
+        if not _warned_legacy_path:
+            log(f"Clé FCM lue depuis l'ancien emplacement {legacy_path} — "
+                f"déplacer vers {new_path} (debt D-6).", "WARN")
+            _warned_legacy_path = True
+        return legacy_path
+    return new_path
 
 
 def is_enabled() -> bool:

@@ -6,6 +6,11 @@ import os
 # --- Chemins ---------------------------------------------------------------
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(ROOT, "state")
+# Secrets (clés de service, etc.) séparés de state/ : ce dernier est balayé par
+# les DB backups (bot/backup.py, scripts/backup_offsite.*) et parcouru par les
+# outils/agents pour des raisons DB légitimes — un secret n'y a rien à faire
+# (debt D-6, docs/ARCHITECTURE_BLUEPRINT.md §11.3). Gitignored comme state/.
+SECRETS_DIR = os.path.join(ROOT, "secrets")
 LOGS_DIR = os.path.join(ROOT, "logs")
 MEMORY_FILE = os.path.join(STATE_DIR, "memory.json")
 CONFIG_FILE = os.path.join(STATE_DIR, "config.json")
