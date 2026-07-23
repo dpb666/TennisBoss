@@ -387,6 +387,10 @@ def init() -> None:
                 conn.execute(ddl)
             except sqlite3.OperationalError:
                 pass  # colonne déjà présente
+        # Migrations versionnées (D-4, §7.2) — mécanisme séparé pour tout
+        # changement de schéma à partir de maintenant ; voir data/db/migrations/.
+        from . import db_migrations
+        db_migrations.apply_pending_migrations(conn)
     # Auto-réparation : quick_check rate les corruptions d'index (vu le 2026-06-11),
     # donc integrity_check complet ; REINDEX si nécessaire. Mais integrity_check
     # coûte ~13s sur /mnt/c (lecture de toute la base) : on le borne à 1×/24h via

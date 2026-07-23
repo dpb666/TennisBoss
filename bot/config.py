@@ -17,6 +17,9 @@ CONFIG_FILE = os.path.join(STATE_DIR, "config.json")
 LOG_FILE = os.path.join(LOGS_DIR, "tennisboss.log")
 _DB_DEFAULT = os.path.join(STATE_DIR, "tennisboss.db")
 DB_FILE = os.environ.get("TENNISBOSS_DB_FILE", _DB_DEFAULT)  # base SQLite "solide"
+# Migrations versionnées (D-4, docs/ARCHITECTURE_BLUEPRINT.md §7.2) — additif
+# uniquement, à côté du schéma CREATE IF NOT EXISTS existant dans db.py.
+MIGRATIONS_DIR = os.path.join(ROOT, "data", "db", "migrations")
 
 # --- Réglages par défaut (écrits dans state/config.json au bootstrap) ------
 DEFAULT_CONFIG = {
