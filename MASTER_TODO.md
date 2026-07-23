@@ -615,4 +615,16 @@ Plus couplé que le batch diagnostics : ces routes lisent des globals module de 
 
 `bot/api.py` : 2 837 → 2 724 lignes ; 33 → 28 routes inline (29 maintenant dans des blueprints, sur 52 au départ). Registre D-1 mis à jour.
 
-**Frozen core :** untouché. Commit `68fe3e3`, CI à vérifier après push.
+**Frozen core :** untouché. Commit `68fe3e3`, CI verte confirmée après push.
+
+### D-1 phase 2g : 3 routes système déplacées dans core.py (2026-07-23)
+
+Dernier lot de cette série : `/api/openapi.json`, `/api/app/version`, `/api/device/register` — les trois triviales et sans aucun couplage à l'état module de `api.py` (juste `db.*`/`openapi_spec.*`). Plutôt qu'un nouveau fichier, ajoutées à `bot/blueprints/core.py` qui possède déjà `/health`/`/privacy`/`/api/status` — même famille sémantique (endpoints système/app-level). Import `openapi_spec` devenu inutile dans `api.py`, retiré.
+
+**Vérifié** : 716/716 en local, 716/716 sur clone WSL fraîchement cloné (`/tmp/tb_verify_diag3`).
+
+`bot/api.py` : 2 724 → 2 689 lignes ; 28 → 25 routes inline (32 maintenant dans des blueprints, sur 52 au départ).
+
+**Pourquoi je m'arrête ici plutôt que de continuer mécaniquement** : les 25 routes restantes sont soit le cœur business (`/api/predict`, `/api/insight`, `/api/match/intelligence`, `/api/engineer/today`, `/api/recommendations`, `/api/bet-builder/combo`, `/api/value*`, `/api/inplay/*`) soit des opérations admin-mutantes (`/api/backfill`, `/api/settlement/run`, `/api/learn/run`, `/api/ingest/*`). Contrairement aux 3 lots faits ce cycle (aucun état module, aucune mutation), ce reste touche `_MEM`/`_resolve`/`predictor`/`features` en profondeur et pour certaines routes mute des données réelles — une extraction mécanique au même rythme serait imprudente. Marqué dans le registre D-1 : mérite son propre passage dédié, pas une continuation automatique.
+
+**Frozen core :** untouché. Commit `626dc5b`, CI verte confirmée après push.
