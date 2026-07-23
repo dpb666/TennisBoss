@@ -51,3 +51,7 @@ hs_err_pid*.log
 /HEARTBEAT.md
 .openclaw/
 .openclaw-cli-images/
+
+# Fichier de workspace VS Code régénéré à la racine (pointe vers .git,
+# artefact local) — la vraie copie versionnée vit dans docs/internal/.
+/TennisBoss.code-workspace
