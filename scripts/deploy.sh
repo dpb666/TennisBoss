@@ -39,7 +39,11 @@ NEW_HASH=$(git rev-parse --short HEAD)
 
 # Dépendances AVANT restart : si pip échoue (réseau...), set -e arrête ici
 # et la prod continue de tourner sur l'ancien code — bon mode de défaillance.
-"$PY" -m pip install -r requirements.txt --quiet
+# Ubuntu 24.04+ (PEP 668, "externally-managed-environment") refuse pip sans
+# --break-system-packages hors venv — acceptable ici : hôte dédié mono-app,
+# pas un environnement Python partagé multi-projets.
+"$PY" -m pip install -r requirements.txt --quiet \
+  || "$PY" -m pip install -r requirements.txt --quiet --break-system-packages
 
 restart_services() {
   if [ "$MODE" = "compose" ]; then
