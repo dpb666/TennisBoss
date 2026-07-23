@@ -4,11 +4,46 @@ from __future__ import annotations
 import os
 import re
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
-from .. import __version__, db, odds_api
+from .. import __version__, db, odds_api, openapi_spec
 
 bp = Blueprint("core", __name__)
+
+
+@bp.get("/api/openapi.json")
+def api_openapi_spec():
+    return jsonify(openapi_spec.build_spec())
+
+
+@bp.get("/api/app/version")
+def api_app_version():
+    """Dernière version Android connue (bandeau "mise à jour disponible" côté
+    app, avant publication Play Store qui gérera ça nativement). Lecture
+    seule ; mis à jour via `python run.py set-app-version` après chaque build
+    notable — voir bot/db.py::set_app_version, docs/AI_ASSISTANT_ARCHITECTURE.md
+    n'est pas concerné (fonctionnalité produit, pas assistant IA)."""
+    info = db.get_app_version_info()
+    if not info:
+        return jsonify({"available": False})
+    return jsonify({"available": True, **info})
+
+
+@bp.post("/api/device/register")
+def api_device_register():
+    """Enregistre le token FCM d'un appareil pour les notifications push.
+
+    Appelé par l'app au démarrage et à chaque renouvellement de token
+    (FirebaseMessagingService.onNewToken). Idempotent : ré-enregistrer un
+    token déjà connu se contente de rafraîchir last_seen_ts.
+    """
+    body = request.get_json(silent=True) or {}
+    token = (body.get("token") or "").strip()
+    if not token:
+        return jsonify({"error": "paramètre requis: token"}), 400
+    platform = (body.get("platform") or "android").strip()
+    db.register_device_token(token, platform)
+    return jsonify({"status": "registered"})
 
 
 @bp.get("/health")

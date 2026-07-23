@@ -33,7 +33,7 @@ from flask_swagger_ui import get_swaggerui_blueprint
 
 from . import (auto_learner, calibrate, chat as chat_mod, clv, config, datasource,
                db, elo, espn_api, features, intelligence, intelligence_layer, live_api, match_intelligence,
-               memory, mistake_learner, namematch, odds_api, oddspapi_feeder, openapi_spec, predictor,
+               memory, mistake_learner, namematch, odds_api, oddspapi_feeder, predictor,
                recommendations, sackmann_feeder, settlement, versions, weather)
 from . import __version__
 from .blueprints import apply_blueprint_rate_limits, register_blueprints
@@ -53,11 +53,6 @@ app.register_blueprint(get_swaggerui_blueprint(
 ))
 
 register_blueprints(app)
-
-
-@app.get("/api/openapi.json")
-def api_openapi_spec():
-    return jsonify(openapi_spec.build_spec())
 
 
 def _client_ip() -> str:
@@ -440,19 +435,6 @@ def _explain(name1: str, feat1: Dict[str, float],
 
 
 # --- Endpoints -------------------------------------------------------------
-
-@app.get("/api/app/version")
-def api_app_version():
-    """Dernière version Android connue (bandeau "mise à jour disponible" côté
-    app, avant publication Play Store qui gérera ça nativement). Lecture
-    seule ; mis à jour via `python run.py set-app-version` après chaque build
-    notable — voir bot/db.py::set_app_version, docs/AI_ASSISTANT_ARCHITECTURE.md
-    n'est pas concerné (fonctionnalité produit, pas assistant IA)."""
-    info = db.get_app_version_info()
-    if not info:
-        return jsonify({"available": False})
-    return jsonify({"available": True, **info})
-
 
 @app.get("/api/players")
 def api_players():
@@ -2494,23 +2476,6 @@ def api_inplay_picks_delete(pick_id: int):
         if cur.rowcount == 0:
             return jsonify({"error": "pick introuvable"}), 404
     return jsonify({"id": pick_id, "status": "deleted"})
-
-
-@app.route("/api/device/register", methods=["POST"])
-def api_device_register():
-    """Enregistre le token FCM d'un appareil pour les notifications push.
-
-    Appelé par l'app au démarrage et à chaque renouvellement de token
-    (FirebaseMessagingService.onNewToken). Idempotent : ré-enregistrer un
-    token déjà connu se contente de rafraîchir last_seen_ts.
-    """
-    body = request.get_json(silent=True) or {}
-    token = (body.get("token") or "").strip()
-    if not token:
-        return jsonify({"error": "paramètre requis: token"}), 400
-    platform = (body.get("platform") or "android").strip()
-    db.register_device_token(token, platform)
-    return jsonify({"status": "registered"})
 
 
 def _odds_for(odds_index, raw1: str, raw2: str) -> Optional[Dict[str, Any]]:
