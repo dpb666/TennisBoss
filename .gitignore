@@ -28,6 +28,10 @@ __pycache__/
 venv/
 .env
 
+# Bases SQLite locales (stray/dev copies — la vraie base vit sous state/,
+# déjà ignorée ci-dessus ; ceci couvre tennis.db et toute autre .db à la racine)
+*.db
+
 # Logs de build/émulateur Android (générés localement)
 android/*.log
 hs_err_pid*.log
