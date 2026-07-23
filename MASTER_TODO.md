@@ -485,3 +485,18 @@ Blueprint: `docs/ARCHITECTURE_BLUEPRINT.md` §5.3. Log: `docs/API_DECOMPOSITION.
 **Autre correctif** : redémarrage prod du 21/07 (00:07 EDT, jamais journalisé au moment) enregistré rétroactivement dans `deployment_history` (#2, `git_hash=5779ef5`).
 
 **Frozen core :** untouché.
+
+### Debt D-17 closed: rate-limit /api/chat + auth-failure throttle (2026-07-22)
+
+Picked from the blueprint's open debt register (D-1..D-18) after the CI fix — the register itself was stale (D-7/D-8/D-9/D-18 already closed by earlier sessions; D-1/D-3 largely addressed by the workers/blueprints extraction; D-15 de-facto validated by the real 07-19 restore incident).
+
+| Item | Fix | Tests |
+|---|---|---|
+| `/api/chat` had no dedicated rate limit (shared the generic 200/min with all traffic — cheap to run up real Groq/Gemini cost) | `@limiter.limit("20 per minute")`, same pattern as the odds-quota routes | 1 (`TestChatRateLimitEnforced`) |
+| Repeated wrong-token requests only competed for the same 200/min bucket as legitimate traffic — no dedicated brute-force protection | In-memory sliding-window throttle in `_auth()`: 10 failures/60s per IP → 429 without comparing the token further. Disabled under `TESTING` (existing bad-token tests unaffected) | 9 (`TestAuthFailureThrottle`) |
+
+**Verified 680/680 in a genuinely fresh WSL clone before pushing** (not just locally) — the CI incident earlier this session made that the new default, not an afterthought. Commit `aa33468`, CI green ([backend](https://github.com/dpb666/TennisBoss/actions) + android, run 29974896056).
+
+**Frozen core:** untouched.
+
+**Remaining open debt (blueprint register needs a refresh pass — noted, not done here):** D-2 (import boundaries), D-4 (migration mechanism), D-6 (firebase key out of state/), D-10 (duplicated surface-detection logic), D-11 (auto_learner governance — human decision), D-12/D-13 (Android Repository/DI, security-crypto/R8), D-16 (openclaw-era root artifacts hygiene).
