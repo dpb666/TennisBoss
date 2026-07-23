@@ -2,9 +2,9 @@
 """Grid search K_FAST / K_STD / K_SLOW pour l'ELO dynamique TennisBoss.
 
 Usage:
-    python3 ksearch.py                    # ATP+WTA standard
-    python3 ksearch.py --challengers      # ATP + Futures/ITF (recommandé)
-    python3 ksearch.py --n-thresholds     # aussi cherche N_FAST / N_SLOW
+    python3 scripts/ksearch.py                    # ATP+WTA standard
+    python3 scripts/ksearch.py --challengers      # ATP + Futures/ITF (recommandé)
+    python3 scripts/ksearch.py --n-thresholds     # aussi cherche N_FAST / N_SLOW
 """
 import argparse
 import copy
@@ -12,6 +12,9 @@ import math
 import sys
 from collections import defaultdict
 from itertools import product
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot import config, datasource, features, memory, predictor
 from bot import elo as elo_mod

@@ -2,8 +2,8 @@
 """Watchdog externe TennisBoss — surveille et redémarre le serveur si mort.
 
 Usage:
-    python3 watchdog.py &          # lance en arrière-plan
-    python3 watchdog.py --once     # un seul check (pour cron)
+    python3 scripts/watchdog.py &          # lance en arrière-plan
+    python3 scripts/watchdog.py --once     # un seul check (pour cron)
 
 Ce script est INDÉPENDANT du serveur Flask — il survit aux crashs.
 """
@@ -25,7 +25,7 @@ SERVER_PID_FILE = Path("/tmp/tennisboss_server.pid")
 CHECK_INTERVAL  = 30    # secondes entre chaque ping
 STARTUP_GRACE   = 12    # secondes pour que le serveur démarre
 MAX_RESTARTS    = 10    # redémarrages max par heure avant pause
-ROOT            = Path(__file__).parent
+ROOT            = Path(__file__).resolve().parent.parent
 
 
 def _ts() -> str:

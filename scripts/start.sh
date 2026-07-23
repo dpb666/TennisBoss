@@ -1,7 +1,7 @@
 #!/bin/bash
 # TennisBoss — démarrage API + tunnel ngrok
 # URL publique stable : https://tennisboss-api.walid-zahir89.workers.dev
-cd "$(dirname "$0")"
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 source .env 2>/dev/null || true
 
 WORKER_URL="https://tennisboss-api.walid-zahir89.workers.dev"
@@ -40,9 +40,12 @@ echo "✅ Tunnel : $NGROK_URL"
 if [ "$NGROK_URL" != "$STATIC_NGROK" ]; then
   echo "⚠️  URL ngrok inattendue — mise à jour du Worker..."
   sed -i "s|TUNNEL_URL = \".*\"|TUNNEL_URL = \"$NGROK_URL\"|" cloudflare/wrangler.toml
-  CF_TOKEN="${CLOUDFLARE_API_TOKEN:-cfut_c6N7p8x9FIJyS7uwdSB1TGBQnUEBAgjJGC3odxP52c459692}"
-  (cd cloudflare && CLOUDFLARE_API_TOKEN="$CF_TOKEN" npx wrangler@latest deploy 2>&1 | tail -3) && \
-    echo "✅ Worker mis à jour" || echo "⚠️  Worker update manuelle requise"
+  if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+    echo "⚠️  CLOUDFLARE_API_TOKEN non défini — mise à jour manuelle requise"
+  else
+    (cd cloudflare && npx wrangler@latest deploy 2>&1 | tail -3) && \
+      echo "✅ Worker mis à jour" || echo "⚠️  Worker update manuelle requise"
+  fi
 fi
 
 echo ""
