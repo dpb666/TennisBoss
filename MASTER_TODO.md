@@ -548,3 +548,37 @@ Orchestrateur mince sur des modules d'analyse **déjà existants** (`calibration
 **Frozen core :** untouché — vérifié `git diff` propre sur predictor.py/calibrate.py.
 
 **Non fait (hors scope de ce cycle, par choix explicite de l'opérateur) :** serveur 24/7 (déjà planifié dans le blueprint, roadmap Q2 2027) ; ingestion Phase 3 → base de connaissances (bloqué sur Phase 2, non construite).
+
+### Redéploiement prod exécuté par l'agent (2026-07-23, autorisation explicite "fait le tu es la master")
+
+La prod tournait sur `064e52c`, 4h+ derrière le dernier push (`175ea32`, chat Telegram + Phase 3) — trouvé lors d'une passe "verifie". L'opérateur a explicitement autorisé l'agent à exécuter le restart lui-même (dérogation ponctuelle à la règle §13/matrice "restart = action humaine").
+
+**Bug réel trouvé en l'exécutant pour de vrai** (jamais roulé avant sur cet hôte) : `scripts/deploy.sh` échouait sur `pip install -r requirements.txt` — Ubuntu 24.04 refuse pip hors venv (PEP 668, "externally-managed-environment"). `set -euo pipefail` a arrêté le script **avant** `restart_services()` — bon mode de défaillance, prod inchangée, aucun risque. Corrigé avec un repli `--break-system-packages` (hôte dédié mono-app, pas un environnement partagé). Commit `9f83053`.
+
+**Vérifié après ré-exécution** (pas juste "la commande a réussi") : `systemctl show tennisboss-bot.service -p ActiveEnterTimestamp` → `2026-07-23 01:55:13` (restart frais) ; `curl https://api.tennisboss.online/health` → `{"status":"ok",...}` en direct (pas juste loopback) ; `deployment_history` (`run.py record-deploy --show`) montre les 2 entrées ; `journalctl` depuis le restart : démarrage propre, "13 jobs configured ... learning_report Sun 22h30", janitor a purgé 16 tmp orphelins, bot Telegram polling démarré, tous les workers (settlement, CLV, watchlist, scanner, inplay, self-healing) up sans erreur. CI verte sur `9f83053` (run `29983526959`).
+
+**Frozen core :** untouché (aucun code touché — script de déploiement seulement).
+
+### Passe de rafraîchissement du registre de dette (2026-07-23)
+
+Suite à la note "le registre a besoin d'une passe de rafraîchissement complète" laissée après la correction D-10 — vérifié chaque item ouvert contre le code réel plutôt que de faire confiance au texte existant (même discipline que D-10/D-16 plus tôt cette session).
+
+**4 items fermés — déjà résolus dans le code, jamais marqués :**
+
+| Item | Preuve trouvée |
+|---|---|
+| D-7 (fichiers tmp orphelins) | Job janitor (`backup.prune_state_tmp`) déjà câblé dans `bot/scheduler.py`, confirmé actif en prod (log démarrage 2026-07-23 : "16 fichier(s) ... purgé(s)") |
+| D-8 (LAN sans token) | `_enforce_prod_token()` refuse le démarrage sans token sous `TENNISBOSS_ENV=prod` ; `.env` prod confirmé avec `TENNISBOSS_ENV=prod` actif |
+| D-9 (`compare-engines` non câblé) | Déjà enregistré dans `run.py` (`cmd_compare_engines`, sous-commande `compare-engines`) |
+| D-18 (logs sans rotation) | `bot/log.py` implémente déjà la rotation par taille (`_MAX_BYTES`/`_KEEP`), avec un commentaire de code qui cite D-18 lui-même |
+
+**2 items dont les chiffres/le texte étaient faux, corrigés (pas fermés) :**
+
+- **D-1** (`bot/api.py` god-module) : le texte disait "~4.2k lignes, 52 routes, 4 boucles daemon". Réalité vérifiée : 2 891 lignes, 38 routes inline (19 déjà déplacées vers `bot/blueprints/{core,matches,performance,personalization}.py`), les 4 boucles daemon sont maintenant des shims de compatibilité de 2-5 lignes qui délèguent à `bot/workers/*.py`. Progrès réel et important, mais toujours 🔴 — loin du critère de sortie Q4 #7 (`bot/api.py` < 500 lignes).
+- **D-3** (threads daemon dans le process API) : la *logique* est bien extraite vers `bot/workers/` (vérifié : les fonctions dans `api.py` sont des shims qui appellent `run_loop()` des modules workers) — ce qui n'était pas encore le cas quand l'item a été écrit. Rétrogradé 🔴→🟡 : ce qui reste ouvert, c'est le partage de *process* (les threads démarrent toujours dans `api.py`, pas un process séparé) — le critère de sortie Q3 #4 ("le scanner survit à un restart de l'API") n'est pas atteint.
+
+**1 item enrichi** : D-5 (sprawl documentaire) — noté que `PROJECT_STATUS.md` a été rafraîchi 2026-07-22 (n'est plus stale), mais `AI_CHAT_AUDIT.md`/`RELEASE_AUDIT.md` sont encore à la racine, pas déplacés vers `docs/audits/` (chacun référencé par 2-5 fichiers — le déplacement demande une passe de correction de liens, pas fait ce cycle-ci, hors scope d'un slice non sollicité).
+
+**Pourquoi ça compte** : c'est exactement le risque R-11 du blueprint ("Knowledge decay — future agents trust stale audits and act on them") — un futur agent qui aurait lu D-9 tel quel aurait pu re-câbler `compare-engines` inutilement, ou sous-estimer le vrai progrès sur D-1/D-3.
+
+**Frozen core :** untouché (changements docs uniquement, `git diff -- bot/predictor.py bot/calibrate.py` vide).
