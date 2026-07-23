@@ -592,3 +592,15 @@ Fait ce qui avait été flaggé "pas fait ce cycle-ci" juste au-dessus : `git mv
 **Volontairement non touchés** (instantanés historiques datés, pas des docs vivants) : `RELEASE_NOTES_CHAT.md` et `docs/DEVELOPMENT_AUDIT_2026-07-16.md` référencent encore l'ancien chemin racine — cohérent avec la décision déjà prise plus tôt cette session (voir plus haut : "le latter ne devrait pas être révisé en tant qu'histoire"). Un lecteur qui ouvre un audit daté sait qu'il peut être obsolète depuis.
 
 Vérifié : aucune référence code (`.py`) au chemin de ces fichiers ; `git diff -- bot/predictor.py bot/calibrate.py` vide.
+
+### D-1 phase 2e : blueprint `diagnostics` extrait de bot/api.py (2026-07-23)
+
+Continuation directe de la passe de rafraîchissement du registre ci-dessus : plutôt que de laisser D-1 comme "🔴, loin de la cible" sans y toucher, extrait un batch de plus, dans la continuité exacte des phases 2a-2d déjà visibles dans l'historique git (core/matches/performance/personalization).
+
+**5 routes déplacées** vers `bot/blueprints/diagnostics.py` : `/api/intelligence/stats`, `/api/intelligence/cycle`, `/api/learner/stats`, `/api/scanner/status`, `/api/monitor/status`. Choisies pour être le lot le moins risqué : aucune n'a de décorateur rate-limit/admin propre (le gate admin sur `/api/intelligence/cycle` passe par `_is_admin_request()` dans le `before_request` global de `app`, qui matche sur `request.path` — indifférent à quel blueprint possède la route, vérifié avant de déplacer). `/api/learn/run` explicitement laissé en place : touche `_MEM` (état module de `api.py`) et `auto_learner`, adjacent à la décision humaine D-11 — pas dans le lot.
+
+**Vérifié, pas juste supposé** : 716/716 en local, 716/716 sur clone WSL fraîchement cloné (`/tmp/tb_verify_diag`, aucun état préexistant). Les tests qui patchent `api.intelligence`/`api.mistake_learner`/`api.db` (`patch.object`) continuent de marcher sans modification — ils patchent l'objet module partagé `bot.intelligence`/etc., pas la référence locale d'`api.py`, donc indifférents à quel fichier appelle la fonction.
+
+`bot/api.py` : 2 891 → 2 837 lignes ; 38 → 33 routes inline (24 maintenant dans des blueprints). Registre D-1 mis à jour avec les nouveaux chiffres.
+
+**Frozen core :** untouché (`git diff -- bot/predictor.py bot/calibrate.py` vide). CI verte à vérifier après push (commit `1491a48`).
