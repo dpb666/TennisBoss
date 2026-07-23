@@ -31,3 +31,16 @@ venv/
 # Logs de build/émulateur Android (générés localement)
 android/*.log
 hs_err_pid*.log
+
+# Scaffold d'un outil agent-runtime "openclaw" tiers présent sur cette
+# machine (extension VS Code / .openclaw/) — se régénère tout seul en
+# templates vierges dès qu'il constate leur absence. Sans rapport avec le
+# code TennisBoss (debt D-16) : ignoré pour de bon plutôt que re-supprimé
+# à répétition.
+/SOUL.md
+/IDENTITY.md
+/MEMORY.md
+/TOOLS.md
+/HEARTBEAT.md
+.openclaw/
+.openclaw-cli-images/
