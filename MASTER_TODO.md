@@ -500,3 +500,15 @@ Picked from the blueprint's open debt register (D-1..D-18) after the CI fix — 
 **Frozen core:** untouched.
 
 **Remaining open debt (blueprint register needs a refresh pass — noted, not done here):** D-2 (import boundaries), D-4 (migration mechanism), D-6 (firebase key out of state/), D-10 (duplicated surface-detection logic), D-11 (auto_learner governance — human decision), D-12/D-13 (Android Repository/DI, security-crypto/R8), D-16 (openclaw-era root artifacts hygiene).
+
+### Debt D-6 closed: FCM key moved out of state/ into secrets/ (2026-07-23)
+
+| Item | Fix | Tests |
+|---|---|---|
+| `state/firebase-adminsdk.json` lived in the DB-tools directory (also a Docker volume mount target) | New `config.SECRETS_DIR` (gitignored like `state/`); `push_notifications._key_path()` resolution: env override > `secrets/` (new) > `state/` (legacy, one-time WARN) > `secrets/` default. Real prod key file physically moved (never read, never git-tracked — confirmed via `git log --all`) | 5 new (`TestKeyPathResolution`) |
+
+**Context found while investigating:** neither the 6h local backup (`bot/backup.py`, sqlite-file-only) nor `scripts/backup_offsite.sh` (explicit file list) actually swept this file into any backup — lower urgency than the blueprint's original framing, but still worth the move as `state/`'s scope keeps growing.
+
+Verified 685/685 both locally and in a genuinely fresh clone (no `secrets/`/`state/` at all → confirms graceful disabled state). No restart needed — `_key_path()` resolves fresh on every call, picks up the moved file immediately. Commit `853698c`, CI green (run 29980528132).
+
+**Frozen core:** untouched. **Remaining open debt (register still needs a full refresh pass):** D-2, D-4, D-10, D-11 (human decision), D-12/D-13 (Android, Cursor's lane), D-16.
