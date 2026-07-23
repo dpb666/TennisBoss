@@ -603,4 +603,16 @@ Continuation directe de la passe de rafraîchissement du registre ci-dessus : pl
 
 `bot/api.py` : 2 891 → 2 837 lignes ; 38 → 33 routes inline (24 maintenant dans des blueprints). Registre D-1 mis à jour avec les nouveaux chiffres.
 
-**Frozen core :** untouché (`git diff -- bot/predictor.py bot/calibrate.py` vide). CI verte à vérifier après push (commit `1491a48`).
+**Frozen core :** untouché (`git diff -- bot/predictor.py bot/calibrate.py` vide). CI verte confirmée après push (commit `1491a48`).
+
+### D-1 phase 2f : blueprint `reporting` extrait de bot/api.py (2026-07-23)
+
+Même continuation, batch suivant : `/api/calibration`, `/api/history`, `/api/clv`, `/api/clv/weekly`, `/api/line-movement` déplacées vers `bot/blueprints/reporting.py`.
+
+Plus couplé que le batch diagnostics : ces routes lisent des globals module de `api.py` (`_CALIB_K`, `_PLATT_A`, `_PLATT_B`, `_MKT_W`, `_MEM`) et deux helpers (`_fmt_date`, `_clean_tournament`, encore utilisés ailleurs dans `api.py` — pas déplacés). Résolu avec le même motif déjà utilisé par `matches.py` : `from .. import api` en local dans chaque handler, puis lecture d'attribut vivant (`api._CALIB_K`, `api._fmt_date(...)`) — l'attribut est toujours lu à l'appel, donc reflète la valeur courante même si elle est réassignée ailleurs dans `api.py` (`_refit_calibration()` etc.). `/api/settlement/run` et `/api/backfill`, juste au-dessus dans le fichier, explicitement laissés en place : ils mutent l'état (`_refit_calibration`, `db.save_calibration`) et sont admin-gated — plus de surface de risque, pas dans ce lot.
+
+**Vérifié** : 716/716 en local, 716/716 sur clone WSL fraîchement cloné (`/tmp/tb_verify_diag2`). Tests `patch.object(api.settlement/clv/db, ...)` inchangés et verts — même raisonnement que phase 2e (ils patchent les modules partagés, pas la référence locale du fichier appelant).
+
+`bot/api.py` : 2 837 → 2 724 lignes ; 33 → 28 routes inline (29 maintenant dans des blueprints, sur 52 au départ). Registre D-1 mis à jour.
+
+**Frozen core :** untouché. Commit `68fe3e3`, CI à vérifier après push.
