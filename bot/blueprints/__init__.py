@@ -2,7 +2,9 @@
 
 Phase 2 (read-only routes first): core + performance + personalization;
 phase 2c adds /api/status, /privacy, /api/bet-history/*;
-phase 2d adds /api/upcoming, /api/live.
+phase 2d adds /api/upcoming, /api/live;
+phase 2e adds /api/intelligence/*, /api/learner/stats, /api/scanner/status,
+/api/monitor/status (diagnostics — D-1).
 """
 from __future__ import annotations
 
@@ -16,11 +18,13 @@ if TYPE_CHECKING:
 
 def register_blueprints(app: Flask) -> None:
     from .core import bp as core_bp
+    from .diagnostics import bp as diagnostics_bp
     from .matches import bp as matches_bp
     from .performance import bp as performance_bp
     from .personalization import bp as personalization_bp
 
     app.register_blueprint(core_bp)
+    app.register_blueprint(diagnostics_bp)
     app.register_blueprint(performance_bp)
     app.register_blueprint(personalization_bp)
     app.register_blueprint(matches_bp)
