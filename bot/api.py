@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -241,6 +243,40 @@ def _is_admin_request() -> bool:
     return request.path in _ADMIN_PATHS or request.path.startswith(_ADMIN_PREFIXES)
 
 
+# Anti-brute-force sur les échecs d'auth (debt D-17, docs/ARCHITECTURE_BLUEPRINT.md
+# §11.4). Le rate-limit global du Limiter (200/min, tout trafic confondu) borne
+# le DoS mais partage son budget avec le trafic légitime — il ne cible pas
+# spécifiquement le brute-force de token. Ce budget dédié, beaucoup plus strict,
+# ne compte QUE les 401 par IP, dans une fenêtre glissante en mémoire (pas de
+# dépendance ajoutée — même esprit que bot/workers/value_scanner.py::SCANNER_STATE).
+_AUTH_FAIL_WINDOW_S = 60
+_AUTH_FAIL_MAX = 10
+_auth_fail_lock = threading.Lock()
+_auth_fail_log: Dict[str, List[float]] = {}
+
+
+def _auth_failure_throttled(ip: str) -> bool:
+    """True si `ip` a déjà atteint _AUTH_FAIL_MAX échecs dans la fenêtre
+    glissante — ne consigne PAS un nouvel échec (voir _record_auth_failure)."""
+    now = time.time()
+    with _auth_fail_lock:
+        recent = [t for t in _auth_fail_log.get(ip, []) if now - t < _AUTH_FAIL_WINDOW_S]
+        _auth_fail_log[ip] = recent
+        return len(recent) >= _AUTH_FAIL_MAX
+
+
+def _record_auth_failure(ip: str) -> None:
+    """Consigne un échec d'auth pour `ip`. Purge occasionnelle des IP inactives
+    pour éviter une croissance mémoire non bornée (coût O(n) rare, pas par requête)."""
+    now = time.time()
+    with _auth_fail_lock:
+        _auth_fail_log.setdefault(ip, []).append(now)
+        if len(_auth_fail_log) > 10000:
+            cutoff = now - _AUTH_FAIL_WINDOW_S
+            for key in [k for k, v in _auth_fail_log.items() if not v or v[-1] <= cutoff]:
+                del _auth_fail_log[key]
+
+
 @app.before_request
 def _auth():
     # /privacy doit rester public : URL exigée par Google Play Console, sans
@@ -252,8 +288,17 @@ def _auth():
             or request.path.startswith("/api/docs")):
         return None
     token = os.environ.get("TENNISBOSS_API_TOKEN", "").strip()
-    if token and request.headers.get("X-API-Token", "") != token:
-        return jsonify({"error": "unauthorized"}), 401
+    if token:
+        # Throttle désactivé en TESTING : évite qu'une suite de tests envoyant
+        # plusieurs 401 volontaires (mauvais token) ne se bloque elle-même.
+        throttling = not app.config.get("TESTING")
+        ip = _client_ip() if throttling else ""
+        if throttling and _auth_failure_throttled(ip):
+            return jsonify({"error": "trop de tentatives échouées — réessaie dans un instant"}), 429
+        if request.headers.get("X-API-Token", "") != token:
+            if throttling:
+                _record_auth_failure(ip)
+            return jsonify({"error": "unauthorized"}), 401
     admin_token = os.environ.get("TENNISBOSS_ADMIN_TOKEN", "").strip()
     if admin_token and _is_admin_request() \
             and request.headers.get("X-Admin-Token", "") != admin_token:
@@ -2441,6 +2486,7 @@ def api_ingest_tennisdata():
 
 
 @app.route("/api/chat", methods=["POST"])
+@limiter.limit("20 per minute")  # protège le coût LLM (Groq/Gemini) — debt D-17
 def api_chat():
     """Chat IA (Groq primaire / Gemini-Gemma fallback / Ollama local). Body JSON: {message, history=[]}."""
     data = request.get_json(silent=True) or {}
