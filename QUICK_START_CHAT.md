@@ -134,5 +134,5 @@ Voir `docs/ARCHITECTURE_BLUEPRINT.md` §6.5.
 
 **Docs liées :** `docs/AI_ASSISTANT_ARCHITECTURE.md` (plan détaillé),
 `docs/ARCHITECTURE_BLUEPRINT.md` (référence permanente), `TELEGRAM_SETUP.md`
-(config bot). `AI_CHAT_AUDIT.md` reste stale (prédate le retrait de `app/`) —
-ne pas s'y fier.
+(config bot). `docs/audits/AI_CHAT_AUDIT.md` reste stale (prédate le retrait de
+`app/`, archivé 2026-07-23) — ne pas s'y fier.

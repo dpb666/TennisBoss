@@ -140,7 +140,7 @@ confidence, result, profit_loss, clv_pct, surface, model_version, bookmaker, ts
 | `docs/CLUTCH_BLEND_WALKFORWARD_VALIDATION.md` | Walk-forward validation |
 | `docs/CTO_SESSION_REPORT.md` | Ops session notes |
 | `docs/DATA_PIPELINE_AUDIT.md` | Pipeline audit |
-| `AI_CHAT_AUDIT.md` | **Stale** — references removed `app/` FastAPI layer |
+| `docs/audits/AI_CHAT_AUDIT.md` | **Stale** — references removed `app/` FastAPI layer (archived 2026-07-23) |
 | `QUICK_START_CHAT.md`, `RELEASE_NOTES_CHAT.md` | Chat setup / history |
 
 Generated reports in `reports/`: `calibration_report.md`, `tis_validation.md`, `surface_benchmark.md`.
@@ -206,8 +206,8 @@ From `run.py`:
 | `memory.json` conflated with "project memory" | Training state ≠ architecture decisions | Phase 2 |
 | No embeddings / semantic search | Keyword-only doc retrieval | Phase 2 |
 | No structured bet_history / calibration analysis in chat | User must use Performance screen manually | Phase 1 |
-| `compare-engines` CLI not wired | Documented workflow broken | Phase 1 (tool wrapper) |
-| `AI_CHAT_AUDIT.md` stale (removed `app/`) | Misleading architecture docs | Phase 2 ingest |
+| ~~`compare-engines` CLI not wired~~ **closed 2026-07-23** — wired in `run.py` (D-9) | — | Done |
+| `docs/audits/AI_CHAT_AUDIT.md` stale (removed `app/`) | Misleading architecture docs | Phase 2 ingest |
 | `agent_router.spawn_agent_session()` stubbed | No real sub-agent isolation | Phase 1 (optional) |
 | `auto_learner` / `mistake_learner` not exposed to chat | Learning exists but opaque to user | Phase 3 |
 | No conversation persistence (Android) | History lost on screen exit | Phase 5 |

@@ -582,3 +582,13 @@ Suite à la note "le registre a besoin d'une passe de rafraîchissement complèt
 **Pourquoi ça compte** : c'est exactement le risque R-11 du blueprint ("Knowledge decay — future agents trust stale audits and act on them") — un futur agent qui aurait lu D-9 tel quel aurait pu re-câbler `compare-engines` inutilement, ou sous-estimer le vrai progrès sur D-1/D-3.
 
 **Frozen core :** untouché (changements docs uniquement, `git diff -- bot/predictor.py bot/calibrate.py` vide).
+
+### D-5 suite : archivage AI_CHAT_AUDIT.md / RELEASE_AUDIT.md (2026-07-23)
+
+Fait ce qui avait été flaggé "pas fait ce cycle-ci" juste au-dessus : `git mv` des deux fichiers vers `docs/audits/` (nouveau dossier, conforme à la réponse du blueprint pour D-5 — "audits → immutable docs/audits/").
+
+**Liens vivants corrigés** (docs qui doivent rester exacts) : `QUICK_START_CHAT.md`, `docs/AI_ASSISTANT_ARCHITECTURE.md` (2 lignes — au passage, une autre affirmation fausse trouvée et corrigée sur la même page : la table listait encore "`compare-engines` CLI not wired" comme gap ouvert, alors que D-9 confirme que c'est câblé depuis un moment — même catégorie d'erreur que D-9 dans le registre), `docs/ARCHITECTURE_BLUEPRINT.md` (entrée D-5 mise à jour).
+
+**Volontairement non touchés** (instantanés historiques datés, pas des docs vivants) : `RELEASE_NOTES_CHAT.md` et `docs/DEVELOPMENT_AUDIT_2026-07-16.md` référencent encore l'ancien chemin racine — cohérent avec la décision déjà prise plus tôt cette session (voir plus haut : "le latter ne devrait pas être révisé en tant qu'histoire"). Un lecteur qui ouvre un audit daté sait qu'il peut être obsolète depuis.
+
+Vérifié : aucune référence code (`.py`) au chemin de ces fichiers ; `git diff -- bot/predictor.py bot/calibrate.py` vide.
