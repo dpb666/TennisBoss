@@ -945,8 +945,11 @@ def api_insight():
     p1, p2 = request.args.get("p1"), request.args.get("p2")
     if not p1 or not p2:
         return jsonify({"error": "paramètres requis: p1, p2"}), 400
-    n1 = _resolve(p1) or p1.strip()
-    n2 = _resolve(p2) or p2.strip()
+    n1 = _resolve(p1)
+    n2 = _resolve(p2)
+    if not n1 or not n2:
+        unknown = p1 if not n1 else p2
+        return jsonify({"error": f"joueur inconnu en base : {unknown}"}), 422
 
     surface = request.args.get("surface") or None
     event_id = request.args.get("event_id") or None
@@ -1075,8 +1078,11 @@ def api_match_intelligence():
     p1, p2 = request.args.get("p1"), request.args.get("p2")
     if not p1 or not p2:
         return jsonify({"error": "paramètres requis: p1, p2"}), 400
-    n1 = _resolve(p1) or p1.strip()
-    n2 = _resolve(p2) or p2.strip()
+    n1 = _resolve(p1)
+    n2 = _resolve(p2)
+    if not n1 or not n2:
+        unknown = p1 if not n1 else p2
+        return jsonify({"error": f"joueur inconnu en base : {unknown}"}), 422
     surface = request.args.get("surface") or None
     event_key = request.args.get("event_key") or request.args.get("event_id") or None
 
