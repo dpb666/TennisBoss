@@ -34,7 +34,8 @@ def api_upcoming():
     days = min(int(request.args.get("days", 2)), 7)
     limit = min(int(request.args.get("limit", 25)), 100)
     want_odds = request.args.get("odds", "false").lower() == "true"
-    cache_key = f"{days}_{limit}_{want_odds}"
+    include_utr = request.args.get("include_utr", "false").lower() == "true"
+    cache_key = f"{days}_{limit}_{want_odds}_{include_utr}"
     now = _t.time()
     global _upcoming_cache_ts
     if cache_key in _upcoming_cache and (now - _upcoming_cache_ts) < _UPCOMING_TTL:
@@ -122,6 +123,21 @@ def api_upcoming():
                 log(f"Inplay inject: {added_live} matchs live ITF/UTR ajoutés à upcoming.", "INFO")
         except Exception as exc:
             log(f"Inplay inject (matchs live ITF/UTR) échoué ({exc}) — ignoré.", "WARN")
+
+    # Filtre UTR : tournois amateurs/universitaires dont les joueurs n'ont
+    # (quasi) jamais de profil dans la base ATP/WTA (Jeff Sackmann) sur
+    # laquelle le modèle est entraîné — mesuré à 89% de "joueur inconnu en
+    # base" sur un échantillon réel. Masqués par défaut pour ne pas noyer le
+    # flux de cartes sans prédiction ; ?include_utr=true les réaffiche.
+    # Aucun champ "tour" structuré ne les distingue (voir live_api.py/
+    # oddspapi_feeder.py : tour ∈ {"atp","wta",""}) — seul le nom du tournoi
+    # ("UTR Men - ...", "UTR Women - ...") les identifie.
+    if not include_utr:
+        _before_utr = len(fixtures)
+        fixtures = [f for f in fixtures if "utr" not in (f.get("tournament") or "").lower()]
+        if len(fixtures) < _before_utr:
+            log(f"Filtre UTR : {_before_utr - len(fixtures)} match(s) UTR masqué(s) "
+                f"par défaut (predictable rarement disponible).", "INFO")
 
     # Filet de sécurité global : quelle que soit la source (API-Tennis, ESPN,
     # odds-api.io, OddsPapi, injection live), un fixture non-live daté d'avant
