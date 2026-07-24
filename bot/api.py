@@ -744,8 +744,11 @@ def _bet_builder_leg(p1_raw: str, p2_raw: str, surface: Optional[str] = None) ->
     """Rejoue predictor.predict() + _bet_builder() pour une paire de joueurs —
     réutilise exactement le même chemin que /api/predict et /api/upcoming,
     aucune nouvelle logique de prédiction. Sert au combiné (/api/bet-builder/combo)."""
-    n1 = _resolve(p1_raw) or p1_raw.strip()
-    n2 = _resolve(p2_raw) or p2_raw.strip()
+    n1 = _resolve(p1_raw)
+    n2 = _resolve(p2_raw)
+    if not n1 or not n2:
+        unknown = p1_raw if not n1 else p2_raw
+        raise ValueError(f"joueur inconnu en base : {unknown}")
     f1 = features.feature_vector(features.get_profile(_MEM, n1))
     f2 = features.feature_vector(features.get_profile(_MEM, n2))
     r = predictor.predict(_MEM, n1, f1, n2, f2, surface=surface)
@@ -1250,8 +1253,8 @@ def api_inplay_best():
     for e in live_events:
         home_raw = e.get("home", "")
         away_raw = e.get("away", "")
-        n1 = _resolve(home_raw) or home_raw.strip()
-        n2 = _resolve(away_raw) or away_raw.strip()
+        n1 = _resolve(home_raw)
+        n2 = _resolve(away_raw)
         if not n1 or not n2:
             continue
 
@@ -1368,8 +1371,8 @@ def api_inplay_markets():
     for e in live_events[:20]:
         home_raw = e.get("home", "")
         away_raw = e.get("away", "")
-        n1 = _resolve(home_raw) or home_raw.strip()
-        n2 = _resolve(away_raw) or away_raw.strip()
+        n1 = _resolve(home_raw)
+        n2 = _resolve(away_raw)
         if not n1 or not n2:
             continue
 
